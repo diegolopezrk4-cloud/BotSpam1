@@ -347,16 +347,38 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
 }
 
 async function resolveGroupJid(sock, link) {
+    // Caso 1: ya es un JID directo
+    if (link.endsWith("@g.us")) return link;
+
+    // Caso 2: link de invitación de WhatsApp
     if (link.includes("chat.whatsapp.com/")) {
         const code = link.split("chat.whatsapp.com/").pop().split(/[?#]/)[0];
-        try {
-            const metadata = await sock.groupGetInviteInfo(code);
-            return metadata.id;
-        } catch (e) {
-            return null;
+
+        // Intentar resolver via inviteInfo (hasta 2 intentos)
+        for (let intento = 0; intento < 2; intento++) {
+            try {
+                const metadata = await sock.groupGetInviteInfo(code);
+                if (metadata && metadata.id) return metadata.id;
+            } catch (e) {
+                console.log(`[resolveGroupJid] Intento ${intento + 1} fallido para ${link}: ${e.message}`);
+                if (intento === 0) await delay(2000);
+            }
         }
+
+        // Fallback: buscar en los grupos del sock
+        try {
+            const allGroups = await sock.groupFetchAllParticipating();
+            for (const gid of Object.keys(allGroups)) {
+                const g = allGroups[gid];
+                if (g.inviteCode === code) return gid;
+            }
+        } catch (e) {
+            console.log(`[resolveGroupJid] Fallback groupFetchAll falló: ${e.message}`);
+        }
+
+        return null;
     }
-    if (link.endsWith("@g.us")) return link;
+
     return null;
 }
 
@@ -402,7 +424,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             if (!campana) return;
             db.setCampanaActiva(campanaId, true);
 
-            const sesionesNombres = db.getSesionesCampana(campanaId);
+            let sesionesNombres = db.getSesionesCampana(campanaId);
             let gruposLinks = db.getGruposCampana(campanaId);
             const conf = db.getCampanaConfig(campanaId);
             const horario = db.getCampanaHorario(campanaId);
@@ -410,8 +432,26 @@ function iniciarCampana(campanaId, userId, botSock) {
             // MEJORA 4: Cargar templates para rotacion
             const templates = db.getTemplates(userId);
 
+            // Auto-asignar grupos si la campaña no tiene
+            if (!gruposLinks.length) {
+                const gruposUser = db.getGrupos(userId);
+                for (const g of gruposUser) {
+                    db.agregarGrupoCampana(campanaId, g.link);
+                }
+                gruposLinks = db.getGruposCampana(campanaId);
+            }
+
+            // Auto-asignar cuentas si la campaña no tiene
+            if (!sesionesNombres.length) {
+                const sesionesUser = db.getSesiones(userId);
+                for (const s of sesionesUser) {
+                    db.agregarSesionCampana(campanaId, s.nombre);
+                }
+                sesionesNombres = db.getSesionesCampana(campanaId);
+            }
+
             if (!sesionesNombres.length || !gruposLinks.length) {
-                await botSock.sendMessage(userId, { text: "\u26A0 Campana sin cuentas o grupos asignados." });
+                await botSock.sendMessage(userId, { text: "\u26A0 Campana sin cuentas o grupos asignados.\nAgrega cuentas y grupos primero." });
                 return;
             }
 
@@ -439,6 +479,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             const numCuentas = socks.length;
             let ciclo = 0;
             const gruposEliminados = [];
+            const grupoFallos = {};  // {grupoLink: contadorFallos} para no eliminar al primer fallo
             let delayMultiplier = 1.0;
             let consecutivePending = 0;
             const MAX_CONSECUTIVE_PENDING = 3;
@@ -533,15 +574,26 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                         const groupJid = await resolveGroupJid(currentSock.sock, grupoLink);
                         if (!groupJid) {
-                            db.eliminarGrupoPorLink(userId, grupoLink);
-                            db.eliminarGrupoCampana(campanaId, grupoLink);
-                            db.actualizarStatsCampana(campanaId, 0, 1);
-                            db.registrarEnvio(userId, campanaId, grupoLink, "error_jid_eliminado");
-                            gruposEliminados.push(grupoLink);
-                            const idx = gruposLinks.indexOf(grupoLink);
-                            if (idx !== -1) gruposLinks.splice(idx, 1);
+                            // Contar fallos consecutivos antes de eliminar
+                            grupoFallos[grupoLink] = (grupoFallos[grupoLink] || 0) + 1;
+                            if (grupoFallos[grupoLink] >= 3) {
+                                // Después de 3 fallos, eliminar
+                                db.eliminarGrupoPorLink(userId, grupoLink);
+                                db.eliminarGrupoCampana(campanaId, grupoLink);
+                                db.actualizarStatsCampana(campanaId, 0, 1);
+                                db.registrarEnvio(userId, campanaId, grupoLink, "error_jid_eliminado");
+                                gruposEliminados.push(grupoLink);
+                                const idx = gruposLinks.indexOf(grupoLink);
+                                if (idx !== -1) gruposLinks.splice(idx, 1);
+                                console.log(`   [Grupo] ${grupoLink} eliminado tras ${grupoFallos[grupoLink]} fallos de resolución.`);
+                            } else {
+                                console.log(`   [Grupo] ${grupoLink} no resuelto (intento ${grupoFallos[grupoLink]}/3), saltando.`);
+                                db.registrarEnvio(userId, campanaId, grupoLink, "skip_no_resuelto");
+                            }
                             continue;
                         }
+                        // Reset contador de fallos si resolvió OK
+                        if (grupoFallos[grupoLink]) delete grupoFallos[grupoLink];
 
                         // MEJORA 1 + 4: Variar mensaje o usar template rotativo
                         let mensajeAEnviar = campana.mensaje;

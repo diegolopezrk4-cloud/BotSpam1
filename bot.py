@@ -23,7 +23,8 @@ import wsp_bridge
 from motor import (iniciar_campana, detener_campana, tareas_activas, get_session_path,
                    iniciar_responder, detener_responder, responder_activos,
                    detectar_grupos_telegram, detectar_carpetas_telegram,
-                   detectar_grupos_carpeta, verificar_grupos_estado)
+                   detectar_grupos_carpeta, verificar_grupos_estado,
+                   leer_chats_cuenta, enviar_a_chats)
 
 # ─────────────────────────────────────────
 #   CONFIGURACIÓN CENTRAL
@@ -90,6 +91,11 @@ class PagoState(StatesGroup):
 class GrupoDetectState(StatesGroup):
     esperando_seleccion_grupos = State()
     esperando_seleccion_grupos_carpeta = State()
+
+class EnviarChatState(StatesGroup):
+    esperando_mensaje = State()
+    esperando_nombre_mensaje = State()
+    editando_mensaje = State()
 
 # Sesiones Telethon temporales
 login_sessions = {}
@@ -2666,7 +2672,8 @@ async def cb_sec_cmdtlg(call: types.CallbackQuery):
         "1️⃣ Agrega una cuenta (/cuentas)\n"
         "2️⃣ Agrega tus grupos (/grupos)\n"
         "3️⃣ Crea una campana (/campanas)\n"
-        "4️⃣ Inicia la campana (/iniciar)\n\n"
+        "4️⃣ Inicia la campana (/iniciar)\n"
+        "5️⃣ Enviar a chats (/enviarchat)\n\n"
         "👇 Navega las secciones:"
     )
     botones = [
@@ -2678,6 +2685,7 @@ async def cb_sec_cmdtlg(call: types.CallbackQuery):
          InlineKeyboardButton(text="📊 Historial", callback_data="sec_historial")],
         [InlineKeyboardButton(text="🗑 Eliminar", callback_data="sec_eliminar"),
          InlineKeyboardButton(text="🛑 Detener", callback_data="sec_detener")],
+        [InlineKeyboardButton(text="💬 Enviar a Chats", callback_data="sec_enviarchat")],
         [InlineKeyboardButton(text="🔙 Volver", callback_data="menu_principal")],
     ]
     if es_admin(call.from_user.id):
@@ -2709,6 +2717,377 @@ async def cb_menu_principal(call: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
+
+
+# ╔══════════════════════════════════════╗
+# ║    SECCION: ENVIAR A CHATS          ║
+# ╚══════════════════════════════════════╝
+
+async def build_enviarchat_view(user_id):
+    """Construye la vista principal de /enviarchat."""
+    mensajes = await db.get_mensajes_chat(user_id)
+    sesiones = await db.get_sesiones(user_id)
+
+    texto = "💬 ENVIAR A CHATS\n\n"
+    texto += "Envía un mensaje a todos tus chats (1 sola vez).\n"
+    texto += "Filtra bloqueados y bots automáticamente.\n\n"
+
+    if mensajes:
+        texto += "📝 MENSAJES GUARDADOS:\n"
+        for i, m in enumerate(mensajes, 1):
+            preview = m['mensaje'][:40] + "..." if len(m['mensaje']) > 40 else m['mensaje']
+            foto_ico = "📷" if m['foto_path'] else ""
+            texto += f"  {i}. {m['nombre']} {foto_ico}\n     {preview}\n"
+        texto += f"\nTotal: {len(mensajes)} mensaje(s)\n"
+    else:
+        texto += "📝 Sin mensajes guardados.\n"
+
+    texto += "\n━━━━━━━━━━━━━━━━━━"
+
+    botones = [
+        [InlineKeyboardButton(text="➕ Nuevo mensaje", callback_data="echat_nuevo")],
+    ]
+    if mensajes:
+        botones.append([
+            InlineKeyboardButton(text="📨 Enviar", callback_data="echat_enviar"),
+            InlineKeyboardButton(text="✏ Editar", callback_data="echat_editar"),
+        ])
+        botones.append([
+            InlineKeyboardButton(text="🗑 Eliminar", callback_data="echat_eliminar"),
+        ])
+    if sesiones:
+        botones.append([
+            InlineKeyboardButton(text="👁 Ver chats de cuenta", callback_data="echat_verchats"),
+        ])
+    botones.append(kb_volver())
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    return texto, kb
+
+
+@dp.message(Command("enviarchat"))
+async def cmd_enviarchat(msg: types.Message, state: FSMContext):
+    if not await verificar_membresia(msg):
+        return
+    texto, kb = await build_enviarchat_view(msg.from_user.id)
+    await msg.answer(texto, reply_markup=kb)
+
+
+@dp.callback_query(F.data == "sec_enviarchat")
+async def cb_sec_enviarchat(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.clear()
+    texto, kb = await build_enviarchat_view(call.from_user.id)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- Nuevo mensaje ---
+@dp.callback_query(F.data == "echat_nuevo")
+async def cb_echat_nuevo(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.set_state(EnviarChatState.esperando_nombre_mensaje)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="sec_enviarchat")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        "➕ NUEVO MENSAJE\n\n"
+        "Envía un nombre para identificar este mensaje.\n"
+        "Ejemplo: Promo, Saludo, etc.",
+        reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(EnviarChatState.esperando_nombre_mensaje)
+async def fsm_echat_nombre(msg: types.Message, state: FSMContext):
+    nombre = msg.text.strip()[:50]
+    await state.update_data(nombre_msg=nombre)
+    await state.set_state(EnviarChatState.esperando_mensaje)
+    await msg.answer(
+        f"📝 Nombre: {nombre}\n\n"
+        f"Ahora envía el MENSAJE que quieres difundir.\n"
+        f"Puede incluir texto y/o foto.\n\n"
+        f"Escribe /cancelar para cancelar."
+    )
+
+
+@dp.message(EnviarChatState.esperando_mensaje)
+async def fsm_echat_mensaje(msg: types.Message, state: FSMContext):
+    if msg.text and msg.text.strip() == "/cancelar":
+        await state.clear()
+        texto, kb = await build_enviarchat_view(msg.from_user.id)
+        await msg.answer("❌ Cancelado.", reply_markup=kb)
+        return
+
+    data = await state.get_data()
+    nombre = data.get("nombre_msg", "Sin nombre")
+    foto_path = None
+    texto_msg = ""
+
+    if msg.photo:
+        photo = msg.photo[-1]
+        file = await bot.get_file(photo.file_id)
+        folder = f"fotos_chat/{msg.from_user.id}"
+        os.makedirs(folder, exist_ok=True)
+        foto_path = os.path.join(folder, f"{nombre}_{photo.file_id[-8:]}.jpg")
+        await bot.download_file(file.file_path, foto_path)
+        texto_msg = msg.caption or ""
+    elif msg.text:
+        texto_msg = msg.text
+    else:
+        await msg.answer("⚠ Envía texto o foto con texto.")
+        return
+
+    if not texto_msg and not foto_path:
+        await msg.answer("⚠ El mensaje no puede estar vacío.")
+        return
+
+    msg_id = await db.crear_mensaje_chat(msg.from_user.id, nombre, texto_msg, foto_path)
+    await state.clear()
+    texto, kb = await build_enviarchat_view(msg.from_user.id)
+    await msg.answer(f"✅ Mensaje '{nombre}' guardado (ID: {msg_id}).\n\n{texto}", reply_markup=kb)
+
+
+# --- Enviar a chats ---
+@dp.callback_query(F.data == "echat_enviar")
+async def cb_echat_enviar(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    mensajes = await db.get_mensajes_chat(call.from_user.id)
+    if not mensajes:
+        await call.answer("Sin mensajes guardados", show_alert=True)
+        return
+
+    botones = [
+        [InlineKeyboardButton(
+            text=f"📨 {m['nombre']}",
+            callback_data=f"echat_selmsg_{m['id']}"
+        )]
+        for m in mensajes[:10]
+    ]
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="sec_enviarchat")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "📨 Selecciona el MENSAJE a enviar:", reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("echat_selmsg_"))
+async def cb_echat_selmsg(call: types.CallbackQuery, state: FSMContext):
+    msg_id = int(call.data.replace("echat_selmsg_", ""))
+    sesiones = await db.get_sesiones(call.from_user.id)
+    if not sesiones:
+        await call.answer("Sin cuentas. Agrega con /cuentas", show_alert=True)
+        return
+
+    await state.update_data(echat_msg_id=msg_id)
+    botones = [
+        [InlineKeyboardButton(
+            text=f"👤 {s['nombre']}",
+            callback_data=f"echat_selcuenta_{s['nombre']}"
+        )]
+        for s in sesiones
+    ]
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="sec_enviarchat")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "👤 Selecciona la CUENTA que enviará:", reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("echat_selcuenta_"))
+async def cb_echat_selcuenta(call: types.CallbackQuery, state: FSMContext):
+    nombre_cuenta = call.data.replace("echat_selcuenta_", "")
+    data = await state.get_data()
+    msg_id = data.get("echat_msg_id")
+    if not msg_id:
+        await call.answer("Error, intenta de nuevo", show_alert=True)
+        return
+
+    await state.clear()
+    mensaje = await db.get_mensaje_chat_by_id(msg_id)
+    botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_enviarchat")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        f"🚀 Enviando mensaje '{mensaje['nombre']}'\n"
+        f"Cuenta: {nombre_cuenta}\n\n"
+        f"⏳ Esto puede tardar unos minutos...",
+        reply_markup=kb)
+    await call.answer()
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(enviar_a_chats(call.from_user.id, nombre_cuenta, msg_id, bot))
+
+
+# --- Editar mensaje ---
+@dp.callback_query(F.data == "echat_editar")
+async def cb_echat_editar(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    mensajes = await db.get_mensajes_chat(call.from_user.id)
+    if not mensajes:
+        await call.answer("Sin mensajes", show_alert=True)
+        return
+
+    botones = [
+        [InlineKeyboardButton(
+            text=f"✏ {m['nombre']}",
+            callback_data=f"echat_edit_{m['id']}"
+        )]
+        for m in mensajes[:10]
+    ]
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="sec_enviarchat")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "✏ Selecciona mensaje a EDITAR:", reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("echat_edit_"))
+async def cb_echat_edit_sel(call: types.CallbackQuery, state: FSMContext):
+    msg_id = int(call.data.replace("echat_edit_", ""))
+    await state.set_state(EnviarChatState.editando_mensaje)
+    await state.update_data(echat_edit_id=msg_id)
+    mensaje = await db.get_mensaje_chat_by_id(msg_id)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="sec_enviarchat")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        f"✏ Editando: {mensaje['nombre']}\n\n"
+        f"Mensaje actual:\n{mensaje['mensaje'][:200]}\n\n"
+        f"Envía el NUEVO mensaje (texto o foto).\n"
+        f"Escribe /cancelar para cancelar.",
+        reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(EnviarChatState.editando_mensaje)
+async def fsm_echat_editar(msg: types.Message, state: FSMContext):
+    if msg.text and msg.text.strip() == "/cancelar":
+        await state.clear()
+        texto, kb = await build_enviarchat_view(msg.from_user.id)
+        await msg.answer("❌ Cancelado.", reply_markup=kb)
+        return
+
+    data = await state.get_data()
+    msg_id = data.get("echat_edit_id")
+    foto_path = None
+    texto_msg = ""
+
+    if msg.photo:
+        photo = msg.photo[-1]
+        file = await bot.get_file(photo.file_id)
+        folder = f"fotos_chat/{msg.from_user.id}"
+        os.makedirs(folder, exist_ok=True)
+        foto_path = os.path.join(folder, f"edit_{photo.file_id[-8:]}.jpg")
+        await bot.download_file(file.file_path, foto_path)
+        texto_msg = msg.caption or ""
+    elif msg.text:
+        texto_msg = msg.text
+    else:
+        await msg.answer("⚠ Envía texto o foto.")
+        return
+
+    await db.editar_mensaje_chat(msg_id, texto_msg, foto_path)
+    await state.clear()
+    texto, kb = await build_enviarchat_view(msg.from_user.id)
+    await msg.answer(f"✅ Mensaje actualizado.\n\n{texto}", reply_markup=kb)
+
+
+# --- Eliminar mensaje ---
+@dp.callback_query(F.data == "echat_eliminar")
+async def cb_echat_eliminar(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    mensajes = await db.get_mensajes_chat(call.from_user.id)
+    if not mensajes:
+        await call.answer("Sin mensajes", show_alert=True)
+        return
+
+    botones = [
+        [InlineKeyboardButton(
+            text=f"🗑 {m['nombre']}",
+            callback_data=f"echat_del_{m['id']}"
+        )]
+        for m in mensajes[:10]
+    ]
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="sec_enviarchat")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "🗑 Selecciona mensaje a ELIMINAR:", reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("echat_del_"))
+async def cb_echat_del_confirm(call: types.CallbackQuery):
+    msg_id = int(call.data.replace("echat_del_", ""))
+    mensaje = await db.get_mensaje_chat_by_id(msg_id)
+    if not mensaje:
+        await call.answer("Mensaje no encontrado", show_alert=True)
+        return
+    await db.eliminar_mensaje_chat(msg_id)
+    texto, kb = await build_enviarchat_view(call.from_user.id)
+    await safe_edit(call.message, f"🗑 Mensaje '{mensaje['nombre']}' eliminado.\n\n{texto}", reply_markup=kb)
+    await call.answer()
+
+
+# --- Ver chats de una cuenta ---
+@dp.callback_query(F.data == "echat_verchats")
+async def cb_echat_verchats(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    sesiones = await db.get_sesiones(call.from_user.id)
+    if not sesiones:
+        await call.answer("Sin cuentas", show_alert=True)
+        return
+
+    botones = [
+        [InlineKeyboardButton(
+            text=f"👤 {s['nombre']}",
+            callback_data=f"echat_vercuenta_{s['nombre']}"
+        )]
+        for s in sesiones
+    ]
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="sec_enviarchat")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "👤 Selecciona cuenta para ver sus chats:", reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("echat_vercuenta_"))
+async def cb_echat_vercuenta(call: types.CallbackQuery):
+    nombre = call.data.replace("echat_vercuenta_", "")
+    botones_v = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_enviarchat")]]
+    kb_v = InlineKeyboardMarkup(inline_keyboard=botones_v)
+    await safe_edit(call.message, f"🔍 Leyendo chats de '{nombre}'...", reply_markup=kb_v)
+    await call.answer()
+
+    chats, info = await leer_chats_cuenta(call.from_user.id, nombre)
+    if chats is None:
+        await safe_edit(call.message, f"❌ {info}", reply_markup=kb_v)
+        return
+
+    usuarios = [c for c in chats if c['tipo'] == 'usuario']
+    grupos = [c for c in chats if c['tipo'] == 'grupo']
+
+    texto = f"💬 CHATS DE '{nombre}'\n\n"
+    texto += f"👤 Contactos: {len(usuarios)}\n"
+    texto += f"🌐 Grupos: {len(grupos)}\n\n"
+
+    if usuarios:
+        texto += "👤 CONTACTOS:\n"
+        for i, u in enumerate(usuarios[:30], 1):
+            un = f" (@{u['username']})" if u['username'] else ""
+            texto += f"  {i}. {u['nombre']}{un}\n"
+        if len(usuarios) > 30:
+            texto += f"  ... y {len(usuarios) - 30} más\n"
+
+    if grupos:
+        texto += "\n🌐 GRUPOS:\n"
+        for i, g in enumerate(grupos[:20], 1):
+            texto += f"  {i}. {g['nombre']}\n"
+        if len(grupos) > 20:
+            texto += f"  ... y {len(grupos) - 20} más\n"
+
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+
+    await safe_edit(call.message, texto, reply_markup=kb_v)
 
 
 # ╔══════════════════════════════════════╗
