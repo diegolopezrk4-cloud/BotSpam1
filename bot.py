@@ -3783,6 +3783,148 @@ async def cb_wsp_miembros_grupo(call: types.CallbackQuery):
     texto += f"\nPara enviar DM a todos:\n/wspmiembros {grupo_jid} Tu mensaje aqui\n\nDelay: 10 seg entre cada envio (anti-ban)"
     if len(texto) > 4000:
         texto = texto[:4000] + "\n(truncado)"
+    botones_back = [
+        [InlineKeyboardButton(text=f"📨 Enviar DM a {total} miembros", callback_data=f"wsp_mdm_{idx}")],
+        [InlineKeyboardButton(text=f"➕ Agregar {total} a otro grupo", callback_data=f"wsp_madd_{idx}")],
+        [InlineKeyboardButton(text="🔙 Volver a grupos", callback_data="wsp_miembros")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
+    await safe_edit(call.message, texto, reply_markup=kb_back)
+
+
+# Cache del grupo origen seleccionado para agregar miembros
+_agregar_origen_cache = {}
+
+# Handler: Enviar DM a miembros desde boton
+@dp.callback_query(F.data.startswith("wsp_mdm_"))
+async def cb_wsp_mdm(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    idx = int(call.data.replace("wsp_mdm_", ""))
+    grupos = _miembros_grupos_cache.get(call.from_user.id, [])
+    if not grupos or idx >= len(grupos):
+        await call.answer("Grupo no encontrado, vuelve a cargar")
+        return
+    grupo = grupos[idx]
+    grupo_jid = grupo.get("jid", "")
+    grupo_nombre = grupo.get("subject", "Sin nombre")
+    botones = [
+        [InlineKeyboardButton(text="🔙 Volver a grupos", callback_data="wsp_miembros")],
+    ]
+    await safe_edit(call.message,
+        f"📨 *Enviar DM a miembros de {grupo_nombre}*\n\n"
+        f"Usa este comando:\n"
+        f"`/wspmiembros {grupo_jid} Tu mensaje aqui`\n\n"
+        f"Reemplaza 'Tu mensaje aqui' con el texto que quieras enviar.\n"
+        f"Delay: 10 seg entre cada envio (anti-ban)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=botones)
+    )
+    await call.answer()
+
+
+# Handler: Agregar miembros a otro grupo - seleccionar destino
+@dp.callback_query(F.data.startswith("wsp_madd_"))
+async def cb_wsp_madd(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    idx = int(call.data.replace("wsp_madd_", ""))
+    grupos = _miembros_grupos_cache.get(call.from_user.id, [])
+    if not grupos or idx >= len(grupos):
+        await call.answer("Grupo no encontrado, vuelve a cargar")
+        return
+    grupo = grupos[idx]
+    grupo_jid = grupo.get("jid", "")
+    grupo_nombre = grupo.get("subject", "Sin nombre")
+    _agregar_origen_cache[call.from_user.id] = {"jid": grupo_jid, "nombre": grupo_nombre, "action": "add"}
+
+    # Mostrar lista de grupos donde soy admin para elegir destino
+    import wsp_bridge as wsp
+    await safe_edit(call.message, "🔍 Buscando grupos donde eres admin...")
+    await call.answer()
+    r = await wsp.wsp_detectar_cliente(call.from_user.id)
+    if not r.get("ok"):
+        await safe_edit(call.message, f"Error: {r.get('error')}")
+        return
+
+    grupos_destino = r.get("grupos", [])
+    # Filtrar el grupo origen
+    grupos_destino = [g for g in grupos_destino if g.get("jid") != grupo_jid]
+    if not grupos_destino:
+        await safe_edit(call.message, "No se encontraron otros grupos donde agregar miembros.")
+        return
+
+    _miembros_grupos_cache[f"{call.from_user.id}_dest"] = grupos_destino
+    texto = f"➕ *AGREGAR MIEMBROS*\n\n"
+    texto += f"Origen: {grupo_nombre}\n\n"
+    texto += f"Selecciona el grupo DESTINO:\n\n"
+    botones = []
+    for i, g in enumerate(grupos_destino[:20]):
+        nombre = g.get("subject", "Sin nombre")[:28]
+        size = g.get("size", "?")
+        texto += f"  {i+1}. {nombre} ({size})\n"
+        botones.append([InlineKeyboardButton(
+            text=f"{i+1}. {nombre} ({size})",
+            callback_data=f"wsp_mdest_{i}"
+        )])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    await safe_edit(call.message, texto, reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+# Handler: Destino seleccionado - ejecutar agregar miembros
+@dp.callback_query(F.data.startswith("wsp_mdest_"))
+async def cb_wsp_mdest(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    idx = int(call.data.replace("wsp_mdest_", ""))
+    grupos_destino = _miembros_grupos_cache.get(f"{call.from_user.id}_dest", [])
+    origen_info = _agregar_origen_cache.get(call.from_user.id, {})
+    if not grupos_destino or idx >= len(grupos_destino) or not origen_info:
+        await call.answer("Datos no encontrados, vuelve a cargar")
+        return
+
+    grupo_destino = grupos_destino[idx]
+    destino_jid = grupo_destino.get("jid", "")
+    destino_nombre = grupo_destino.get("subject", "Sin nombre")
+    origen_jid = origen_info.get("jid", "")
+    origen_nombre = origen_info.get("nombre", "")
+
+    import wsp_bridge as wsp
+    await safe_edit(call.message,
+        f"⏳ *Agregando miembros...*\n\n"
+        f"Origen: {origen_nombre}\n"
+        f"Destino: {destino_nombre}\n\n"
+        f"Esto puede tomar unos minutos..."
+    )
+    await call.answer()
+
+    r = await wsp.wsp_agregar_miembros(call.from_user.id, origen_jid, destino_jid)
+    botones_back = [
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
+
+    if not r.get("ok"):
+        await safe_edit(call.message,
+            f"❌ Error: {r.get('error', 'error desconocido')}",
+            reply_markup=kb_back
+        )
+        return
+
+    agregados = r.get("agregados", 0)
+    errores = r.get("errores", 0)
+    total = r.get("total", 0)
+    texto = f"✅ *Miembros agregados*\n\n"
+    texto += f"Origen: {origen_nombre}\n"
+    texto += f"Destino: {destino_nombre}\n\n"
+    texto += f"📊 Resultados:\n"
+    texto += f"  ✅ Agregados: {agregados}\n"
+    texto += f"  ❌ Errores: {errores}\n"
+    texto += f"  📋 Total intentados: {total}\n"
+    if r.get("error"):
+        texto += f"\n⚠️ {r.get('error')}"
     await safe_edit(call.message, texto, reply_markup=kb_back)
 
 

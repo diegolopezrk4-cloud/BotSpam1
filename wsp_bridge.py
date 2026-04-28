@@ -108,6 +108,9 @@ async def wsp_miembros_grupo(user_id, grupo_jid):
 async def wsp_enviar_miembros(user_id, grupo_jid, mensaje):
     return await _post("/api/enviar_miembros", {"u": str(user_id), "grupo": grupo_jid, "mensaje": mensaje})
 
+async def wsp_agregar_miembros(user_id, grupo_origen, grupo_destino):
+    return await _post("/api/agregar_miembros", {"u": str(user_id), "origen": grupo_origen, "destino": grupo_destino})
+
 # --- DETECTAR GRUPOS (VIA CUENTA CLIENTE) ---
 async def wsp_detectar_cliente(user_id, cuenta=None):
     params = {"u": str(user_id)}

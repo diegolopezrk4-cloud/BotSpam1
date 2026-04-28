@@ -732,16 +732,17 @@ poll();
                     }
                 }
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
-                try {
-                    const result = await motor.enviarAPersonales(userId, mensaje, null, sock);
+                // Verificar si ya hay envio activo
+                if (motor.envioPersonalActivo[userId]) {
                     res.writeHead(200);
-                    if (result === true) return res.end(JSON.stringify({ ok: true, message: "envio iniciado" }));
-                    if (result === "activo") return res.end(JSON.stringify({ ok: false, error: "ya hay un envio activo. Usa /wspcancelarpersonal para cancelarlo." }));
-                    return res.end(JSON.stringify({ ok: false, error: "no se encontraron chats personales. La cuenta necesita unos minutos para sincronizar." }));
-                } catch (e) {
-                    res.writeHead(500);
-                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                    return res.end(JSON.stringify({ ok: false, error: "ya hay un envio activo. Usa /wspcancelarpersonal para cancelarlo." }));
                 }
+                // Fire-and-forget: iniciar envio en background
+                motor.enviarAPersonales(userId, mensaje, null, sock).catch(e => {
+                    console.error(`Error en envio personal: ${e.message}`);
+                });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, message: "envio iniciado" }));
             }
 
             // POST /api/cancelar_envio_personal — Cancelar envio personal
@@ -792,12 +793,38 @@ poll();
                     }
                 }
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
-                try {
-                    const result = await motor.enviarAMiembrosGrupo(userId, grupoJid, mensaje, null, sock);
+                // Verificar si ya hay envio activo
+                if (motor.envioPersonalActivo[userId]) {
                     res.writeHead(200);
-                    if (result === true) return res.end(JSON.stringify({ ok: true, message: "envio a miembros iniciado" }));
-                    if (result === "activo") return res.end(JSON.stringify({ ok: false, error: "ya hay un envio activo. Usa /wspcancelarpersonal para cancelarlo." }));
-                    return res.end(JSON.stringify({ ok: false, error: "no se encontraron miembros en el grupo" }));
+                    return res.end(JSON.stringify({ ok: false, error: "ya hay un envio activo. Usa /wspcancelarpersonal para cancelarlo." }));
+                }
+                // Fire-and-forget: iniciar envio en background
+                motor.enviarAMiembrosGrupo(userId, grupoJid, mensaje, null, sock).catch(e => {
+                    console.error(`Error en envio a miembros: ${e.message}`);
+                });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, message: "envio a miembros iniciado" }));
+            }
+
+            // POST /api/agregar_miembros — Agregar miembros de un grupo a otro
+            if (url.pathname === "/api/agregar_miembros" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                const grupoOrigen = body.origen;
+                const grupoDestino = body.destino;
+                if (!userId || !grupoOrigen || !grupoDestino) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, origen o destino" })); }
+                let sock = botSock;
+                if (!sock) {
+                    const sesiones = db.getSesiones(userId);
+                    for (const s of sesiones) {
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); break; } catch (e) {}
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
+                try {
+                    const result = await motor.agregarMiembrosAGrupo(sock, grupoOrigen, grupoDestino, userId);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify(result));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));

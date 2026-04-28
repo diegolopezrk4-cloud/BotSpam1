@@ -1172,6 +1172,73 @@ async function enviarAMiembrosGrupo(userId, groupJid, mensaje, imagenPath, sock)
     }
 }
 
+// ============================================================
+// AGREGAR MIEMBROS DE UN GRUPO A OTRO GRUPO
+// ============================================================
+async function agregarMiembrosAGrupo(sock, grupoOrigen, grupoDestino, userId) {
+    const resultado = { agregados: 0, errores: 0, detalles: [] };
+    try {
+        const miembros = await listarMiembrosGrupo(sock, grupoOrigen);
+        if (!miembros.length) return { ok: false, error: "No se encontraron miembros en el grupo origen" };
+
+        // Verificar que somos admin en el grupo destino
+        const metaDest = await sock.groupMetadata(grupoDestino);
+        const myJid = sock.user?.id;
+        const myNum = myJid ? myJid.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "") : "";
+        const soyAdmin = metaDest?.participants?.some(p => {
+            const pNum = p.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+            return (pNum === myNum || p.id === myJid) && (p.admin === "admin" || p.admin === "superadmin");
+        });
+        if (!soyAdmin) return { ok: false, error: "No eres admin en el grupo destino" };
+
+        // Obtener miembros actuales del destino para no duplicar
+        const miembrosDestino = new Set(metaDest.participants.map(p =>
+            p.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "")
+        ));
+
+        // Filtrar miembros que no estan en destino y que tienen JID @s.whatsapp.net
+        const porAgregar = miembros.filter(m => {
+            if (!m.jid.endsWith("@s.whatsapp.net")) return false;
+            const num = m.jid.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "");
+            return !miembrosDestino.has(num);
+        });
+
+        if (!porAgregar.length) return { ok: true, agregados: 0, error: "Todos los miembros ya estan en el grupo destino" };
+
+        // Agregar en lotes de 5 con delay
+        const BATCH_SIZE = 5;
+        const DELAY_MS = 3000;
+        for (let i = 0; i < porAgregar.length; i += BATCH_SIZE) {
+            const batch = porAgregar.slice(i, i + BATCH_SIZE).map(m => m.jid);
+            try {
+                const resp = await sock.groupParticipantsUpdate(grupoDestino, batch, "add");
+                for (const r of (resp || [])) {
+                    if (r.status === "200" || r.status === 200) {
+                        resultado.agregados++;
+                        resultado.detalles.push({ jid: r.jid, estado: "agregado" });
+                    } else {
+                        resultado.errores++;
+                        resultado.detalles.push({ jid: r.jid, estado: `error_${r.status}` });
+                    }
+                }
+            } catch (e) {
+                resultado.errores += batch.length;
+                console.error(`Error agregando batch a grupo: ${e.message}`);
+            }
+            if (i + BATCH_SIZE < porAgregar.length) {
+                await delay(DELAY_MS);
+            }
+        }
+
+        resultado.ok = true;
+        resultado.total = porAgregar.length;
+        return resultado;
+    } catch (e) {
+        console.error(`Error en agregarMiembrosAGrupo: ${e.message}`);
+        return { ok: false, error: e.message };
+    }
+}
+
 module.exports = {
     tareasActivas,
     getCampanasActivas,
@@ -1206,4 +1273,5 @@ module.exports = {
     detenerEnvioPersonal,
     listarMiembrosGrupo,
     enviarAMiembrosGrupo,
+    agregarMiembrosAGrupo,
 };
