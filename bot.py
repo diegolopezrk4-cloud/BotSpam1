@@ -103,6 +103,11 @@ class AutoJoinState(StatesGroup):
     esperando_links_wsp = State()
     esperando_links_tg = State()
 
+class SeleccionGruposState(StatesGroup):
+    esperando_numeros_wsp = State()
+    esperando_numeros_tg = State()
+    esperando_numeros_detectar = State()
+
 class MensajeTgState(StatesGroup):
     esperando_nombre = State()
     esperando_texto = State()
@@ -909,40 +914,90 @@ async def cb_tg_enviar_unico(call: types.CallbackQuery):
 
 
 @dp.callback_query(F.data.startswith("tg_enviar_msg_"))
-async def cb_tg_enviar_msg(call: types.CallbackQuery):
+async def cb_tg_enviar_msg(call: types.CallbackQuery, state: FSMContext):
     if not await verificar_membresia_cb(call):
         return
     msg_id = int(call.data.replace("tg_enviar_msg_", ""))
-    botones = [
-        [InlineKeyboardButton(text="✅ Sí, enviar ahora", callback_data=f"tg_confirmar_envio_{msg_id}")],
-        [InlineKeyboardButton(text="❌ Cancelar", callback_data="tg_enviar_unico")],
-    ]
-    kb = InlineKeyboardMarkup(inline_keyboard=botones)
-    await safe_edit(call.message, "⚠ ¿Confirmas enviar este mensaje a TODOS tus grupos TG una sola vez?", reply_markup=kb)
-    await call.answer()
-
-
-@dp.callback_query(F.data.startswith("tg_confirmar_envio_"))
-async def cb_tg_confirmar_envio(call: types.CallbackQuery):
-    if not await verificar_membresia_cb(call):
-        return
-    msg_id = int(call.data.replace("tg_confirmar_envio_", ""))
-    mensaje = await db.tg_get_mensaje_by_id(msg_id)
-    if not mensaje:
-        await call.answer("Mensaje no encontrado.", show_alert=True)
-        return
     grupos = await db.get_grupos(call.from_user.id)
     if not grupos:
-        await call.answer("No tienes grupos.", show_alert=True)
+        await call.answer("No tienes grupos TG.", show_alert=True)
         return
-    sesiones = await db.get_sesiones(call.from_user.id)
-    if not sesiones:
-        await call.answer("No tienes cuentas TG vinculadas.", show_alert=True)
-        return
-    await safe_edit(call.message, f"🚀 Enviando a {len(grupos)} grupo(s) TG...\nTe notificaré cuando termine.")
+    texto = f"📤 SELECCIONAR GRUPOS TG\n\nMensaje ID: {msg_id}\n\n"
+    for i, g in enumerate(grupos, 1):
+        link = g.get("link", "?")
+        if len(link) > 35:
+            link = link[:35] + "..."
+        texto += f"{i}. {link}\n"
+    texto += (
+        f"\nTotal: {len(grupos)} grupo(s)\n"
+        f"\n━━━━━━━━━━━━━━━━━━\n"
+        f"Envía los números de los grupos separados por coma:\n"
+        f"Ejemplo: 1,3,5,7\n\n"
+        f"O envía T para enviar a TODOS"
+    )
+    await state.set_state(SeleccionGruposState.esperando_numeros_tg)
+    await state.update_data(tg_enviar_msg_id=msg_id, tg_grupos_disponibles=grupos)
+    botones = [
+        [InlineKeyboardButton(text="📤 Enviar a TODOS", callback_data=f"tg_confirmar_envio_{msg_id}")],
+        [InlineKeyboardButton(text="❌ Cancelar", callback_data="tg_enviar_unico")],
+    ]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
 
-    envio_id = await db.tg_crear_envio_unico(call.from_user.id, msg_id, len(grupos))
+
+@dp.message(SeleccionGruposState.esperando_numeros_tg)
+async def msg_seleccion_grupos_tg(msg: types.Message, state: FSMContext):
+    texto_input = msg.text.strip().upper()
+    data = await state.get_data()
+    msg_id = data.get("tg_enviar_msg_id")
+    all_grupos = data.get("tg_grupos_disponibles", [])
+    await state.clear()
+
+    if texto_input == "T":
+        grupos = all_grupos
+    else:
+        try:
+            numeros = [int(n.strip()) for n in texto_input.replace(" ", ",").split(",") if n.strip().isdigit()]
+        except ValueError:
+            await msg.answer("❌ Formato inválido. Envía números separados por coma (ej: 1,3,5) o T para todos.")
+            return
+        if not numeros:
+            await msg.answer("❌ No se recibieron números válidos.")
+            return
+        grupos = []
+        for n in numeros:
+            if 1 <= n <= len(all_grupos):
+                grupos.append(all_grupos[n - 1])
+        if not grupos:
+            await msg.answer("❌ Ningún número válido. Rango: 1-" + str(len(all_grupos)))
+            return
+
+    await _ejecutar_envio_tg(msg, msg_id, grupos)
+
+
+async def _ejecutar_envio_tg(msg_or_call, msg_id, grupos):
+    """Envía mensaje TG a los grupos dados. msg_or_call: Message o CallbackQuery."""
+    if isinstance(msg_or_call, types.CallbackQuery):
+        user_id = msg_or_call.from_user.id
+        reply = msg_or_call.message
+    else:
+        user_id = msg_or_call.from_user.id
+        reply = msg_or_call
+
+    mensaje = await db.tg_get_mensaje_by_id(msg_id)
+    if not mensaje:
+        await reply.answer("❌ Mensaje no encontrado.")
+        return
+    sesiones = await db.get_sesiones(user_id)
+    if not sesiones:
+        await reply.answer("❌ No tienes cuentas TG vinculadas.")
+        return
+    await reply.answer(f"🚀 Enviando a {len(grupos)} grupo(s) TG...")
+
+    envio_id = await db.tg_crear_envio_unico(user_id, msg_id, len(grupos))
     ok = 0
     errores = 0
     sesion = sesiones[0]
@@ -955,10 +1010,10 @@ async def cb_tg_confirmar_envio(call: types.CallbackQuery):
                 entity = await client.get_entity(g["link"])
                 await client.send_message(entity, mensaje["texto"])
                 ok += 1
-                await db.registrar_envio(call.from_user.id, 0, g["link"], "enviado")
+                await db.registrar_envio(user_id, 0, g["link"], "enviado")
             except Exception as e:
                 errores += 1
-                await db.registrar_envio(call.from_user.id, 0, g["link"], f"error: {str(e)[:50]}")
+                await db.registrar_envio(user_id, 0, g["link"], f"error: {str(e)[:50]}")
             import asyncio
             await asyncio.sleep(5 + __import__('random').random() * 10)
         await client.disconnect()
@@ -971,7 +1026,22 @@ async def cb_tg_confirmar_envio(call: types.CallbackQuery):
         [InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")],
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
-    await safe_edit(call.message, f"✅ Envío TG completado!\n\n📤 {ok}/{len(grupos)} enviados\n❌ {errores} errores", reply_markup=kb)
+    await reply.answer(f"✅ Envío TG completado!\n\n📤 {ok}/{len(grupos)} enviados\n❌ {errores} errores", reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("tg_confirmar_envio_"))
+async def cb_tg_confirmar_envio(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.clear()
+    msg_id = int(call.data.replace("tg_confirmar_envio_", ""))
+    grupos = await db.get_grupos(call.from_user.id)
+    if not grupos:
+        await call.answer("No tienes grupos.", show_alert=True)
+        return
+    await safe_edit(call.message, f"🚀 Enviando a {len(grupos)} grupo(s) TG...")
+    await call.answer()
+    await _ejecutar_envio_tg(call, msg_id, grupos)
 
 
 @dp.callback_query(F.data == "tg_historial_envios")
@@ -3948,7 +4018,7 @@ async def cb_wsp_check_link(call: types.CallbackQuery):
 # ╚══════════════════════════════════════╝
 
 @dp.callback_query(F.data == "wsp_detectar")
-async def cb_wsp_detectar(call: types.CallbackQuery):
+async def cb_wsp_detectar(call: types.CallbackQuery, state: FSMContext):
     if not await verificar_membresia_cb(call):
         return
     import wsp_bridge as wsp
@@ -3973,25 +4043,85 @@ async def cb_wsp_detectar(call: types.CallbackQuery):
     if len(grupos) > 50:
         texto += f"\n... y {len(grupos) - 50} más\n"
     texto += f"\nTotal: {len(grupos)} grupo(s)\n"
-    texto += "\nPara agregar todos estos grupos, presiona 'Agregar todos':"
+    texto += (
+        "\n━━━━━━━━━━━━━━━━━━\n"
+        "Envía los números de los grupos que quieres agregar:\n"
+        "Ejemplo: 1,3,5,7\n\n"
+        "O presiona 'Agregar todos' para agregar todos"
+    )
     botones = [
         [InlineKeyboardButton(text="✅ Agregar todos", callback_data="wsp_detectar_add_all")],
         [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
     ]
-    # Guardar los grupos detectados temporalmente
     _detected_groups[call.from_user.id] = grupos
     if len(texto) > 4000:
         texto = texto[:4000] + "\n(truncado)"
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
+    await state.set_state(SeleccionGruposState.esperando_numeros_detectar)
+    await state.update_data(detectar_plataforma="wsp")
 
-# Almacen temporal de grupos detectados
 _detected_groups = {}
 
+
+@dp.message(SeleccionGruposState.esperando_numeros_detectar)
+async def msg_seleccion_detectar(msg: types.Message, state: FSMContext):
+    texto_input = msg.text.strip().upper()
+    data = await state.get_data()
+    plataforma = data.get("detectar_plataforma", "wsp")
+    await state.clear()
+
+    grupos = _detected_groups.get(msg.from_user.id, [])
+    if not grupos:
+        await msg.answer("❌ No hay grupos detectados. Vuelve a detectar.")
+        return
+
+    if texto_input == "T":
+        seleccionados = grupos
+    else:
+        try:
+            numeros = [int(n.strip()) for n in texto_input.replace(" ", ",").split(",") if n.strip().isdigit()]
+        except ValueError:
+            await msg.answer("❌ Formato inválido. Envía números separados por coma (ej: 1,3,5) o T para todos.")
+            return
+        if not numeros:
+            await msg.answer("❌ No se recibieron números válidos.")
+            return
+        seleccionados = []
+        for n in numeros:
+            if 1 <= n <= len(grupos):
+                seleccionados.append(grupos[n - 1])
+        if not seleccionados:
+            await msg.answer("❌ Ningún número válido. Rango: 1-" + str(len(grupos)))
+            return
+
+    if plataforma == "wsp":
+        import wsp_bridge as wsp
+        added = 0
+        for g in seleccionados:
+            link = g.get("link") or g.get("jid")
+            if link:
+                r = await wsp.wsp_agregar_grupo(msg.from_user.id, link)
+                if r.get("ok"):
+                    added += 1
+        _detected_groups.pop(msg.from_user.id, None)
+        await msg.answer(f"✅ {added} grupo(s) agregados de {len(seleccionados)} seleccionados.")
+    else:
+        added = 0
+        for g in seleccionados:
+            link = g.get("link") or g.get("username") or g.get("title", "")
+            if link:
+                await db.agregar_grupo(msg.from_user.id, link)
+                added += 1
+        _detected_groups.pop(msg.from_user.id, None)
+        await msg.answer(f"✅ {added} grupo(s) TG agregados de {len(seleccionados)} seleccionados.")
+
+
 @dp.callback_query(F.data == "wsp_detectar_add_all")
-async def cb_wsp_detectar_add_all(call: types.CallbackQuery):
+async def cb_wsp_detectar_add_all(call: types.CallbackQuery, state: FSMContext):
     if not await verificar_membresia_cb(call):
         return
+    await state.clear()
     import wsp_bridge as wsp
     grupos = _detected_groups.get(call.from_user.id, [])
     if not grupos:
@@ -4200,23 +4330,93 @@ async def cb_wsp_enviar_unico(call: types.CallbackQuery):
 
 
 @dp.callback_query(F.data.startswith("wsp_enviar_msg_"))
-async def cb_wsp_enviar_msg(call: types.CallbackQuery):
+async def cb_wsp_enviar_msg(call: types.CallbackQuery, state: FSMContext):
     if not await verificar_membresia_cb(call):
         return
     msg_id = int(call.data.replace("wsp_enviar_msg_", ""))
+    import wsp_bridge as wsp
+    r = await wsp.wsp_grupos(call.from_user.id)
+    grupos = r.get("grupos", []) if r.get("ok") else []
+    if not grupos:
+        await call.answer("No tienes grupos WSP.", show_alert=True)
+        return
+    texto = f"📤 SELECCIONAR GRUPOS WSP\n\nMensaje ID: {msg_id}\n\n"
+    for i, g in enumerate(grupos, 1):
+        link = g.get("link", "?")
+        if len(link) > 35:
+            link = link[:35] + "..."
+        texto += f"{i}. {link}\n"
+    texto += (
+        f"\nTotal: {len(grupos)} grupo(s)\n"
+        f"\n━━━━━━━━━━━━━━━━━━\n"
+        f"Envía los números de los grupos separados por coma:\n"
+        f"Ejemplo: 1,3,5,7\n\n"
+        f"O envía T para enviar a TODOS"
+    )
+    await state.set_state(SeleccionGruposState.esperando_numeros_wsp)
+    await state.update_data(wsp_enviar_msg_id=msg_id, wsp_grupos_disponibles=grupos)
     botones = [
-        [InlineKeyboardButton(text="✅ Sí, enviar ahora", callback_data=f"wsp_confirmar_envio_{msg_id}")],
+        [InlineKeyboardButton(text="📤 Enviar a TODOS", callback_data=f"wsp_confirmar_envio_{msg_id}")],
         [InlineKeyboardButton(text="❌ Cancelar", callback_data="wsp_enviar_unico")],
     ]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
-    await safe_edit(call.message, "⚠ ¿Confirmas enviar este mensaje a TODOS tus grupos una sola vez?", reply_markup=kb)
+    await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
 
 
+@dp.message(SeleccionGruposState.esperando_numeros_wsp)
+async def msg_seleccion_grupos_wsp(msg: types.Message, state: FSMContext):
+    texto_input = msg.text.strip().upper()
+    data = await state.get_data()
+    msg_id = data.get("wsp_enviar_msg_id")
+    grupos = data.get("wsp_grupos_disponibles", [])
+    await state.clear()
+
+    if texto_input == "T":
+        import wsp_bridge as wsp
+        await msg.answer("🚀 Enviando a TODOS los grupos WSP...")
+        r = await wsp.wsp_enviar_unico(msg.from_user.id, msg_id)
+        if r.get("ok"):
+            await msg.answer(f"✅ Envío iniciado! Enviando a {r.get('grupos', '?')} grupo(s) en segundo plano.")
+        else:
+            await msg.answer(f"❌ Error: {r.get('error')}")
+        return
+
+    try:
+        numeros = [int(n.strip()) for n in texto_input.replace(" ", ",").split(",") if n.strip().isdigit()]
+    except ValueError:
+        await msg.answer("❌ Formato inválido. Envía números separados por coma (ej: 1,3,5) o T para todos.")
+        return
+
+    if not numeros:
+        await msg.answer("❌ No se recibieron números válidos.")
+        return
+
+    seleccionados = []
+    for n in numeros:
+        if 1 <= n <= len(grupos):
+            seleccionados.append(grupos[n - 1])
+
+    if not seleccionados:
+        await msg.answer("❌ Ningún número válido. Rango: 1-" + str(len(grupos)))
+        return
+
+    import wsp_bridge as wsp
+    await msg.answer(f"🚀 Enviando a {len(seleccionados)} grupo(s) seleccionados...")
+    r = await wsp.wsp_enviar_unico(msg.from_user.id, msg_id, grupos_seleccionados=[g.get("link") for g in seleccionados])
+    if r.get("ok"):
+        await msg.answer(f"✅ Envío iniciado! Enviando a {r.get('grupos', len(seleccionados))} grupo(s) en segundo plano.")
+    else:
+        await msg.answer(f"❌ Error: {r.get('error')}")
+
+
 @dp.callback_query(F.data.startswith("wsp_confirmar_envio_"))
-async def cb_wsp_confirmar_envio(call: types.CallbackQuery):
+async def cb_wsp_confirmar_envio(call: types.CallbackQuery, state: FSMContext):
     if not await verificar_membresia_cb(call):
         return
+    await state.clear()
     msg_id = int(call.data.replace("wsp_confirmar_envio_", ""))
     import wsp_bridge as wsp
     await safe_edit(call.message, "🚀 Enviando mensaje a todos los grupos...\nTe notificaré cuando termine.")

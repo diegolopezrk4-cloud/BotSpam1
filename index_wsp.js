@@ -546,7 +546,12 @@ poll();
                 if (!body.u || !body.mensaje_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje_id" })); }
                 const msg = db.getMensajeById(body.mensaje_id);
                 if (!msg) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "mensaje no encontrado" })); }
-                const grupos = db.getGrupos(body.u);
+                let grupos;
+                if (body.grupos_seleccionados && Array.isArray(body.grupos_seleccionados)) {
+                    grupos = body.grupos_seleccionados.map(link => ({ link }));
+                } else {
+                    grupos = db.getGrupos(body.u);
+                }
                 if (!grupos.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "sin grupos" })); }
                 const sesiones = db.getSesiones(body.u);
                 if (!sesiones.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "sin cuentas vinculadas" })); }

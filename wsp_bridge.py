@@ -118,8 +118,11 @@ async def wsp_eliminar_mensaje(mensaje_id):
     return await _post("/api/mensajes/del", {"id": mensaje_id})
 
 # --- ENVIO UNICO ---
-async def wsp_enviar_unico(user_id, mensaje_id):
-    return await _post("/api/enviar_unico", {"u": str(user_id), "mensaje_id": mensaje_id})
+async def wsp_enviar_unico(user_id, mensaje_id, grupos_seleccionados=None):
+    data = {"u": str(user_id), "mensaje_id": mensaje_id}
+    if grupos_seleccionados:
+        data["grupos_seleccionados"] = grupos_seleccionados
+    return await _post("/api/enviar_unico", data)
 
 async def wsp_envios_unicos(user_id):
     return await _get("/api/envios_unicos", {"u": str(user_id)})
