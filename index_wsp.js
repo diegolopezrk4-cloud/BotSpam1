@@ -465,6 +465,44 @@ poll();
                 }
             }
 
+            // GET /api/chats_personales?u=USER_ID — Listar chats personales
+            if (url.pathname === "/api/chats_personales" && req.method === "GET") {
+                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                try {
+                    const chats = await motor.listarChatsPersonales(botSock);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, total: chats.length, chats }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // POST /api/enviar_personal — Enviar mensaje a chats personales
+            if (url.pathname === "/api/enviar_personal" && req.method === "POST") {
+                const userId = body.u;
+                const mensaje = body.mensaje;
+                if (!userId || !mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje" })); }
+                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                try {
+                    const started = await motor.enviarAPersonales(userId, mensaje, null, botSock);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // POST /api/cancelar_envio_personal — Cancelar envio personal
+            if (url.pathname === "/api/cancelar_envio_personal" && req.method === "POST") {
+                const userId = body.u;
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const stopped = motor.detenerEnvioPersonal(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: stopped }));
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
@@ -734,6 +772,13 @@ async function handleMessage(jid, msg) {
         return await sendMainMenu(jid, pushName);
     }
 
+    // Cancelar envio personal
+    if (lower === "cancelar envio" || lower === "cancelarenvio") {
+        const stopped = motor.detenerEnvioPersonal(jid);
+        if (stopped) return await send(jid, "\u{1F6D1} Envio personal cancelado.");
+        return await send(jid, "\u274C No hay envio personal activo.");
+    }
+
     // Comando /soyadmin
     if (lower === "/soyadmin" || lower.startsWith("/soyadmin ")) {
         const parts = trimmed.split(/\s+/);
@@ -806,6 +851,12 @@ async function handleMessage(jid, msg) {
                 case "exportar": case "importar": return await showExportar(jid);
                 case "limitediario": case "limite": return await showLimiteDiario(jid);
                 case "reporte": return await showReporteDiario(jid);
+                case "personal": case "enviopersonal": return await showEnvioPersonal(jid);
+                case "cancelarenvio": {
+                    const stopped = motor.detenerEnvioPersonal(jid);
+                    if (stopped) return await send(jid, "\u{1F6D1} Envio personal cancelado.");
+                    return await send(jid, "\u274C No hay envio personal activo.");
+                }
             }
         }
         switch (cmd) {
@@ -849,6 +900,7 @@ async function handleMessage(jid, msg) {
             case "20": return await showExportar(jid);
             case "21": return await showLimiteDiario(jid);
             case "22": return await showReporteDiario(jid);
+            case "23": return await showEnvioPersonal(jid);
             default:
                 return;
         }
@@ -912,7 +964,8 @@ async function sendMainMenu(jid, nombre) {
             `*19.* \u{1F504} Sinonimos — /sinonimos\n` +
             `*20.* \u{1F4E6} Exportar — /exportar\n` +
             `*21.* \u{1F6E1} Limite — /limitediario\n` +
-            `*22.* \u{1F4CA} Reporte — /reporte\n\n` +
+            `*22.* \u{1F4CA} Reporte — /reporte\n` +
+            `*23.* \u{1F4E8} Envio Personal — /personal\n\n` +
             `Escribe /start para comenzar`
         );
     } else {
@@ -965,6 +1018,8 @@ async function showCmds(jid) {
         texto += `/exportar \u2014 Exportar/Importar datos\n`;
         texto += `/limitediario \u2014 Limite envios por dia\n`;
         texto += `/reporte \u2014 Reporte diario\n`;
+        texto += `/personal \u2014 Envio a chats personales\n`;
+        texto += `/cancelarenvio \u2014 Cancelar envio personal\n`;
         texto += `\n\u2501\u2501 *ADMIN (Grupo)* \u2501\u2501\n`;
         texto += `/activar [codigo] [dias] \u2014 Activar membresia\n`;
         texto += `/desactivar [codigo] \u2014 Desactivar\n`;
@@ -1188,6 +1243,7 @@ async function showGrupos(jid) {
         texto += "*3.* \u{1F5D1} Eliminar grupo\n";
         texto += "*4.* \u270F Editar grupo\n";
         texto += "*5.* \u{1F5D1} Eliminar todos\n";
+        texto += "*6.* \u{1F517} Unirse a grupos (por link)\n";
     }
     texto += "*0.* \u{1F519} Volver al men\u00FA";
     setState(jid, "grupos");
@@ -1362,6 +1418,44 @@ async function adminUsuarios(jid) {
     }
     if (usuarios.length > 30) texto += `\n... y ${usuarios.length - 30} m\u00E1s`;
     await send(jid, texto);
+}
+
+// ====================================
+// ENVIO PERSONAL (Chats individuales)
+// ====================================
+async function showEnvioPersonal(jid) {
+    if (!await checkMembership(jid)) return;
+    await send(jid, "\u{1F50D} Buscando chats personales...");
+
+    try {
+        const chats = await motor.listarChatsPersonales(botSock);
+        if (!chats.length) {
+            return await send(jid,
+                `\u274C No se encontraron chats personales.\n\n` +
+                `\u{1F4A1} Asegurate de que el bot tenga conversaciones abiertas con tus clientes.\n\n` +
+                `*0.* \u{1F519} Volver`
+            );
+        }
+
+        let texto = `\u{1F4E8} *ENVIO PERSONAL*\n\n`;
+        texto += `\u{1F464} *${chats.length} chat(s) personales encontrados:*\n\n`;
+        for (let i = 0; i < Math.min(chats.length, 50); i++) {
+            texto += `  ${i + 1}. ${chats[i].nombre} (${chats[i].numero})\n`;
+        }
+        if (chats.length > 50) {
+            texto += `  ... y ${chats.length - 50} mas\n`;
+        }
+        texto += `\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n`;
+        texto += `*1.* \u{1F4E8} Enviar a TODOS (${chats.length})\n`;
+        texto += `*2.* \u{1F4CB} Seleccionar contactos\n`;
+        texto += `*0.* \u{1F519} Volver al menu\n\n`;
+        texto += `\u23F1 Delay: 10 seg entre cada envio (anti-ban)`;
+
+        setState(jid, "envio_personal", { chats });
+        await send(jid, texto);
+    } catch (e) {
+        await send(jid, `\u274C Error al listar chats: ${e.message}\n\n*0.* Volver`);
+    }
 }
 
 // ====================================
@@ -1556,6 +1650,23 @@ async function handleFSM(jid, msg, text, trimmed, state) {
                 setState(jid, "grupos_delall_confirm");
                 return await send(jid, "\u26A0 \u00BFEliminar TODOS los grupos?\n\n*1.* S\u00ED, eliminar todos\n*0.* No, cancelar");
             }
+            if (trimmed === "6") {
+                const grupos = db.getGrupos(jid);
+                const gruposConLink = grupos.filter(g => g.link.includes("chat.whatsapp.com/"));
+                if (!gruposConLink.length) {
+                    return await send(jid, "\u274C No hay grupos con links de invitacion.\n\nSolo se puede unirse a grupos con links chat.whatsapp.com\n\n*0.* Volver");
+                }
+                await send(jid,
+                    `\u{1F517} *UNIRSE A GRUPOS*\n\n` +
+                    `Se intentara unirse a ${gruposConLink.length} grupo(s) con link de invitacion.\n\n` +
+                    `\u26A0 Esto puede tardar unos minutos.\n` +
+                    `Se dejara 5 seg entre cada grupo para evitar ban.\n\n` +
+                    `*1.* \u2705 Si, unirse a todos\n` +
+                    `*0.* Cancelar`
+                );
+                setState(jid, "grupos_join_confirm", { gruposConLink });
+                return;
+            }
             return await sendMainMenu(jid, pushName);
         }
 
@@ -1603,21 +1714,84 @@ async function handleFSM(jid, msg, text, trimmed, state) {
             const lines = trimmed.split("\n").map(l => l.trim()).filter(l => l);
             const maxG = db.getMaxGrupos(jid);
             const current = db.getGrupos(jid);
-            let added = 0, errors = 0;
+            let added = 0, errors = 0, skipped = 0, dupes = 0;
+
+            await send(jid, `\u23F3 Procesando ${lines.length} link(s)...`);
+
             for (const link of lines) {
-                if (current.length + added >= maxG) break;
+                if (current.length + added >= maxG) {
+                    skipped++;
+                    continue;
+                }
                 if (link.includes("chat.whatsapp.com/") || link.endsWith("@g.us")) {
-                    if (db.agregarGrupo(jid, link)) added++;
+                    const result = db.agregarGrupo(jid, link);
+                    if (result) added++;
+                    else dupes++;
                 } else {
                     errors++;
                 }
             }
             clearState(jid);
-            let resp = "";
-            if (added) resp += `\u2705 ${added} grupo(s) agregado(s)\n`;
-            if (errors) resp += `\u26A0 ${errors} link(s) invalido(s)\n`;
-            if (!added && !errors) resp = "\u274C No se agrego ningun grupo.\n";
+
+            let resp = `\u{1F4CB} *RESULTADO DE AGREGAR GRUPOS*\n\n`;
+            resp += `\u{1F4E5} Total links recibidos: ${lines.length}\n`;
+            if (added) resp += `\u2705 Agregados: ${added}\n`;
+            if (dupes) resp += `\u26A0 Ya existian: ${dupes}\n`;
+            if (errors) resp += `\u274C Links invalidos: ${errors}\n`;
+            if (skipped) resp += `\u{1F6AB} Limite alcanzado (${maxG}): ${skipped} omitidos\n`;
+            if (!added && !dupes && !errors && !skipped) resp += `\u274C No se agrego ningun grupo.\n`;
+            resp += `\n\u{1F310} Total grupos ahora: ${current.length + added}/${maxG}`;
+
             await send(jid, resp);
+            return await showGrupos(jid);
+        }
+
+        case "grupos_join_confirm": {
+            if (trimmed !== "1") {
+                clearState(jid);
+                return await showGrupos(jid);
+            }
+            const { gruposConLink } = data;
+            clearState(jid);
+            await send(jid, `\u23F3 *Intentando unirse a ${gruposConLink.length} grupo(s)...*\nTe notificare cuando termine.`);
+
+            let joined = 0, failed = 0, alreadyIn = 0;
+            const errores = [];
+            for (const g of gruposConLink) {
+                try {
+                    const inviteCode = g.link.split("chat.whatsapp.com/")[1];
+                    if (!inviteCode) {
+                        failed++;
+                        errores.push(`${g.link.substring(0, 30)}... - link invalido`);
+                        continue;
+                    }
+                    await botSock.groupAcceptInvite(inviteCode);
+                    joined++;
+                } catch (e) {
+                    if (e.message && e.message.includes("already")) {
+                        alreadyIn++;
+                    } else {
+                        failed++;
+                        errores.push(`${g.link.substring(0, 30)}... - ${e.message || "error"}`);
+                    }
+                }
+                // Esperar 5 seg entre cada grupo para evitar ban
+                await new Promise(r => setTimeout(r, 5000));
+            }
+
+            let resultado = `\u{1F4CB} *RESULTADO DE UNIRSE A GRUPOS*\n\n`;
+            resultado += `\u{1F4E5} Total: ${gruposConLink.length}\n`;
+            if (joined) resultado += `\u2705 Unidos: ${joined}\n`;
+            if (alreadyIn) resultado += `\u2139 Ya estaba dentro: ${alreadyIn}\n`;
+            if (failed) resultado += `\u274C Fallidos: ${failed}\n`;
+            if (errores.length) {
+                resultado += `\n\u26A0 *Errores:*\n`;
+                for (const err of errores.slice(0, 10)) {
+                    resultado += `  \u2022 ${err}\n`;
+                }
+                if (errores.length > 10) resultado += `  ... y ${errores.length - 10} mas\n`;
+            }
+            await send(jid, resultado);
             return await showGrupos(jid);
         }
 
@@ -2418,6 +2592,94 @@ async function handleFSM(jid, msg, text, trimmed, state) {
             if (added) await send(jid, `\u2705 ${added} grupo(s) importado(s).`);
             else await send(jid, "\u274C No se pudo importar ningun grupo.");
             return await showExportar(jid);
+        }
+
+        // ==========================================
+        // ENVIO PERSONAL (Chats individuales)
+        // ==========================================
+        case "envio_personal": {
+            if (trimmed === "1") {
+                // Enviar a todos los chats personales
+                setState(jid, "envio_personal_msg", { modo: "todos", chats: data.chats });
+                return await send(jid,
+                    `\u{1F4E8} *ENVIAR A TODOS (${data.chats.length} contactos)*\n\n` +
+                    `Escribe el *mensaje* que quieres enviar:\n\n` +
+                    `\u{1F4A1} Se enviara con 10 seg de delay entre cada uno.\n\n` +
+                    `*0.* Cancelar`
+                );
+            }
+            if (trimmed === "2") {
+                // Seleccionar contactos
+                let texto = `\u{1F4CB} *SELECCIONAR CONTACTOS*\n\n`;
+                for (let i = 0; i < Math.min(data.chats.length, 50); i++) {
+                    texto += `*${i + 1}.* ${data.chats[i].nombre} (${data.chats[i].numero})\n`;
+                }
+                texto += `\n\u{1F4A1} Escribe los numeros separados por coma:\n`;
+                texto += `Ej: *1,3,5,7* o *T* para todos\n\n`;
+                texto += `*0.* Cancelar`;
+                setState(jid, "envio_personal_select", { chats: data.chats });
+                return await send(jid, texto);
+            }
+            return await sendMainMenu(jid, pushName);
+        }
+
+        case "envio_personal_select": {
+            const { chats } = data;
+            let selectedJids = [];
+
+            if (lower === "t" || lower === "todos") {
+                selectedJids = chats.map(c => c.jid);
+            } else {
+                const indices = trimmed.split(/[,\s\n]+/).map(n => parseInt(n) - 1);
+                for (const idx of indices) {
+                    if (!isNaN(idx) && idx >= 0 && idx < chats.length) {
+                        selectedJids.push(chats[idx].jid);
+                    }
+                }
+            }
+
+            if (!selectedJids.length) {
+                return await send(jid, "\u274C Seleccion invalida. Intenta de nuevo o escribe *0* para cancelar.");
+            }
+
+            setState(jid, "envio_personal_msg", { modo: "seleccionados", jids: selectedJids, total: selectedJids.length });
+            return await send(jid,
+                `\u2705 ${selectedJids.length} contacto(s) seleccionados.\n\n` +
+                `Ahora escribe el *mensaje* que quieres enviar:\n\n` +
+                `*0.* Cancelar`
+            );
+        }
+
+        case "envio_personal_msg": {
+            if (!trimmed) {
+                return await send(jid, "\u274C Escribe un mensaje. No puede estar vacio.");
+            }
+            const mensaje = trimmed;
+
+            clearState(jid);
+
+            if (data.modo === "todos") {
+                const allJids = data.chats.map(c => c.jid);
+                motor.enviarASeleccionados(jid, allJids, mensaje, null, botSock);
+                return await send(jid,
+                    `\u{1F680} *Envio personal iniciado!*\n\n` +
+                    `\u{1F464} ${allJids.length} contacto(s)\n` +
+                    `\u23F1 Delay: 10 seg entre cada envio\n` +
+                    `\u23F3 Tiempo estimado: ~${Math.round(allJids.length * 10 / 60)} min\n\n` +
+                    `Recibiras progreso cada 10 envios.\n` +
+                    `Escribe */cancelarenvio* para detener.`
+                );
+            } else {
+                motor.enviarASeleccionados(jid, data.jids, mensaje, null, botSock);
+                return await send(jid,
+                    `\u{1F680} *Envio personal iniciado!*\n\n` +
+                    `\u{1F464} ${data.total} contacto(s)\n` +
+                    `\u23F1 Delay: 10 seg entre cada envio\n` +
+                    `\u23F3 Tiempo estimado: ~${Math.round(data.total * 10 / 60)} min\n\n` +
+                    `Recibiras progreso cada 10 envios.\n` +
+                    `Escribe */cancelarenvio* para detener.`
+                );
+            }
         }
 
         default:

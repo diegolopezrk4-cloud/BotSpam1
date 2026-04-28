@@ -2891,6 +2891,83 @@ async def cb_wsp_grupos_delall(call: types.CallbackQuery):
     await call.answer()
 
 
+# --- ENVIO PERSONAL WSP ---
+@dp.callback_query(F.data == "wsp_personal")
+async def cb_wsp_personal(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_chats_personales(call.from_user.id)
+    botones_back = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
+    if not r.get("ok"):
+        await safe_edit(call.message, f"Error: {r.get('error')}", reply_markup=kb_back)
+        await call.answer()
+        return
+
+    total = r.get("total", 0)
+    chats = r.get("chats", [])
+    texto = f"Chats personales encontrados: {total}\n\n"
+    for i, c in enumerate(chats[:30], 1):
+        texto += f"  {i}. {c.get('nombre', '?')} ({c.get('numero', '?')})\n"
+    if total > 30:
+        texto += f"  ... y {total - 30} mas\n"
+
+    texto += f"\nPara enviar a todos:\n/wsppersonal Tu mensaje aqui\n\nDelay: 10 seg entre cada envio (anti-ban)"
+    botones = [
+        [InlineKeyboardButton(text="Cancelar envio activo", callback_data="wsp_cancelar_personal")],
+        [InlineKeyboardButton(text="Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(Command("wsppersonal"))
+async def cmd_wsp_personal(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args:
+        return await msg.answer(
+            "Uso: /wsppersonal Tu mensaje aqui\n\n"
+            "Envia un mensaje a todos tus chats personales con 10 seg de delay entre cada uno."
+        )
+    import wsp_bridge as wsp
+    r = await wsp.wsp_enviar_personal(msg.from_user.id, args)
+    if r.get("ok"):
+        await msg.answer("Envio personal iniciado! Recibiras progreso en WhatsApp.\n\nUsa /wspcancelarpersonal para detener.")
+    else:
+        await msg.answer(f"Error: {r.get('error', r.get('message', 'error desconocido'))}")
+
+
+@dp.message(Command("wspcancelarpersonal"))
+async def cmd_wsp_cancelar_personal(msg: types.Message):
+    if not await verificar_membresia(msg):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_cancelar_envio_personal(msg.from_user.id)
+    if r.get("ok"):
+        await msg.answer("Envio personal cancelado.")
+    else:
+        await msg.answer("No hay envio personal activo.")
+
+
+@dp.callback_query(F.data == "wsp_cancelar_personal")
+async def cb_wsp_cancelar_personal(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_cancelar_envio_personal(call.from_user.id)
+    botones = [[InlineKeyboardButton(text="Volver a WSP", callback_data="sec_wsp")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    if r.get("ok"):
+        await safe_edit(call.message, "Envio personal cancelado.", reply_markup=kb)
+    else:
+        await safe_edit(call.message, "No hay envio personal activo.", reply_markup=kb)
+    await call.answer()
+
+
 # --- CAMPAÑAS WSP ---
 @dp.callback_query(F.data == "wsp_campanas")
 async def cb_wsp_campanas(call: types.CallbackQuery):
@@ -3153,6 +3230,7 @@ async def cmd_wsp(msg: types.Message):
         [InlineKeyboardButton(text="📋 Campañas WSP", callback_data="wsp_campanas")],
         [InlineKeyboardButton(text="🚀 Iniciar campaña", callback_data="wsp_iniciar"),
          InlineKeyboardButton(text="🛑 Detener", callback_data="wsp_detener")],
+        [InlineKeyboardButton(text="📨 Envio Personal", callback_data="wsp_personal")],
         [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
         kb_volver(),
@@ -3304,6 +3382,8 @@ async def cmd_cmdwsp(msg: types.Message):
         "/wspcampana nombre | mensaje — Crear campaña\n"
         "/wspstart ID — Iniciar campaña\n"
         "/wspstop ID — Detener campaña\n"
+        "/wsppersonal mensaje — Envio a chats personales\n"
+        "/wspcancelarpersonal — Cancelar envio personal\n"
         "/wspactivar ID dias — Activar membresía WSP\n"
         "/wspdesactivar ID — Desactivar membresía WSP\n"
         "/wspmembresia — Ver membresías WSP\n"

@@ -90,3 +90,13 @@ async def wsp_activar(wsp_id, dias):
 
 async def wsp_desactivar(wsp_id):
     return await _post("/api/desactivar", {"wsp_id": str(wsp_id)})
+
+# --- ENVIO PERSONAL ---
+async def wsp_chats_personales(user_id):
+    return await _get("/api/chats_personales", {"u": str(user_id)})
+
+async def wsp_enviar_personal(user_id, mensaje):
+    return await _post("/api/enviar_personal", {"u": str(user_id), "mensaje": mensaje})
+
+async def wsp_cancelar_envio_personal(user_id):
+    return await _post("/api/cancelar_envio_personal", {"u": str(user_id)})
