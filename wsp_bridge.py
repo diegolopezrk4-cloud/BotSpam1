@@ -78,6 +78,34 @@ async def wsp_eliminar_sesion(user_id, nombre):
 async def wsp_editar_grupo(user_id, grupo_id, link):
     return await _post("/api/grupos/edit", {"u": str(user_id), "id": grupo_id, "link": link})
 
+# --- INTERVALO ---
+async def wsp_get_config(campana_id):
+    return await _get("/api/campanas/config", {"id": str(campana_id)})
+
+async def wsp_set_config(campana_id, min_val, max_val, espera_cuenta=None, espera_ciclo=None):
+    data = {"id": campana_id, "min": min_val, "max": max_val}
+    if espera_cuenta is not None:
+        data["espera_cuenta"] = espera_cuenta
+    if espera_ciclo is not None:
+        data["espera_ciclo"] = espera_ciclo
+    return await _post("/api/campanas/config", data)
+
+# --- RESPONDER ---
+async def wsp_get_responder(user_id):
+    return await _get("/api/responder", {"u": str(user_id)})
+
+async def wsp_set_responder(user_id, contacto, activo=1):
+    return await _post("/api/responder/config", {"u": str(user_id), "contacto": contacto, "activo": activo})
+
+async def wsp_toggle_responder(user_id, activo):
+    return await _post("/api/responder/toggle", {"u": str(user_id), "activo": activo})
+
+async def wsp_set_keywords(user_id, palabras):
+    return await _post("/api/responder/keywords", {"u": str(user_id), "palabras": palabras})
+
+async def wsp_clear_keywords(user_id):
+    return await _post("/api/responder/keywords/clear", {"u": str(user_id)})
+
 # --- CONTROL ---
 async def wsp_iniciar(user_id, campana_id):
     return await _post("/api/iniciar", {"u": str(user_id), "id": campana_id})

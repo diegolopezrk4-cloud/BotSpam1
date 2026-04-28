@@ -109,6 +109,13 @@ class WspGrupoState(StatesGroup):
     esperando_link = State()
     editando_link = State()
 
+class WspIntervaloState(StatesGroup):
+    esperando_intervalo = State()
+
+class WspResponderState(StatesGroup):
+    esperando_contacto = State()
+    esperando_keywords = State()
+
 # Sesiones Telethon temporales
 login_sessions = {}
 sesiones_seleccionadas = {}
@@ -3171,14 +3178,18 @@ async def cb_sec_wsp(call: types.CallbackQuery):
         f"Controla tu bot de WhatsApp desde aquí:"
     )
     botones = [
-        [InlineKeyboardButton(text="👤 Cuentas WSP", callback_data="wsp_cuentas")],
-        [InlineKeyboardButton(text="🌐 Grupos WSP", callback_data="wsp_grupos")],
+        [InlineKeyboardButton(text="👤 Cuentas WSP", callback_data="wsp_cuentas"),
+         InlineKeyboardButton(text="🌐 Grupos WSP", callback_data="wsp_grupos")],
         [InlineKeyboardButton(text="📋 Campañas WSP", callback_data="wsp_campanas")],
         [InlineKeyboardButton(text="🚀 Iniciar campaña", callback_data="wsp_iniciar"),
          InlineKeyboardButton(text="🛑 Detener", callback_data="wsp_detener")],
-        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial")],
+        [InlineKeyboardButton(text="🤖 Responder WSP", callback_data="wsp_responder"),
+         InlineKeyboardButton(text="⏱ Intervalo WSP", callback_data="wsp_intervalo")],
+        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial"),
+         InlineKeyboardButton(text="🗑 Eliminar WSP", callback_data="wsp_eliminar")],
+        [InlineKeyboardButton(text="👑 Membresía WSP", callback_data="wsp_membresia"),
+         InlineKeyboardButton(text="💳 Planes", callback_data="sec_planes")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
-        [InlineKeyboardButton(text="👑 Membresía WSP", callback_data="wsp_membresia")],
         kb_volver(),
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
@@ -4132,6 +4143,247 @@ async def cb_wsp_dashboard(call: types.CallbackQuery):
         f"👤 Cuentas: {d.get('total_sesiones', 0)}\n"
     )
     botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- INTERVALO WSP ---
+@dp.callback_query(F.data == "wsp_intervalo")
+async def cb_wsp_intervalo(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_campanas(call.from_user.id)
+    campanas = r.get("campanas", []) if r.get("ok") else []
+    if not campanas:
+        await call.answer("No tienes campañas WSP.", show_alert=True)
+        return
+    texto = "⏱ INTERVALO WSP\n\n"
+    for c in campanas:
+        r2 = await wsp.wsp_get_config(c.get("id"))
+        conf = r2.get("config", {}) if r2.get("ok") else {}
+        min_v = conf.get("intervalo_min", 30)
+        max_v = conf.get("intervalo_max", 60)
+        texto += f"  • {c.get('nombre', '?')}: {min_v}-{max_v}s\n"
+    texto += (
+        "\n━━━━━━━━━━━━━━━━━━\n"
+        "Selecciona campaña para cambiar:\n\n"
+        "Recomendado:\n"
+        "  1 cuenta: 30-60s\n"
+        "  2 cuentas: 15-30s\n"
+        "  3+ cuentas: 10-20s"
+    )
+    botones = [
+        [InlineKeyboardButton(text=f"⏱ {c.get('nombre', '?')}", callback_data=f"wspintv_{c.get('id', 0)}")]
+        for c in campanas
+    ]
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wspintv_"))
+async def cb_wsp_intervalo_camp(call: types.CallbackQuery, state: FSMContext):
+    camp_id = int(call.data.replace("wspintv_", ""))
+    import wsp_bridge as wsp
+    r = await wsp.wsp_get_config(camp_id)
+    conf = r.get("config", {}) if r.get("ok") else {}
+    min_v = conf.get("intervalo_min", 30)
+    max_v = conf.get("intervalo_max", 60)
+    await state.update_data(wsp_intv_camp_id=camp_id)
+    await call.message.answer(
+        f"⏱ Actual: {min_v}-{max_v}s\n\n"
+        f"Envía nuevo intervalo:\nminimo maximo\n\n"
+        f"Ej: 10 30\n\n"
+        f"Envía /cancelar para cancelar."
+    )
+    await state.set_state(WspIntervaloState.esperando_intervalo)
+    await call.answer()
+
+
+@dp.message(WspIntervaloState.esperando_intervalo)
+async def recibir_wsp_intervalo(msg: types.Message, state: FSMContext):
+    if msg.text and msg.text.startswith("/"):
+        await state.clear()
+        return await msg.answer("❌ Cancelado.", reply_markup=kb_menu_principal(msg.from_user.id))
+    partes = msg.text.strip().split() if msg.text else []
+    if len(partes) != 2:
+        return await msg.answer("❌ Formato: minimo maximo\nEj: 10 30")
+    try:
+        min_val = int(partes[0])
+        max_val = int(partes[1])
+    except ValueError:
+        return await msg.answer("❌ Deben ser números.\nEj: 10 30")
+    if min_val < 3:
+        return await msg.answer("❌ Mínimo 3 segundos.")
+    if max_val < min_val:
+        max_val = min_val
+    if max_val > 3600:
+        return await msg.answer("❌ Máximo 3600 segundos.")
+    data = await state.get_data()
+    import wsp_bridge as wsp
+    r = await wsp.wsp_set_config(data["wsp_intv_camp_id"], min_val, max_val)
+    await state.clear()
+    if r.get("ok"):
+        await msg.answer(
+            f"✅ Intervalo WSP actualizado: {min_val}-{max_val}s",
+            reply_markup=kb_menu_principal(msg.from_user.id)
+        )
+    else:
+        await msg.answer(f"❌ Error: {r.get('error', '?')}", reply_markup=kb_menu_principal(msg.from_user.id))
+
+
+# --- RESPONDER WSP ---
+@dp.callback_query(F.data == "wsp_responder")
+async def cb_wsp_responder(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_get_responder(call.from_user.id)
+    config = r.get("config") if r.get("ok") else None
+    keywords = r.get("keywords", []) if r.get("ok") else []
+
+    if config and config.get("activo"):
+        texto = (
+            "🤖 AUTO-RESPONDER WSP\n\n"
+            f"Estado: 🟢 ACTIVO\n"
+            f"📱 Contacto: {config.get('contacto', '---')}\n"
+            f"📝 Keywords: {len(keywords)}\n\n"
+            "Cuando alguien en un grupo WSP escriba una\n"
+            "keyword, tu cuenta responde automático."
+        )
+        botones = [
+            [InlineKeyboardButton(text="🔴 Desactivar", callback_data="wspresp_off"),
+             InlineKeyboardButton(text="✏ Cambiar contacto", callback_data="wspresp_contacto")],
+            [InlineKeyboardButton(text="📝 Cambiar keywords", callback_data="wspresp_keywords"),
+             InlineKeyboardButton(text="📋 Ver keywords", callback_data="wspresp_ver")],
+        ]
+    else:
+        texto = (
+            "🤖 AUTO-RESPONDER WSP\n\n"
+            "Estado: 🔴 INACTIVO\n\n"
+            "Este modo responde automáticamente\n"
+            "cuando alguien en un grupo WSP escribe\n"
+            "palabras clave."
+        )
+        botones = [
+            [InlineKeyboardButton(text="🟢 Configurar y activar", callback_data="wspresp_contacto")],
+        ]
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "wspresp_off")
+async def cb_wspresp_off(call: types.CallbackQuery):
+    import wsp_bridge as wsp
+    await wsp.wsp_toggle_responder(call.from_user.id, 0)
+    await call.answer("Responder WSP desactivado.", show_alert=True)
+    await cb_wsp_responder(call)
+
+
+@dp.callback_query(F.data == "wspresp_contacto")
+async def cb_wspresp_contacto(call: types.CallbackQuery, state: FSMContext):
+    await call.message.answer(
+        "🤖 RESPONDER WSP\n\n"
+        "Envía el mensaje de contacto (lo que se enviará como respuesta):\n\n"
+        "Envía /cancelar para cancelar.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await state.set_state(WspResponderState.esperando_contacto)
+    await state.update_data(user_id=call.from_user.id)
+    await call.answer()
+
+
+@dp.message(WspResponderState.esperando_contacto)
+async def recibir_wspresp_contacto(msg: types.Message, state: FSMContext):
+    if msg.text and msg.text.startswith("/"):
+        await state.clear()
+        return await msg.answer("❌ Cancelado.", reply_markup=kb_menu_principal(msg.from_user.id))
+    contacto = msg.text.strip() if msg.text else ""
+    if not contacto:
+        return await msg.answer("⚠ Envía un mensaje de texto.")
+    import wsp_bridge as wsp
+    await wsp.wsp_set_responder(msg.from_user.id, contacto, 1)
+    await msg.answer(
+        f"✅ Contacto WSP configurado.\n\n"
+        "Ahora envía las palabras clave (separadas por comas):\n"
+        "Ej: netflix, disney, hbo, streaming\n\n"
+        "Envía /cancelar para cancelar."
+    )
+    await state.set_state(WspResponderState.esperando_keywords)
+
+
+@dp.message(WspResponderState.esperando_keywords)
+async def recibir_wspresp_keywords(msg: types.Message, state: FSMContext):
+    if msg.text and msg.text.startswith("/"):
+        await state.clear()
+        return await msg.answer("❌ Cancelado.", reply_markup=kb_menu_principal(msg.from_user.id))
+    palabras_raw = msg.text.strip() if msg.text else ""
+    if not palabras_raw:
+        return await msg.answer("⚠ Envía palabras clave separadas por comas.")
+    palabras = [p.strip().lower() for p in palabras_raw.split(",") if p.strip()]
+    if not palabras:
+        return await msg.answer("⚠ No se encontraron palabras válidas.")
+    import wsp_bridge as wsp
+    await wsp.wsp_clear_keywords(msg.from_user.id)
+    await wsp.wsp_set_keywords(msg.from_user.id, palabras)
+    await state.clear()
+    await msg.answer(
+        f"✅ Responder WSP activado con {len(palabras)} keywords.",
+        reply_markup=kb_menu_principal(msg.from_user.id)
+    )
+
+
+@dp.callback_query(F.data == "wspresp_keywords")
+async def cb_wspresp_keywords(call: types.CallbackQuery, state: FSMContext):
+    await call.message.answer(
+        "📝 KEYWORDS WSP\n\n"
+        "Envía las nuevas palabras clave (separadas por comas):\n"
+        "Ej: netflix, disney, hbo\n\n"
+        "(Se reemplazarán las anteriores)\n"
+        "Envía /cancelar para cancelar.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await state.set_state(WspResponderState.esperando_keywords)
+    await state.update_data(user_id=call.from_user.id)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "wspresp_ver")
+async def cb_wspresp_ver(call: types.CallbackQuery):
+    import wsp_bridge as wsp
+    r = await wsp.wsp_get_responder(call.from_user.id)
+    keywords = r.get("keywords", []) if r.get("ok") else []
+    if keywords:
+        texto = f"📝 KEYWORDS WSP ({len(keywords)}):\n\n"
+        for i, kw in enumerate(keywords[:50], 1):
+            texto += f"{i}. {kw}\n"
+        if len(keywords) > 50:
+            texto += f"\n... y {len(keywords) - 50} más"
+    else:
+        texto = "📝 No tienes keywords WSP configuradas."
+    botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_responder")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- ELIMINAR WSP ---
+@dp.callback_query(F.data == "wsp_eliminar")
+async def cb_wsp_eliminar(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    texto = "🗑 ELIMINAR WSP\n\n¿Qué deseas eliminar?"
+    botones = [
+        [InlineKeyboardButton(text="👤 Eliminar cuenta WSP", callback_data="wspacc_del")],
+        [InlineKeyboardButton(text="🌐 Eliminar grupo WSP", callback_data="wspgrp_del")],
+        [InlineKeyboardButton(text="📋 Eliminar campaña WSP", callback_data="wspcamp_eliminar")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()

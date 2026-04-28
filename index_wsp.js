@@ -379,6 +379,70 @@ poll();
                 return res.end(JSON.stringify({ ok: true }));
             }
 
+            // GET /api/campanas/config?id=CAMP_ID — Config de campaña (intervalo)
+            if (url.pathname === "/api/campanas/config" && req.method === "GET") {
+                const campId = url.searchParams.get("id");
+                if (!campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                const config = db.getCampanaConfig(parseInt(campId));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, config }));
+            }
+
+            // POST /api/campanas/config — Cambiar intervalo { id, min, max }
+            if (url.pathname === "/api/campanas/config" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.setCampanaConfig(body.id, body.min || 30, body.max || 60, body.espera_cuenta, body.espera_ciclo);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/responder?u=USER_ID — Config del auto-responder
+            if (url.pathname === "/api/responder" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const config = db.getResponderConfig(userId);
+                const keywords = db.getKeywords(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, config: config || null, keywords }));
+            }
+
+            // POST /api/responder/config — Configurar responder { u, contacto, activo }
+            if (url.pathname === "/api/responder/config" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.setResponderConfig(body.u, body.contacto || "", body.activo !== undefined ? body.activo : 1);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/responder/toggle — Activar/desactivar responder { u, activo }
+            if (url.pathname === "/api/responder/toggle" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.toggleResponder(body.u, body.activo ? 1 : 0);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/responder/keywords — Agregar keywords { u, palabras }
+            if (url.pathname === "/api/responder/keywords" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.palabras) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o palabras" })); }
+                db.agregarKeywords(body.u, body.palabras);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/responder/keywords/clear — Limpiar keywords { u }
+            if (url.pathname === "/api/responder/keywords/clear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.limpiarKeywords(body.u);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
             // POST /api/iniciar — Iniciar campaña { u, id }
             if (url.pathname === "/api/iniciar" && req.method === "POST") {
                 const body = await readBody();
