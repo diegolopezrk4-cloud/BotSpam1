@@ -1210,7 +1210,12 @@ function getPanelUser(telegramId) {
     return db.prepare("SELECT * FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
 }
 function registrarPanelUser(telegramId, password) {
-    db.prepare("INSERT OR REPLACE INTO panel_users (telegram_id, password) VALUES (?, ?)").run(String(telegramId), password);
+    const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+    if (existing) {
+        db.prepare("UPDATE panel_users SET password = ? WHERE telegram_id = ?").run(password, String(telegramId));
+    } else {
+        db.prepare("INSERT INTO panel_users (telegram_id, password) VALUES (?, ?)").run(String(telegramId), password);
+    }
 }
 function registrarPanelUserCompleto(telegramId, password, username) {
     const expiraDemo = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();

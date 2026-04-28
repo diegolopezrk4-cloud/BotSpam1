@@ -988,8 +988,8 @@ async function obtenerSockRotado(userId) {
 // ============================================================
 const envioPersonalActivo = {};
 
-// Helper: verificar si estamos en horario permitido
-function dentroDeHorario(userId) {
+// Helper: verificar si estamos en horario permitido (usuario)
+function dentroDeHorarioUsuario(userId) {
     const horario = db.getHorarioEnvio(userId);
     if (horario.hora_inicio === 0 && horario.hora_fin === 24) return true;
     const ahora = new Date();
@@ -1002,7 +1002,7 @@ function dentroDeHorario(userId) {
 
 // Helper: esperar hasta que estemos en horario
 async function esperarHorario(userId) {
-    while (!dentroDeHorario(userId)) {
+    while (!dentroDeHorarioUsuario(userId)) {
         await delay(60000); // Revisar cada minuto
     }
 }
