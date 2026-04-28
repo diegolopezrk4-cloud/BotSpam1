@@ -147,3 +147,10 @@ async def wsp_eliminar_programado(prog_id):
 # --- STATS POR GRUPO ---
 async def wsp_grupo_stats(user_id):
     return await _get("/api/grupo_stats", {"u": str(user_id)})
+
+# --- AUTO-UNIRSE A GRUPOS ---
+async def wsp_autojoin(user_id, links, cuenta=None):
+    data = {"u": str(user_id), "links": links}
+    if cuenta:
+        data["cuenta"] = cuenta
+    return await _post("/api/autojoin", data)

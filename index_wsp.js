@@ -654,6 +654,42 @@ poll();
                 return res.end(JSON.stringify({ ok: true, stats }));
             }
 
+            // POST /api/autojoin — Auto-unirse a grupos por invite link { u, links: ["https://chat.whatsapp.com/xxx"], cuenta }
+            if (url.pathname === "/api/autojoin" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                const links = body.links || [];
+                const cuenta = body.cuenta;
+                if (!userId || !links.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o links" })); }
+                try {
+                    const sesiones = db.getSesiones(userId);
+                    if (!sesiones.length) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "sin cuentas vinculadas" })); }
+                    const nombre = cuenta || sesiones[0].nombre;
+                    const sock = await motor.getOrConnectClient(userId, nombre);
+                    const resultados = [];
+                    for (const link of links) {
+                        try {
+                            const code = link.replace("https://chat.whatsapp.com/", "").trim();
+                            if (!code) { resultados.push({ link, ok: false, error: "link inválido" }); continue; }
+                            const info = await sock.groupAcceptInvite(code);
+                            resultados.push({ link, ok: true, grupo_jid: info });
+                            // Agregar a la base de datos
+                            db.agregarGrupo(userId, link);
+                        } catch (e) {
+                            resultados.push({ link, ok: false, error: e.message || "no se pudo unir" });
+                        }
+                        await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+                    }
+                    const ok = resultados.filter(r => r.ok).length;
+                    const errores = resultados.filter(r => !r.ok).length;
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, resultados, unidos: ok, fallidos: errores, cuenta: nombre }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));

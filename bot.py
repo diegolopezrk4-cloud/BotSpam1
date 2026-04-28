@@ -99,6 +99,18 @@ class MensajeWspState(StatesGroup):
 class ProgramarState(StatesGroup):
     esperando_hora = State()
 
+class AutoJoinState(StatesGroup):
+    esperando_links_wsp = State()
+    esperando_links_tg = State()
+
+class MensajeTgState(StatesGroup):
+    esperando_nombre = State()
+    esperando_texto = State()
+    editando_texto = State()
+
+class ProgramarTgState(StatesGroup):
+    esperando_hora = State()
+
 # Sesiones Telethon temporales
 login_sessions = {}
 sesiones_seleccionadas = {}
@@ -490,7 +502,12 @@ async def build_grupos_view(user_id):
     )
     botones = [
         [InlineKeyboardButton(text="🔍 Detectar de Telegram", callback_data="grp_detectar_tg")],
-        [InlineKeyboardButton(text="➕ Agregar grupos", callback_data="grp_add")],
+        [InlineKeyboardButton(text="➕ Agregar grupos", callback_data="grp_add"),
+         InlineKeyboardButton(text="🔗 Auto-unirse", callback_data="grp_autojoin")],
+        [InlineKeyboardButton(text="✉ Mensajes TG", callback_data="tg_mensajes")],
+        [InlineKeyboardButton(text="📤 Enviar Único TG", callback_data="tg_enviar_unico"),
+         InlineKeyboardButton(text="⏰ Programados TG", callback_data="tg_programados")],
+        [InlineKeyboardButton(text="📈 Stats Grupos TG", callback_data="tg_grupo_stats")],
     ]
     if grupos:
         botones.append([
@@ -619,6 +636,502 @@ async def cb_grp_delall_ok(call: types.CallbackQuery):
     texto = f"✅ Todos los grupos eliminados.\n\n{texto}"
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
+
+
+# ╔══════════════════════════════════════╗
+# ║  AUTO-UNIRSE A GRUPOS (TG)          ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "grp_autojoin")
+async def cb_grp_autojoin(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.set_state(AutoJoinState.esperando_links_tg)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="sec_grupos")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        "🔗 AUTO-UNIRSE A GRUPOS TELEGRAM\n\n"
+        "Envía los links de los grupos (uno por línea):\n\n"
+        "Ejemplo:\nhttps://t.me/+abc123\nhttps://t.me/grupo1\n\n"
+        "El bot intentará unirse automáticamente a cada grupo.",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@dp.message(AutoJoinState.esperando_links_tg)
+async def msg_autojoin_tg(msg: types.Message, state: FSMContext):
+    await state.clear()
+    links = [l.strip() for l in msg.text.strip().split("\n") if l.strip()]
+    if not links:
+        await msg.answer("❌ No se recibieron links.")
+        return
+
+    sesiones = await db.get_sesiones(msg.from_user.id)
+    if not sesiones:
+        await msg.answer("❌ No tienes cuentas TG vinculadas. Vincula una primero con /cuenta.")
+        return
+
+    await msg.answer(f"🔗 Intentando unirse a {len(links)} grupo(s)...\nTe notificaré cuando termine.")
+    unidos = 0
+    fallidos = 0
+    reporte = ""
+    sesion = sesiones[0]
+    try:
+        from telethon import TelegramClient
+        from telethon.tl.functions.messages import ImportChatInviteRequest
+        from telethon.tl.functions.channels import JoinChannelRequest
+        import re
+
+        client = TelegramClient(f"sessions/{sesion['nombre']}", int(os.environ.get("API_ID", "0")), os.environ.get("API_HASH", ""))
+        await client.connect()
+        if not await client.is_user_authorized():
+            await msg.answer("❌ La sesión TG no está autorizada. Revíncula la cuenta.")
+            return
+
+        for link in links:
+            try:
+                if "/+" in link or "/joinchat/" in link:
+                    invite_hash = re.search(r'(?:/\+|/joinchat/)(.+)', link)
+                    if invite_hash:
+                        await client(ImportChatInviteRequest(invite_hash.group(1)))
+                else:
+                    entity = await client.get_entity(link)
+                    await client(JoinChannelRequest(entity))
+                unidos += 1
+                reporte += f"✅ {link}\n"
+                await db.agregar_grupo(msg.from_user.id, link)
+            except Exception as e:
+                fallidos += 1
+                error_msg = str(e)[:50]
+                reporte += f"❌ {link} — {error_msg}\n"
+            import asyncio
+            await asyncio.sleep(3 + __import__('random').random() * 5)
+
+        await client.disconnect()
+    except Exception as e:
+        await msg.answer(f"❌ Error general: {str(e)[:100]}")
+        return
+
+    texto = (
+        f"🔗 RESULTADO AUTO-UNIRSE\n\n"
+        f"✅ Unidos: {unidos}\n"
+        f"❌ Fallidos: {fallidos}\n\n"
+        f"{reporte}"
+    )
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    await msg.answer(texto)
+
+
+# ╔══════════════════════════════════════╗
+# ║  MENSAJES TG (CRUD)                 ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "tg_mensajes")
+async def cb_tg_mensajes(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    mensajes = await db.tg_get_mensajes(call.from_user.id)
+    texto = "✉ MENSAJES TELEGRAM\n\n"
+    if mensajes:
+        for i, m in enumerate(mensajes, 1):
+            preview = (m["texto"][:40] + "...") if len(m["texto"]) > 40 else m["texto"]
+            texto += f"{i}. 📝 {m['nombre']}\n   {preview}\n\n"
+    else:
+        texto += "(sin mensajes guardados)\n\n"
+    texto += "Crea un mensaje para enviarlo a todos tus grupos TG."
+    botones = [
+        [InlineKeyboardButton(text="➕ Crear mensaje", callback_data="tg_msg_crear")],
+    ]
+    if mensajes:
+        for m in mensajes[:10]:
+            botones.append([
+                InlineKeyboardButton(text=f"📝 {m['nombre']}", callback_data=f"tg_msg_ver_{m['id']}"),
+                InlineKeyboardButton(text="🗑", callback_data=f"tg_msg_del_{m['id']}"),
+            ])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a Grupos", callback_data="sec_grupos")])
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "tg_msg_crear")
+async def cb_tg_msg_crear(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.set_state(MensajeTgState.esperando_nombre)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="tg_mensajes")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "📝 Envía el *nombre* para este mensaje TG:\n\n(Ejemplo: promo_curso, oferta_pack)", reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(MensajeTgState.esperando_nombre)
+async def msg_tg_nombre(msg: types.Message, state: FSMContext):
+    nombre = msg.text.strip()
+    if not nombre:
+        await msg.answer("❌ El nombre no puede estar vacío.")
+        return
+    await state.update_data(tg_msg_nombre=nombre)
+    await state.set_state(MensajeTgState.esperando_texto)
+    await msg.answer(f"✅ Nombre: *{nombre}*\n\nAhora envía el *texto del mensaje*:", parse_mode="Markdown")
+
+
+@dp.message(MensajeTgState.esperando_texto)
+async def msg_tg_texto(msg: types.Message, state: FSMContext):
+    texto = msg.text
+    if not texto:
+        await msg.answer("❌ El texto no puede estar vacío.")
+        return
+    data = await state.get_data()
+    nombre = data.get("tg_msg_nombre", "sin_nombre")
+    msg_id = await db.tg_crear_mensaje(msg.from_user.id, nombre, texto)
+    await state.clear()
+    if msg_id:
+        await msg.answer(f"✅ Mensaje TG '{nombre}' creado (ID: {msg_id})!")
+    else:
+        await msg.answer("❌ Error al crear mensaje.")
+
+
+@dp.callback_query(F.data.startswith("tg_msg_ver_"))
+async def cb_tg_msg_ver(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_msg_ver_", ""))
+    mensaje = await db.tg_get_mensaje_by_id(msg_id)
+    if not mensaje:
+        await call.answer("Mensaje no encontrado.", show_alert=True)
+        return
+    texto = (
+        f"📝 MENSAJE TG: {mensaje['nombre']}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"{mensaje['texto']}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📅 Creado: {mensaje.get('fecha_creacion', '?')}\n"
+    )
+    botones = [
+        [InlineKeyboardButton(text="📤 Enviar a todos los grupos TG", callback_data=f"tg_enviar_msg_{msg_id}")],
+        [InlineKeyboardButton(text="⏰ Programar envío TG", callback_data=f"tg_prog_msg_{msg_id}")],
+        [InlineKeyboardButton(text="✏ Editar", callback_data=f"tg_msg_edit_{msg_id}"),
+         InlineKeyboardButton(text="📋 Duplicar", callback_data=f"tg_msg_dup_{msg_id}")],
+        [InlineKeyboardButton(text="🗑 Eliminar", callback_data=f"tg_msg_del_{msg_id}")],
+        [InlineKeyboardButton(text="🔙 Volver a mensajes TG", callback_data="tg_mensajes")],
+    ]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("tg_msg_edit_"))
+async def cb_tg_msg_edit(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_msg_edit_", ""))
+    await state.set_state(MensajeTgState.editando_texto)
+    await state.update_data(tg_edit_msg_id=msg_id)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data=f"tg_msg_ver_{msg_id}")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "✏ Envía el nuevo texto:", reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(MensajeTgState.editando_texto)
+async def msg_tg_editar(msg: types.Message, state: FSMContext):
+    texto = msg.text
+    if not texto:
+        await msg.answer("❌ El texto no puede estar vacío.")
+        return
+    data = await state.get_data()
+    msg_id = data.get("tg_edit_msg_id")
+    await db.tg_editar_mensaje(msg_id, texto)
+    await state.clear()
+    await msg.answer("✅ Mensaje TG editado!")
+
+
+@dp.callback_query(F.data.startswith("tg_msg_del_"))
+async def cb_tg_msg_del(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_msg_del_", ""))
+    await db.tg_eliminar_mensaje(msg_id)
+    await call.answer("✅ Mensaje eliminado.", show_alert=True)
+    await cb_tg_mensajes(call)
+
+
+@dp.callback_query(F.data.startswith("tg_msg_dup_"))
+async def cb_tg_msg_dup(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_msg_dup_", ""))
+    new_id = await db.tg_duplicar_mensaje(msg_id)
+    if new_id:
+        await call.answer("✅ Mensaje duplicado!", show_alert=True)
+    else:
+        await call.answer("❌ Error al duplicar.", show_alert=True)
+    await cb_tg_mensajes(call)
+
+
+# ╔══════════════════════════════════════╗
+# ║  ENVIO UNICO TG                     ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "tg_enviar_unico")
+async def cb_tg_enviar_unico(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    mensajes = await db.tg_get_mensajes(call.from_user.id)
+    if not mensajes:
+        botones = [
+            [InlineKeyboardButton(text="➕ Crear mensaje primero", callback_data="tg_msg_crear")],
+            [InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")],
+        ]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, "📤 ENVIO UNICO TG\n\nNo tienes mensajes. Crea uno primero.", reply_markup=kb)
+        await call.answer()
+        return
+    texto = "📤 ENVIO UNICO TG\n\nSelecciona el mensaje:\n\n"
+    botones = []
+    for m in mensajes[:10]:
+        preview = (m["texto"][:30] + "...") if len(m["texto"]) > 30 else m["texto"]
+        texto += f"• {m['nombre']}: {preview}\n"
+        botones.append([InlineKeyboardButton(text=f"📤 {m['nombre']}", callback_data=f"tg_enviar_msg_{m['id']}")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")])
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("tg_enviar_msg_"))
+async def cb_tg_enviar_msg(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_enviar_msg_", ""))
+    botones = [
+        [InlineKeyboardButton(text="✅ Sí, enviar ahora", callback_data=f"tg_confirmar_envio_{msg_id}")],
+        [InlineKeyboardButton(text="❌ Cancelar", callback_data="tg_enviar_unico")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "⚠ ¿Confirmas enviar este mensaje a TODOS tus grupos TG una sola vez?", reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("tg_confirmar_envio_"))
+async def cb_tg_confirmar_envio(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_confirmar_envio_", ""))
+    mensaje = await db.tg_get_mensaje_by_id(msg_id)
+    if not mensaje:
+        await call.answer("Mensaje no encontrado.", show_alert=True)
+        return
+    grupos = await db.get_grupos(call.from_user.id)
+    if not grupos:
+        await call.answer("No tienes grupos.", show_alert=True)
+        return
+    sesiones = await db.get_sesiones(call.from_user.id)
+    if not sesiones:
+        await call.answer("No tienes cuentas TG vinculadas.", show_alert=True)
+        return
+    await safe_edit(call.message, f"🚀 Enviando a {len(grupos)} grupo(s) TG...\nTe notificaré cuando termine.")
+    await call.answer()
+
+    envio_id = await db.tg_crear_envio_unico(call.from_user.id, msg_id, len(grupos))
+    ok = 0
+    errores = 0
+    sesion = sesiones[0]
+    try:
+        from telethon import TelegramClient
+        client = TelegramClient(f"sessions/{sesion['nombre']}", int(os.environ.get("API_ID", "0")), os.environ.get("API_HASH", ""))
+        await client.connect()
+        for g in grupos:
+            try:
+                entity = await client.get_entity(g["link"])
+                await client.send_message(entity, mensaje["texto"])
+                ok += 1
+                await db.registrar_envio(call.from_user.id, 0, g["link"], "enviado")
+            except Exception as e:
+                errores += 1
+                await db.registrar_envio(call.from_user.id, 0, g["link"], f"error: {str(e)[:50]}")
+            import asyncio
+            await asyncio.sleep(5 + __import__('random').random() * 10)
+        await client.disconnect()
+    except Exception as e:
+        errores = len(grupos)
+    await db.tg_actualizar_envio_unico(envio_id, ok, errores, "completado")
+
+    botones = [
+        [InlineKeyboardButton(text="📊 Ver historial", callback_data="tg_historial_envios")],
+        [InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, f"✅ Envío TG completado!\n\n📤 {ok}/{len(grupos)} enviados\n❌ {errores} errores", reply_markup=kb)
+
+
+@dp.callback_query(F.data == "tg_historial_envios")
+async def cb_tg_historial_envios(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    envios = await db.tg_get_envios_unicos(call.from_user.id)
+    texto = "📊 HISTORIAL ENVIOS TG\n\n"
+    if envios:
+        for e in envios[:15]:
+            estado_emoji = {"completado": "✅", "pendiente": "⏳", "enviando": "🔄", "error": "❌"}.get(e.get("estado"), "❓")
+            texto += (
+                f"{estado_emoji} {e.get('mensaje_nombre', '?')}\n"
+                f"   📤 {e.get('grupos_ok', 0)}/{e.get('grupos_total', 0)} | "
+                f"❌ {e.get('grupos_error', 0)} | {e.get('fecha', '?')}\n\n"
+            )
+    else:
+        texto += "(sin envíos)\n"
+    botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")]]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# ╔══════════════════════════════════════╗
+# ║  ENVIOS PROGRAMADOS TG              ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data.startswith("tg_prog_msg_"))
+async def cb_tg_prog_msg(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_prog_msg_", ""))
+    await state.set_state(ProgramarTgState.esperando_hora)
+    await state.update_data(tg_prog_msg_id=msg_id)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data=f"tg_msg_ver_{msg_id}")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        "⏰ PROGRAMAR ENVÍO TG\n\n"
+        "Envía la hora en formato HH:MM (hora de Perú)\n"
+        "Ejemplo: 14:30\n\n"
+        "Para repetir diariamente: 14:30 repetir",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@dp.message(ProgramarTgState.esperando_hora)
+async def msg_tg_programar(msg: types.Message, state: FSMContext):
+    texto = msg.text.strip().lower()
+    repetir = "repetir" in texto
+    tiempo = texto.replace("repetir", "").strip()
+    try:
+        partes = tiempo.split(":")
+        hora = int(partes[0])
+        minuto = int(partes[1]) if len(partes) > 1 else 0
+        if hora < 0 or hora > 23 or minuto < 0 or minuto > 59:
+            raise ValueError
+    except (ValueError, IndexError):
+        await msg.answer("❌ Formato inválido. Envía como HH:MM (ej: 14:30)")
+        return
+    data = await state.get_data()
+    msg_id = data.get("tg_prog_msg_id")
+    await db.tg_crear_envio_programado(msg.from_user.id, msg_id, hora, minuto, 1 if repetir else 0)
+    await state.clear()
+    rep_txt = "🔄 (diariamente)" if repetir else "1️⃣ (una sola vez)"
+    await msg.answer(f"✅ Envío TG programado para {hora:02d}:{minuto:02d} (Perú)\n{rep_txt}")
+
+
+@dp.callback_query(F.data == "tg_programados")
+async def cb_tg_programados(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    programados = await db.tg_get_envios_programados(call.from_user.id)
+    texto = "⏰ ENVÍOS PROGRAMADOS TG\n\n"
+    if programados:
+        for p in programados:
+            estado = "🟢" if p.get("activo") else "🔴"
+            rep = "🔄" if p.get("repetir") else "1️⃣"
+            texto += f"{estado} {p.get('mensaje_nombre', '?')} — {p['hora']:02d}:{p['minuto']:02d} {rep}\n"
+            if p.get("ultimo_envio"):
+                texto += f"   Último: {p['ultimo_envio']}\n"
+            texto += "\n"
+    else:
+        texto += "(sin programados)\n\n"
+    texto += "Para programar, ve a un mensaje y presiona 'Programar envío TG'."
+    botones = []
+    for p in programados[:10]:
+        botones.append([
+            InlineKeyboardButton(
+                text=f"{'🔴' if p.get('activo') else '🟢'} {p.get('mensaje_nombre', '?')}",
+                callback_data=f"tg_prog_toggle_{p['id']}_{0 if p.get('activo') else 1}"
+            ),
+            InlineKeyboardButton(text="🗑", callback_data=f"tg_prog_del_{p['id']}"),
+        ])
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")])
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("tg_prog_toggle_"))
+async def cb_tg_prog_toggle(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    parts = call.data.replace("tg_prog_toggle_", "").split("_")
+    prog_id = int(parts[0])
+    activo = int(parts[1]) if len(parts) > 1 else 1
+    await db.tg_toggle_envio_programado(prog_id, activo)
+    await call.answer(f"{'🟢 Activado' if activo else '🔴 Desactivado'}", show_alert=True)
+    await cb_tg_programados(call)
+
+
+@dp.callback_query(F.data.startswith("tg_prog_del_"))
+async def cb_tg_prog_del(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    prog_id = int(call.data.replace("tg_prog_del_", ""))
+    await db.tg_eliminar_envio_programado(prog_id)
+    await call.answer("✅ Eliminado.", show_alert=True)
+    await cb_tg_programados(call)
+
+
+# ╔══════════════════════════════════════╗
+# ║  STATS POR GRUPO TG                 ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "tg_grupo_stats")
+async def cb_tg_grupo_stats(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    stats = await db.tg_get_stats_por_grupo_resumen(call.from_user.id)
+    texto = "📊 ESTADÍSTICAS POR GRUPO TG\n\n"
+    if stats:
+        for i, s in enumerate(stats[:30], 1):
+            link = s.get("grupo_link", "?")
+            if len(link) > 30:
+                link = link[:30] + "..."
+            total = s.get("total", 0)
+            exitos = s.get("exitos", 0)
+            tasa = round(exitos * 100 / total, 1) if total > 0 else 0
+            emoji = "🟢" if tasa >= 80 else ("🟡" if tasa >= 50 else "🔴")
+            texto += (
+                f"{i}. {emoji} {link}\n"
+                f"   ✅{exitos} ❌{s.get('fallidos', 0)} "
+                f"📊{tasa}% | {s.get('ultima_fecha', '?')}\n\n"
+            )
+    else:
+        texto += "(sin estadísticas aún)\n"
+    botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")]]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
 
 # /grupos command
 @dp.message(Command("grupos"))
@@ -2871,6 +3384,7 @@ async def cb_wsp_grupos(call: types.CallbackQuery):
         texto = texto[:4000] + "\n(truncado)"
 
     botones = [
+        [InlineKeyboardButton(text="🔗 Auto-unirse a grupos", callback_data="wsp_autojoin")],
         [InlineKeyboardButton(text="🗑 Eliminar todos", callback_data="wsp_grupos_delall")],
         [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
     ]
@@ -2910,6 +3424,58 @@ async def cb_wsp_grupos_delall(call: types.CallbackQuery):
     else:
         await safe_edit(call.message, f"❌ Error: {r.get('error')}", reply_markup=kb)
     await call.answer()
+
+
+# --- AUTO-UNIRSE WSP ---
+@dp.callback_query(F.data == "wsp_autojoin")
+async def cb_wsp_autojoin(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.set_state(AutoJoinState.esperando_links_wsp)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="wsp_grupos")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        "🔗 AUTO-UNIRSE A GRUPOS WHATSAPP\n\n"
+        "Envía los links de invitación (uno por línea):\n\n"
+        "Ejemplo:\nhttps://chat.whatsapp.com/abc123\nhttps://chat.whatsapp.com/xyz456\n\n"
+        "El bot usará tu cuenta WSP para unirse automáticamente.",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@dp.message(AutoJoinState.esperando_links_wsp)
+async def msg_autojoin_wsp(msg: types.Message, state: FSMContext):
+    await state.clear()
+    links = [l.strip() for l in msg.text.strip().split("\n") if l.strip()]
+    if not links:
+        await msg.answer("❌ No se recibieron links.")
+        return
+    await msg.answer(f"🔗 Intentando unirse a {len(links)} grupo(s) WSP...\nTe notificaré cuando termine.")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_autojoin(msg.from_user.id, links)
+    if not r.get("ok"):
+        await msg.answer(f"❌ Error: {r.get('error')}")
+        return
+    resultados = r.get("resultados", [])
+    unidos = r.get("unidos", 0)
+    fallidos = r.get("fallidos", 0)
+    reporte = ""
+    for res in resultados:
+        if res.get("ok"):
+            reporte += f"✅ {res['link']}\n"
+        else:
+            reporte += f"❌ {res['link']} — {res.get('error', '?')}\n"
+    texto = (
+        f"🔗 RESULTADO AUTO-UNIRSE WSP\n\n"
+        f"Cuenta: {r.get('cuenta', '?')}\n"
+        f"✅ Unidos: {unidos}\n"
+        f"❌ Fallidos: {fallidos}\n\n"
+        f"{reporte}"
+    )
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    await msg.answer(texto)
 
 
 # --- CAMPAÑAS WSP ---
@@ -4068,6 +4634,61 @@ async def main():
     except Exception:
         pass
     logger.info("🚀 Bot de Spam J&D v2.0 iniciado correctamente.")
+
+    # Scheduler TG: envios programados cada minuto
+    async def tg_scheduler():
+        while True:
+            await asyncio.sleep(60)
+            try:
+                from datetime import datetime, timedelta, timezone
+                peru_tz = timezone(timedelta(hours=-5))
+                ahora = datetime.now(peru_tz)
+                hora = ahora.hour
+                minuto = ahora.minute
+                hoy = ahora.strftime("%Y-%m-%d")
+
+                programados = await db.tg_get_envios_programados_activos()
+                for prog in programados:
+                    if prog["hora"] != hora or prog["minuto"] != minuto:
+                        continue
+                    if prog.get("ultimo_envio") and prog["ultimo_envio"].startswith(hoy) and not prog.get("repetir"):
+                        continue
+
+                    logger.info(f"[TG Scheduler] Enviando programado #{prog['id']}: {prog.get('mensaje_nombre')}")
+                    await db.tg_actualizar_ultimo_envio(prog["id"])
+                    user_id = prog["user_id"]
+                    grupos = await db.get_grupos(user_id)
+                    sesiones_list = await db.get_sesiones(user_id)
+                    if not grupos or not sesiones_list:
+                        continue
+
+                    envio_id = await db.tg_crear_envio_unico(user_id, prog["mensaje_id"], len(grupos))
+                    ok_count = 0
+                    err_count = 0
+                    sesion = sesiones_list[0]
+                    try:
+                        from telethon import TelegramClient
+                        client = TelegramClient(f"sessions/{sesion['nombre']}", int(os.environ.get("API_ID", "0")), os.environ.get("API_HASH", ""))
+                        await client.connect()
+                        for g in grupos:
+                            try:
+                                entity = await client.get_entity(g["link"])
+                                await client.send_message(entity, prog["texto"])
+                                ok_count += 1
+                            except Exception:
+                                err_count += 1
+                            await asyncio.sleep(5 + __import__('random').random() * 10)
+                        await client.disconnect()
+                    except Exception:
+                        err_count = len(grupos)
+                    await db.tg_actualizar_envio_unico(envio_id, ok_count, err_count, "completado")
+
+                    if not prog.get("repetir"):
+                        await db.tg_toggle_envio_programado(prog["id"], False)
+            except Exception as e:
+                logger.error(f"[TG Scheduler] Error: {e}")
+
+    asyncio.create_task(tg_scheduler())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
