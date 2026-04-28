@@ -1057,3 +1057,144 @@ async def verificar_grupos_estado(user_id):
         except Exception:
             pass
 
+
+async def listar_chats_telegram(user_id):
+    """Lee todos los chats personales (1-a-1) del Telegram del usuario.
+    Retorna lista de dicts con info de cada chat."""
+    from telethon.tl.types import User
+    sesiones = await get_sesiones(user_id)
+    if not sesiones:
+        return None, "No tienes cuentas registradas."
+
+    nombre = sesiones[0]['nombre']
+    path = get_session_path(user_id, nombre)
+    client = TelegramClient(path, API_ID, API_HASH)
+
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            return None, f"Cuenta '{nombre}' no autorizada."
+
+        dialogs = await client.get_dialogs(limit=500)
+        chats = []
+        for d in dialogs:
+            ent = d.entity
+            if isinstance(ent, User) and not ent.bot and not ent.deleted:
+                nombre_usr = ""
+                if ent.first_name:
+                    nombre_usr = ent.first_name
+                if ent.last_name:
+                    nombre_usr += f" {ent.last_name}"
+                nombre_usr = nombre_usr.strip() or "Sin nombre"
+                chats.append({
+                    "id": ent.id,
+                    "nombre": nombre_usr,
+                    "username": ent.username or "",
+                    "telefono": ent.phone or "",
+                })
+
+        return chats, nombre
+    except Exception as e:
+        return None, f"Error: {str(e)[:100]}"
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def auto_unirse_grupo(user_id, link):
+    """Intenta unirse a un grupo/canal de Telegram dado un link.
+    Retorna (ok, mensaje)."""
+    from telethon.tl.functions.messages import ImportChatInviteRequest
+    from telethon.tl.functions.channels import JoinChannelRequest
+    sesiones = await get_sesiones(user_id)
+    if not sesiones:
+        return False, "No tienes cuentas registradas."
+
+    nombre = sesiones[0]['nombre']
+    path = get_session_path(user_id, nombre)
+    client = TelegramClient(path, API_ID, API_HASH)
+
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            return False, f"Cuenta '{nombre}' no autorizada."
+
+        link = link.strip()
+        if "/joinchat/" in link or "+{" in link or link.startswith("https://t.me/+"):
+            hash_str = link.split("/")[-1].replace("+", "")
+            await client(ImportChatInviteRequest(hash_str))
+            return True, f"Unido al grupo via invite."
+        else:
+            if link.startswith("@"):
+                entity = link
+            elif "t.me/" in link:
+                entity = link.split("t.me/")[-1].split("?")[0]
+                entity = f"@{entity}"
+            else:
+                entity = link
+            ent = await client.get_entity(entity)
+            await client(JoinChannelRequest(ent))
+            title = getattr(ent, 'title', entity)
+            return True, f"Unido a '{title}'."
+    except errors.UserAlreadyParticipantError:
+        return True, "Ya eres miembro de este grupo."
+    except errors.InviteHashExpiredError:
+        return False, "El link de invitacion ha expirado."
+    except errors.FloodWaitError as e:
+        return False, f"Espera {e.seconds} segundos antes de intentar de nuevo."
+    except Exception as e:
+        return False, f"Error: {str(e)[:150]}"
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def enviar_personal_telegram(user_id, mensaje, bot_notificar=None):
+    """Envía un mensaje a todos los chats personales del usuario en Telegram.
+    Retorna (enviados, errores, total)."""
+    from telethon.tl.types import User
+    sesiones = await get_sesiones(user_id)
+    if not sesiones:
+        return 0, 0, 0
+
+    nombre = sesiones[0]['nombre']
+    path = get_session_path(user_id, nombre)
+    client = TelegramClient(path, API_ID, API_HASH)
+
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            return 0, 0, 0
+
+        dialogs = await client.get_dialogs(limit=500)
+        enviados = 0
+        errores_count = 0
+        total = 0
+
+        for d in dialogs:
+            ent = d.entity
+            if isinstance(ent, User) and not ent.bot and not ent.deleted:
+                total += 1
+                try:
+                    msg_text = variar_mensaje(mensaje)
+                    await client.send_message(ent.id, msg_text)
+                    enviados += 1
+                    await asyncio.sleep(random.uniform(8, 15))
+                except Exception as e:
+                    errores_count += 1
+                    logger.warning(f"Error enviando a {ent.id}: {e}")
+
+        return enviados, errores_count, total
+    except Exception as e:
+        logger.error(f"Error envio personal TG: {e}")
+        return 0, 0, 0
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+

@@ -235,3 +235,25 @@ async def wsp_generar_recovery(telegram_id):
 
 async def wsp_reset_password(code, new_password):
     return await _post("/api/panel_reset_password", {"code": code, "new_password": new_password})
+
+# --- QR / LINK STATUS ---
+async def wsp_link_status(user_id, nombre):
+    return await _get("/link-status", {"u": str(user_id), "n": nombre})
+
+# --- ELIMINAR SESION ---
+async def wsp_eliminar_sesion(user_id, nombre):
+    return await _post("/api/sesiones/del", {"u": str(user_id), "nombre": nombre})
+
+# --- ENVIO INTERACTIVO (PROMO) ---
+async def wsp_promo_registrar(user_id, palabra_aceptar, palabra_rechazar):
+    return await _post("/api/promo/registrar", {
+        "u": str(user_id),
+        "palabra_aceptar": palabra_aceptar,
+        "palabra_rechazar": palabra_rechazar,
+    })
+
+async def wsp_promo_respuestas(user_id):
+    return await _get("/api/promo/respuestas", {"u": str(user_id)})
+
+async def wsp_promo_detener(user_id):
+    return await _post("/api/promo/detener", {"u": str(user_id)})

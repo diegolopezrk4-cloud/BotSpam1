@@ -61,6 +61,32 @@ let botSock = null;
 let currentQR = null;
 let botStatus = "desconectado";
 
+// --- Envíos interactivos (espera respuesta) ---
+const promoConfigs = {}; // { "userId": { aceptar, rechazar, aceptados: [], rechazados: [] } }
+
+// --- Bot Telegram para notificaciones ---
+const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN || "8779002740:AAEGu8ML62y0uFAqpbpSwStm7FJBn3d-KMo";
+const TG_ADMIN_ID = process.env.TG_ADMIN_ID || "8001675901";
+
+async function notifyTelegram(chatId, text) {
+    try {
+        const https = require("https");
+        const data = JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" });
+        const options = {
+            hostname: "api.telegram.org",
+            path: `/bot${TG_BOT_TOKEN}/sendMessage`,
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) },
+        };
+        return new Promise((resolve) => {
+            const req = https.request(options, (res) => { res.on("data", () => {}); res.on("end", resolve); });
+            req.on("error", resolve);
+            req.write(data);
+            req.end();
+        });
+    } catch (e) { console.error("Error notificando Telegram:", e.message); }
+}
+
 // --- Control de mensajes enviados por el bot ---
 const botSentIds = new Set();
 const processedMsgIds = new Set();
@@ -454,6 +480,29 @@ poll();
                 db.banByNumber(body.wsp_id);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/sesiones/del — Eliminar sesión/cuenta WSP { u, nombre }
+            if (url.pathname === "/api/sesiones/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                try {
+                    db.eliminarSesion(body.u, body.nombre);
+                    const key = `${body.u}_${body.nombre}`;
+                    if (motor.clientSessions[key]) {
+                        try { motor.clientSessions[key].end(); } catch (e) {}
+                        delete motor.clientSessions[key];
+                    }
+                    const sessDir = `${config.SESSIONS_DIR}/${body.u}_${body.nombre}`;
+                    if (fs.existsSync(sessDir)) {
+                        fs.rmSync(sessDir, { recursive: true, force: true });
+                    }
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
             }
 
             // GET /api/activas — Campañas activas
@@ -1626,6 +1675,43 @@ if(uid())loadAll();
                 return res.end(JSON.stringify({ ok: true, data }));
             }
 
+            // POST /api/promo/registrar — Registrar envio interactivo { u, palabra_aceptar, palabra_rechazar }
+            if (url.pathname === "/api/promo/registrar" && req.method === "POST") {
+                const body2 = await readBody();
+                if (!body2.u || !body2.palabra_aceptar) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o palabra_aceptar" })); }
+                promoConfigs[body2.u] = {
+                    aceptar: body2.palabra_aceptar.toLowerCase(),
+                    rechazar: (body2.palabra_rechazar || "no").toLowerCase(),
+                    aceptados: [],
+                    rechazados: [],
+                };
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/promo/respuestas?u=USER_ID — Ver respuestas del envio interactivo
+            if (url.pathname === "/api/promo/respuestas" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const config = promoConfigs[userId];
+                if (!config) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, aceptados: [], rechazados: [], activo: false }));
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, aceptados: config.aceptados, rechazados: config.rechazados, activo: true }));
+            }
+
+            // POST /api/promo/detener — Detener envio interactivo { u }
+            if (url.pathname === "/api/promo/detener" && req.method === "POST") {
+                const body2 = await readBody();
+                if (!body2.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const config = promoConfigs[body2.u];
+                delete promoConfigs[body2.u];
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, aceptados: config?.aceptados || [], rechazados: config?.rechazados || [] }));
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
@@ -1821,6 +1907,26 @@ async function startBot() {
 
             const pushName = msg.pushName || jidToNumber(jid);
             console.log(`\u{1F4E9} Mensaje: fromMe=${msg.key.fromMe}, jid=${jid}, texto="${text.substring(0,50)}", isAdmin=${isAdmin(jid)}`);
+
+            // --- Detectar respuestas a envios interactivos (promo) ---
+            if (!msg.key.fromMe && text.trim() && !jid.endsWith("@g.us")) {
+                const respLower = text.trim().toLowerCase();
+                for (const [promoUid, promoConfig] of Object.entries(promoConfigs)) {
+                    const nombre = pushName || jidToNumber(jid);
+                    const numero = jidToNumber(jid);
+                    if (respLower === promoConfig.aceptar || respLower.includes(promoConfig.aceptar)) {
+                        promoConfig.aceptados.push({ nombre, numero, fecha: new Date().toISOString() });
+                        console.log(`\u2705 Promo aceptada por ${nombre} (${numero}) para user ${promoUid}`);
+                        // Notificar al Telegram del usuario
+                        const tgNotif = `\u2705 <b>ACEPTADO (WSP)</b>\n\n\u{1F464} ${nombre}\n\u{1F4F1} ${numero}\n\u23F0 ${new Date().toLocaleString("es-PE", { timeZone: "America/Lima" })}`;
+                        notifyTelegram(promoUid, tgNotif).catch(() => {});
+                        notifyTelegram(TG_ADMIN_ID, tgNotif).catch(() => {});
+                    } else if (respLower === promoConfig.rechazar || respLower.includes(promoConfig.rechazar)) {
+                        promoConfig.rechazados.push({ nombre, numero, fecha: new Date().toISOString() });
+                        console.log(`\u274C Promo rechazada por ${nombre} (${numero})`);
+                    }
+                }
+            }
 
             if (msg.key.fromMe) {
                 if (!isAdmin(jid)) continue;
