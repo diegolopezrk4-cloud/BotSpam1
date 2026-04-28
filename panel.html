@@ -1233,7 +1233,7 @@ async function loadCuentasTg(){
     h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre)}</b></td><td>${esc(x.telefono||'—')}</td>`;
     h+=`<td><span class="badge badge-success">Activa</span></td>`;
     h+=`<td style="font-size:11px">${x.fecha||'—'}</td>`;
-    h+=`<td><button class="btn btn-sm btn-danger" onclick="eliminarCuentaTg('${esc(x.nombre)}')">🗑 Eliminar</button></td></tr>`;
+    h+=`<td><button class="btn btn-sm btn-danger" onclick="eliminarCuentaTg(${JSON.stringify(x.nombre)})">🗑 Eliminar</button></td></tr>`;
   });
   h+='</tbody></table></div>';
   $('cuentasTgContent').innerHTML=h;
@@ -1376,7 +1376,7 @@ function renderNotifs(){
   if(!notifications.length){$('notifList').innerHTML='<div class="notif-item" style="color:var(--text2)">Sin notificaciones</div>';return}
   let h='';notifications.slice(0,20).forEach(n=>{
     const icon=n.type==='error'?'❌':n.type==='success'?'✅':'ℹ️';
-    h+=`<div class="notif-item">${icon} ${n.msg}<div class="notif-time">${n.time}</div></div>`;
+    h+=`<div class="notif-item">${icon} ${esc(n.msg)}<div class="notif-time">${esc(n.time)}</div></div>`;
   });
   $('notifList').innerHTML=h;
 }
@@ -1537,7 +1537,7 @@ async function loadActividad(){
   if(!logs.length){$('actividadContent').innerHTML='<div class="empty-state"><div class="icon">📝</div><p>Sin actividad registrada</p></div>';return}
   let h='<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Accion</th><th>Detalle</th></tr></thead><tbody>';
   logs.forEach(l=>{
-    h+=`<tr><td style="font-size:11px">${l.fecha||'?'}</td><td><b>${l.accion||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${l.detalle||''}</td></tr>`;
+    h+=`<tr><td style="font-size:11px">${esc(l.fecha||'?')}</td><td><b>${esc(l.accion||'?')}</b></td><td style="font-size:12px;color:var(--text2)">${esc(l.detalle||'')}</td></tr>`;
   });
   h+='</tbody></table></div>';$('actividadContent').innerHTML=h;
   window._actividadData=logs;
@@ -1558,7 +1558,7 @@ async function loadAdminLogs(){
   let h='<div class="table-wrap"><div class="table-header"><h3>📋 '+logs.length+' registros</h3></div>';
   h+='<table><thead><tr><th>Fecha</th><th>Usuario</th><th>Accion</th><th>Detalle</th></tr></thead><tbody>';
   logs.forEach(l=>{
-    h+=`<tr><td style="font-size:11px">${l.fecha||'?'}</td><td style="font-size:11px">${l.user_id||'?'}</td><td><b>${l.accion||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${l.detalle||''}</td></tr>`;
+    h+=`<tr><td style="font-size:11px">${esc(l.fecha||'?')}</td><td style="font-size:11px">${esc(l.user_id||'?')}</td><td><b>${esc(l.accion||'?')}</b></td><td style="font-size:12px;color:var(--text2)">${esc(l.detalle||'')}</td></tr>`;
   });
   h+='</tbody></table></div>';$('adminLogsContent').innerHTML=h;
   window._adminLogsData=logs;
