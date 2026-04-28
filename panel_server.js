@@ -19,8 +19,8 @@ const PANEL_FILE = path.join(__dirname, "panel.html");
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
-    // Proxy API requests to the WSP API server
-    if (url.pathname.startsWith("/api/")) {
+    // Proxy API requests + QR link pages to the WSP API server
+    if (url.pathname.startsWith("/api/") || url.pathname === "/link" || url.pathname === "/link-status") {
         const options = {
             hostname: API_HOST,
             port: API_PORT,

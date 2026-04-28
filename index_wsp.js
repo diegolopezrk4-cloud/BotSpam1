@@ -1180,6 +1180,7 @@ if(uid())loadAll();
                 const crypto = require("crypto");
                 const hash = crypto.createHash("sha256").update(body.password).digest("hex");
                 db.registrarPanelUserCompleto(body.telegram_id, hash, body.username);
+                db.registrarActividad(body.telegram_id, 'registro', 'Usuario registrado: ' + body.username);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, msg: "Registro exitoso. Demo de 1 dia activado." }));
             }
@@ -1195,6 +1196,7 @@ if(uid())loadAll();
                 if (user.password !== hash) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "password_incorrecta" })); }
                 const token = crypto.randomBytes(32).toString("hex");
                 const membresia = db.checkMembresiPanel(body.telegram_id);
+                db.registrarActividad(body.telegram_id, 'login', 'Inicio de sesion');
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, token, telegram_id: body.telegram_id, es_admin: user.es_admin ? true : false, membresia }));
             }
@@ -1255,6 +1257,7 @@ if(uid())loadAll();
                 const admin = db.getPanelUser(body.admin_id);
                 if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
                 db.activarMembresiPanel(body.telegram_id, body.plan, parseInt(body.dias));
+                db.registrarActividad(body.admin_id, 'admin_membresia', 'Activar ' + body.plan + ' para ' + body.telegram_id);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, msg: "Membresia actualizada" }));
             }
@@ -1279,6 +1282,348 @@ if(uid())loadAll();
                 db.setTipoMembresia(body.telegram_id, body.tipo);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, msg: "Tipo de membresia actualizado a " + body.tipo }));
+            }
+
+            // GET /api/sesiones_tg?u=ID — List TG sessions
+            if (url.pathname === "/api/sesiones_tg" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const sesiones = db.getSesionesTg(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, sesiones }));
+            }
+
+            // POST /api/sesiones_tg/agregar — Add TG session
+            if (url.pathname === "/api/sesiones_tg/agregar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                db.agregarSesionTg(body.u, body.nombre, body.telefono || '');
+                db.registrarActividad(body.u, 'tg_cuenta_agregada', 'Cuenta TG: ' + body.nombre + (body.telefono ? ' (' + body.telefono + ')' : ''));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Cuenta TG registrada" }));
+            }
+
+            // POST /api/sesiones_tg/eliminar — Delete TG session
+            if (url.pathname === "/api/sesiones_tg/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                db.eliminarSesionTg(body.u, body.nombre);
+                db.registrarActividad(body.u, 'tg_cuenta_eliminada', 'Cuenta TG: ' + body.nombre);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // === TG BOT DATA ENDPOINTS (read from titan.db) ===
+
+            // GET /api/tg/grupos?u=ID — TG groups
+            if (url.pathname === "/api/tg/grupos" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const grupos = db.getTgGrupos(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, grupos }));
+            }
+
+            // GET /api/tg/mensajes?u=ID — TG messages
+            if (url.pathname === "/api/tg/mensajes" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const mensajes = db.getTgMensajes(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, mensajes }));
+            }
+
+            // GET /api/tg/campanas?u=ID — TG campaigns
+            if (url.pathname === "/api/tg/campanas" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const campanas = db.getTgCampanas(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, campanas }));
+            }
+
+            // GET /api/tg/historial?u=ID — TG send history
+            if (url.pathname === "/api/tg/historial" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const limite = parseInt(url.searchParams.get("limite")) || 50;
+                const historial = db.getTgHistorialEnvios(uid, limite);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, historial }));
+            }
+
+            // GET /api/tg/programados?u=ID — TG scheduled sends
+            if (url.pathname === "/api/tg/programados" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const programados = db.getTgProgramados(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, programados }));
+            }
+
+            // GET /api/tg/autoresponder?u=ID — TG auto responder config
+            if (url.pathname === "/api/tg/autoresponder" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const data = db.getTgAutoResponder(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...data }));
+            }
+
+            // GET /api/tg/stats?u=ID — TG statistics
+            if (url.pathname === "/api/tg/stats" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const stats = db.getTgStats(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, stats }));
+            }
+
+            // === TG WRITE ENDPOINTS ===
+
+            // POST /api/tg/grupos/add — add TG group
+            if (url.pathname === "/api/tg/grupos/add" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.link) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o link" })); }
+                const ok = db.addTgGrupo(body.u, body.link);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/grupos/del — delete TG group
+            if (url.pathname === "/api/tg/grupos/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.link) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o link" })); }
+                const ok = db.delTgGrupo(body.u, body.link);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/grupos/delall — delete all TG groups
+            if (url.pathname === "/api/tg/grupos/delall" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const ok = db.delAllTgGrupos(body.u);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // POST /api/tg/mensajes/crear
+            if (url.pathname === "/api/tg/mensajes/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre || !body.texto) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, nombre o texto" })); }
+                const id = db.crearTgMensaje(body.u, body.nombre, body.texto, body.foto);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: !!id, id }));
+            }
+            // POST /api/tg/mensajes/editar
+            if (url.pathname === "/api/tg/mensajes/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.editarTgMensaje(body.u, body.id, body.nombre, body.texto);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/mensajes/del
+            if (url.pathname === "/api/tg/mensajes/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.eliminarTgMensaje(body.u, body.id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/mensajes/duplicar
+            if (url.pathname === "/api/tg/mensajes/duplicar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.duplicarTgMensaje(body.u, body.id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // POST /api/tg/campanas/crear
+            if (url.pathname === "/api/tg/campanas/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                const id = db.crearTgCampana(body.u, body.nombre, body.mensaje_id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: !!id, id }));
+            }
+            // POST /api/tg/campanas/del
+            if (url.pathname === "/api/tg/campanas/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.eliminarTgCampana(body.u, body.id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // POST /api/tg/programados/crear
+            if (url.pathname === "/api/tg/programados/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.mensaje_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje_id" })); }
+                const id = db.crearTgProgramado(body.u, body.mensaje_id, body.hora || 0, body.minuto || 0, body.repetir);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: !!id, id }));
+            }
+            // POST /api/tg/programados/toggle
+            if (url.pathname === "/api/tg/programados/toggle" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.toggleTgProgramado(body.u, body.id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/programados/del
+            if (url.pathname === "/api/tg/programados/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.eliminarTgProgramado(body.u, body.id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // POST /api/tg/autoresponder/toggle
+            if (url.pathname === "/api/tg/autoresponder/toggle" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const ok = db.setTgAutoResponder(body.u, body.activo);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/autoresponder/keyword/add
+            if (url.pathname === "/api/tg/autoresponder/keyword/add" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.keyword || !body.respuesta) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta datos" })); }
+                const ok = db.addTgKeyword(body.u, body.keyword, body.respuesta);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/autoresponder/keyword/del
+            if (url.pathname === "/api/tg/autoresponder/keyword/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.delTgKeyword(body.u, body.id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/autoresponder/keyword/delall
+            if (url.pathname === "/api/tg/autoresponder/keyword/delall" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const ok = db.delAllTgKeywords(body.u);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // GET /api/tg/listanegra?u=ID
+            if (url.pathname === "/api/tg/listanegra" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const lista = db.getTgListaNegra(uid);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true, lista }));
+            }
+            // POST /api/tg/listanegra/add
+            if (url.pathname === "/api/tg/listanegra/add" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.grupo) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
+                const ok = db.addTgListaNegra(body.u, body.grupo);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/listanegra/del
+            if (url.pathname === "/api/tg/listanegra/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.grupo) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
+                const ok = db.delTgListaNegra(body.u, body.grupo);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/listanegra/limpiar
+            if (url.pathname === "/api/tg/listanegra/limpiar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const ok = db.limpiarTgListaNegra(body.u);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // GET /api/tg/config?u=ID
+            if (url.pathname === "/api/tg/config" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const config = db.getTgConfigEnvio(uid);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true, config }));
+            }
+            // POST /api/tg/config
+            if (url.pathname === "/api/tg/config" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const ok = db.setTgConfigEnvio(body.u, body.delay_seg, body.lote_tamano, body.lote_pausa_seg);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // GET /api/actividad?u=ID&limite=50 — Activity logs
+            if (url.pathname === "/api/actividad" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const limite = parseInt(url.searchParams.get("limite")) || 50;
+                const logs = db.getActividadUsuario(uid, limite);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs }));
+            }
+
+            // GET /api/actividad_admin?u=ADMIN_ID — All activity logs (admin only)
+            if (url.pathname === "/api/actividad_admin" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!adminId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const admin = db.getPanelUser(adminId);
+                if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
+                const logs = db.getActividadTodos(parseInt(url.searchParams.get("limite")) || 100);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs }));
+            }
+
+            // GET /api/plantillas?u=ID — Get message templates
+            if (url.pathname === "/api/plantillas" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const plantillas = db.getPlantillas(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, plantillas }));
+            }
+
+            // POST /api/plantillas/crear — Create a template
+            if (url.pathname === "/api/plantillas/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                db.crearPlantilla(body.u, body.nombre, body.mensaje);
+                db.registrarActividad(body.u, 'plantilla_creada', 'Plantilla: ' + body.nombre);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/plantillas/del — Delete a template
+            if (url.pathname === "/api/plantillas/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                db.eliminarPlantilla(body.u, body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/historial_panel?u=ID — Send history with filters
+            if (url.pathname === "/api/historial_panel" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const filtros = {
+                    tipo: url.searchParams.get("tipo") || null,
+                    resultado: url.searchParams.get("resultado") || null,
+                    desde: url.searchParams.get("desde") || null,
+                    hasta: url.searchParams.get("hasta") || null,
+                    limite: parseInt(url.searchParams.get("limite")) || 100
+                };
+                const historial = db.getHistorialEnviosPanel(uid, filtros);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, historial }));
+            }
+
+            // GET /api/limites?u=ID — Membership limits
+            if (url.pathname === "/api/limites" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const limites = db.getLimitesMembresia(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, limites }));
+            }
+
+            // GET /api/envios_chart?u=ID&dias=7 — Chart data for dashboard
+            if (url.pathname === "/api/envios_chart" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const dias = parseInt(url.searchParams.get("dias")) || 7;
+                const data = db.getEnviosPorDia(uid, dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
             }
 
             // Endpoint no encontrado
