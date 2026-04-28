@@ -100,3 +100,71 @@ async def wsp_enviar_personal(user_id, mensaje):
 
 async def wsp_cancelar_envio_personal(user_id):
     return await _post("/api/cancelar_envio_personal", {"u": str(user_id)})
+
+# --- MENSAJES / TEMPLATES ---
+async def wsp_mensajes(user_id):
+    return await _get("/api/mensajes", {"u": str(user_id)})
+
+async def wsp_crear_mensaje(user_id, nombre, texto):
+    return await _post("/api/mensajes/crear", {"u": str(user_id), "nombre": nombre, "texto": texto})
+
+async def wsp_editar_mensaje(user_id, msg_id, nombre=None, texto=None):
+    data = {"u": str(user_id), "id": msg_id}
+    if nombre: data["nombre"] = nombre
+    if texto: data["texto"] = texto
+    return await _post("/api/mensajes/editar", data)
+
+async def wsp_eliminar_mensaje(user_id, msg_id):
+    return await _post("/api/mensajes/del", {"u": str(user_id), "id": msg_id})
+
+# --- LISTA NEGRA ---
+async def wsp_lista_negra(user_id):
+    return await _get("/api/lista_negra", {"u": str(user_id)})
+
+async def wsp_agregar_blacklist(user_id, numero):
+    return await _post("/api/lista_negra", {"u": str(user_id), "accion": "agregar", "numero": numero})
+
+async def wsp_eliminar_blacklist(user_id, numero):
+    return await _post("/api/lista_negra", {"u": str(user_id), "accion": "eliminar", "numero": numero})
+
+async def wsp_limpiar_blacklist(user_id):
+    return await _post("/api/lista_negra", {"u": str(user_id), "accion": "limpiar"})
+
+# --- AUTO RESPUESTAS ---
+async def wsp_auto_respuestas(user_id):
+    return await _get("/api/auto_respuestas", {"u": str(user_id)})
+
+async def wsp_agregar_auto_respuesta(user_id, palabra, respuesta):
+    return await _post("/api/auto_respuestas", {"u": str(user_id), "accion": "agregar", "palabra": palabra, "respuesta": respuesta})
+
+async def wsp_eliminar_auto_respuesta(user_id, ar_id):
+    return await _post("/api/auto_respuestas", {"u": str(user_id), "accion": "eliminar", "id": ar_id})
+
+# --- CONFIG ENVIO ---
+async def wsp_envio_config(user_id):
+    return await _get("/api/envio_config", {"u": str(user_id)})
+
+async def wsp_set_envio_config(user_id, config):
+    data = {"u": str(user_id)}
+    data.update(config)
+    return await _post("/api/envio_config", data)
+
+# --- STATS ---
+async def wsp_grupo_stats(user_id):
+    return await _get("/api/grupo_stats", {"u": str(user_id)})
+
+# --- REPORTE ---
+async def wsp_reporte_diario(user_id):
+    return await _get("/api/reporte_diario", {"u": str(user_id)})
+
+# --- PROGRAMADOS ---
+async def wsp_programados(user_id):
+    return await _get("/api/programados", {"u": str(user_id)})
+
+# --- ENVIAR A MIEMBROS ---
+async def wsp_enviar_miembros(user_id, grupo, mensaje):
+    return await _post("/api/enviar_miembros", {"u": str(user_id), "grupo": grupo, "mensaje": mensaje})
+
+# --- DETECTAR GRUPOS CLIENTE ---
+async def wsp_detectar_cliente(user_id):
+    return await _get("/api/detectar_cliente", {"u": str(user_id)})

@@ -167,6 +167,36 @@ function init() {
             alternativas TEXT,
             FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
         );
+        CREATE TABLE IF NOT EXISTS panel_users (
+            telegram_id TEXT PRIMARY KEY,
+            username TEXT DEFAULT '',
+            password TEXT,
+            fecha_registro TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS user_envio_config (
+            user_id TEXT PRIMARY KEY,
+            delay_seg INTEGER DEFAULT 10,
+            lote_tamano INTEGER DEFAULT 0,
+            lote_pausa_seg INTEGER DEFAULT 30,
+            hora_inicio INTEGER DEFAULT 0,
+            hora_fin INTEGER DEFAULT 24
+        );
+        CREATE TABLE IF NOT EXISTS programados_wsp (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            mensaje_id INTEGER,
+            hora TEXT,
+            repetir INTEGER DEFAULT 0,
+            activo INTEGER DEFAULT 1,
+            fecha TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS auto_respuestas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            palabra TEXT,
+            respuesta TEXT,
+            fecha TEXT DEFAULT (datetime('now'))
+        );
     `);
 
     // Migraciones
@@ -830,6 +860,111 @@ function exportarCampanas(userId) {
     return result;
 }
 
+// --- PANEL AUTH ---
+function panelLogin(telegramId, password) {
+    const user = db.prepare("SELECT * FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+    if (!user) return { ok: false, error: "Usuario no registrado" };
+    if (user.password !== password) return { ok: false, error: "Contraseña incorrecta" };
+    return { ok: true, telegram_id: user.telegram_id, username: user.username };
+}
+
+function panelRegistro(telegramId, password, username) {
+    const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+    if (existing) return { ok: false, error: "Ya estás registrado" };
+    db.prepare("INSERT INTO panel_users (telegram_id, username, password) VALUES (?, ?, ?)").run(String(telegramId), username || '', password);
+    return { ok: true };
+}
+
+function panelCambiarPassword(telegramId, oldPass, newPass) {
+    const user = db.prepare("SELECT * FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+    if (!user) return { ok: false, error: "Usuario no encontrado" };
+    if (user.password !== oldPass) return { ok: false, error: "Contraseña actual incorrecta" };
+    db.prepare("UPDATE panel_users SET password = ? WHERE telegram_id = ?").run(newPass, String(telegramId));
+    return { ok: true };
+}
+
+function checkMembresia(userId) {
+    const sesiones = getSesiones(userId);
+    if (sesiones.length > 0) return { ok: true, activa: true, tipo: "wsp" };
+    return { ok: true, activa: true, tipo: "free" };
+}
+
+// --- TEMPLATE (mensajes) EXTRAS ---
+function editarTemplate(templateId, nombre, mensaje) {
+    const existing = db.prepare("SELECT * FROM templates WHERE id = ?").get(templateId);
+    if (!existing) return false;
+    if (nombre) db.prepare("UPDATE templates SET nombre = ? WHERE id = ?").run(nombre, templateId);
+    if (mensaje) db.prepare("UPDATE templates SET mensaje = ? WHERE id = ?").run(mensaje, templateId);
+    return true;
+}
+
+function duplicarTemplate(templateId) {
+    const orig = db.prepare("SELECT * FROM templates WHERE id = ?").get(templateId);
+    if (!orig) return null;
+    return db.prepare("INSERT INTO templates (user_id, nombre, mensaje, imagen_path) VALUES (?, ?, ?, ?)").run(orig.user_id, orig.nombre + " (copia)", orig.mensaje, orig.imagen_path).lastInsertRowid;
+}
+
+// --- USER ENVIO CONFIG ---
+function getUserEnvioConfig(userId) {
+    const row = db.prepare("SELECT * FROM user_envio_config WHERE user_id = ?").get(userId);
+    return row || { delay_seg: 10, lote_tamano: 0, lote_pausa_seg: 30, hora_inicio: 0, hora_fin: 24 };
+}
+
+function setUserEnvioConfig(userId, config) {
+    db.prepare("INSERT OR REPLACE INTO user_envio_config (user_id, delay_seg, lote_tamano, lote_pausa_seg, hora_inicio, hora_fin) VALUES (?, ?, ?, ?, ?, ?)").run(
+        userId, config.delay_seg || 10, config.lote_tamano || 0, config.lote_pausa_seg || 30, config.hora_inicio || 0, config.hora_fin || 24
+    );
+}
+
+// --- PROGRAMADOS WSP ---
+function getProgramados(userId) {
+    return db.prepare("SELECT p.*, t.nombre as mensaje_nombre, t.mensaje as mensaje_texto FROM programados_wsp p LEFT JOIN templates t ON p.mensaje_id = t.id WHERE p.user_id = ?").all(userId);
+}
+
+function crearProgramado(userId, mensajeId, hora, repetir) {
+    return db.prepare("INSERT INTO programados_wsp (user_id, mensaje_id, hora, repetir) VALUES (?, ?, ?, ?)").run(userId, mensajeId, hora, repetir ? 1 : 0).lastInsertRowid;
+}
+
+function toggleProgramado(progId) {
+    const p = db.prepare("SELECT activo FROM programados_wsp WHERE id = ?").get(progId);
+    if (!p) return false;
+    db.prepare("UPDATE programados_wsp SET activo = ? WHERE id = ?").run(p.activo ? 0 : 1, progId);
+    return true;
+}
+
+function eliminarProgramado(progId) {
+    db.prepare("DELETE FROM programados_wsp WHERE id = ?").run(progId);
+}
+
+// --- AUTO RESPUESTAS WSP ---
+function getAutoRespuestas(userId) {
+    return db.prepare("SELECT * FROM auto_respuestas WHERE user_id = ?").all(userId);
+}
+
+function agregarAutoRespuesta(userId, palabra, respuesta) {
+    return db.prepare("INSERT INTO auto_respuestas (user_id, palabra, respuesta) VALUES (?, ?, ?)").run(userId, palabra, respuesta).lastInsertRowid;
+}
+
+function eliminarAutoRespuesta(arId) {
+    db.prepare("DELETE FROM auto_respuestas WHERE id = ?").run(arId);
+}
+
+function limpiarAutoRespuestas(userId) {
+    db.prepare("DELETE FROM auto_respuestas WHERE user_id = ?").run(userId);
+}
+
+// --- TASA ENTREGA ---
+function getTasaEntrega(userId) {
+    const rows = db.prepare("SELECT resultado, COUNT(*) as total FROM historial_envios WHERE user_id = ? GROUP BY resultado").all(userId);
+    let enviados = 0, fallidos = 0;
+    for (const r of rows) {
+        if (r.resultado === "enviado") enviados = r.total;
+        else fallidos += r.total;
+    }
+    const total = enviados + fallidos;
+    return { total, enviados, fallidos, tasa: total > 0 ? Math.round(enviados * 100 / total) : 0 };
+}
+
 function getDb() { return db; }
 
 module.exports = {
@@ -859,4 +994,16 @@ module.exports = {
     getSinonimos, agregarSinonimo, eliminarSinonimo, limpiarSinonimos,
     getReporteDiario,
     exportarGrupos, importarGrupos, exportarCampanas,
+    // Panel auth
+    panelLogin, panelRegistro, panelCambiarPassword, checkMembresia,
+    // Template extras
+    editarTemplate, duplicarTemplate,
+    // User envio config
+    getUserEnvioConfig, setUserEnvioConfig,
+    // Programados WSP
+    getProgramados, crearProgramado, toggleProgramado, eliminarProgramado,
+    // Auto respuestas WSP
+    getAutoRespuestas, agregarAutoRespuesta, eliminarAutoRespuesta, limpiarAutoRespuestas,
+    // Tasa entrega
+    getTasaEntrega,
 };

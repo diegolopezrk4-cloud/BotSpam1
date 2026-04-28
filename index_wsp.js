@@ -4,8 +4,8 @@ const QRCode = require("qrcode");
 const http = require("http");
 const fs = require("fs");
 const config = require("./config");
-const db = require("./db");
-const motor = require("./motor");
+const db = require("./db_wsp");
+const motor = require("./motor_wsp");
 
 const QR_PORT = process.env.QR_PORT || 3000;
 
@@ -260,11 +260,17 @@ poll();
                 return res.end(JSON.stringify({ ok: true }));
             }
 
-            // POST /api/grupos/del — Eliminar grupo { u, id }
+            // POST /api/grupos/del — Eliminar grupo { u, id } o { u, link }
             if (url.pathname === "/api/grupos/del" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
-                db.eliminarGrupo(body.u, body.id);
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                if (body.id) {
+                    db.eliminarGrupo(body.u, body.id);
+                } else if (body.link) {
+                    db.eliminarGrupoPorLink(body.u, body.link);
+                } else {
+                    res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id o link" }));
+                }
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
@@ -320,22 +326,24 @@ poll();
                 return res.end(JSON.stringify({ ok: true }));
             }
 
-            // POST /api/iniciar — Iniciar campaña { u, id }
+            // POST /api/iniciar — Iniciar campaña { u, id|campana_id }
             if (url.pathname === "/api/iniciar" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
-                const camp = db.getCampanaById(body.id);
+                const campId = body.id || body.campana_id;
+                if (!body.u || !campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const camp = db.getCampanaById(campId);
                 if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "campana no encontrada" })); }
-                motor.iniciarCampana(body.id, body.u, botSock);
+                motor.iniciarCampana(campId, body.u, botSock);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campana: camp.nombre }));
             }
 
-            // POST /api/detener — Detener campaña { id }
+            // POST /api/detener — Detener campaña { id|campana_id }
             if (url.pathname === "/api/detener" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
-                motor.detenerCampana(body.id);
+                const campId = body.id || body.campana_id;
+                if (!campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                motor.detenerCampana(campId);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
@@ -505,6 +513,454 @@ poll();
                 const stopped = motor.detenerEnvioPersonal(userId);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: stopped }));
+            }
+
+            // ─── PANEL AUTH ───
+            if (url.pathname === "/api/panel_login" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                const r = db.panelLogin(body.telegram_id, body.password);
+                res.writeHead(200);
+                return res.end(JSON.stringify(r));
+            }
+            if (url.pathname === "/api/panel_registro" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                const r = db.panelRegistro(body.telegram_id, body.password, body.username || '');
+                res.writeHead(200);
+                return res.end(JSON.stringify(r));
+            }
+            if (url.pathname === "/api/panel_cambiar_password" && req.method === "POST") {
+                const body = await readBody();
+                const r = db.panelCambiarPassword(body.telegram_id, body.old_password, body.new_password);
+                res.writeHead(200);
+                return res.end(JSON.stringify(r));
+            }
+            if (url.pathname === "/api/check_membresia" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const r = db.checkMembresia(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify(r));
+            }
+
+            // ─── DESVINCULAR CUENTA ───
+            if (url.pathname === "/api/desvincular" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                db.eliminarSesion(body.u, body.nombre);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── REPORTE DIARIO ───
+            if (url.pathname === "/api/reporte_diario" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const r = db.getReporteDiario(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...r }));
+            }
+
+            // ─── TASA ENTREGA ───
+            if (url.pathname === "/api/tasa_entrega" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const r = db.getTasaEntrega(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...r }));
+            }
+
+            // ─── MENSAJES / TEMPLATES WSP ───
+            if (url.pathname === "/api/mensajes" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const mensajes = db.getTemplates(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, mensajes }));
+            }
+            if (url.pathname === "/api/mensajes/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre || !body.texto) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, nombre o texto" })); }
+                const id = db.agregarTemplate(body.u, body.nombre, body.texto);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id }));
+            }
+            if (url.pathname === "/api/mensajes/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.editarTemplate(body.id, body.nombre || null, body.texto || null);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok }));
+            }
+            if (url.pathname === "/api/mensajes/duplicar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const newId = db.duplicarTemplate(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: !!newId, id: newId }));
+            }
+            if (url.pathname === "/api/mensajes/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                db.eliminarTemplate(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── PLANTILLAS (alias para mensajes/templates) ───
+            if (url.pathname === "/api/plantillas" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const plantillas = db.getTemplates(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, plantillas }));
+            }
+            if (url.pathname === "/api/plantillas/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, nombre o mensaje" })); }
+                const id = db.agregarTemplate(body.u, body.nombre, body.mensaje);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id }));
+            }
+            if (url.pathname === "/api/plantillas/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                db.eliminarTemplate(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── ENVIO UNICO WSP ───
+            if (url.pathname === "/api/envios_unicos" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const historial = db.getHistorialEnvios(userId, 20);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, envios: historial }));
+            }
+            if (url.pathname === "/api/enviar_unico" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.mensaje_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje_id" })); }
+                const template = db.getTemplateById(body.mensaje_id);
+                if (!template) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "mensaje no encontrado" })); }
+                const grupos = db.getGrupos(body.u);
+                if (!grupos.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "no tienes grupos" })); }
+                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                let exitosos = 0, fallidos = 0;
+                for (const g of grupos) {
+                    try {
+                        await motor.sendToGroup ? await motor.sendToGroup(botSock, g.link, template.mensaje) : null;
+                        db.registrarEnvio(body.u, 0, g.link, "enviado");
+                        exitosos++;
+                    } catch (e) {
+                        db.registrarEnvio(body.u, 0, g.link, "error");
+                        fallidos++;
+                    }
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, exitosos, fallidos }));
+            }
+
+            // ─── PROGRAMADOS WSP ───
+            if (url.pathname === "/api/programados" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const programados = db.getProgramados(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, programados }));
+            }
+            if (url.pathname === "/api/programados/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.mensaje_id || !body.hora) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, mensaje_id o hora" })); }
+                const id = db.crearProgramado(body.u, body.mensaje_id, body.hora, body.repetir || false);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id }));
+            }
+            if (url.pathname === "/api/programados/toggle" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                const ok = db.toggleProgramado(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok }));
+            }
+            if (url.pathname === "/api/programados/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.eliminarProgramado(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── CONFIG ENVIO WSP ───
+            if (url.pathname === "/api/envio_config" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const config = db.getUserEnvioConfig(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, config, horario: { hora_inicio: config.hora_inicio, hora_fin: config.hora_fin } }));
+            }
+            if (url.pathname === "/api/envio_config" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.setUserEnvioConfig(body.u, body);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── LISTA NEGRA WSP ───
+            if (url.pathname === "/api/lista_negra" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const lista = db.getBlacklist(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, lista: lista.map(x => ({ ...x, numero: x.grupo_link })) }));
+            }
+            if (url.pathname === "/api/lista_negra" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.accion) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o accion" })); }
+                if (body.accion === "agregar") {
+                    db.agregarBlacklist(body.u, body.numero || body.grupo);
+                } else if (body.accion === "eliminar") {
+                    db.eliminarBlacklist(body.u, body.numero || body.grupo);
+                } else if (body.accion === "limpiar") {
+                    db.limpiarBlacklist(body.u);
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── AUTO RESPUESTAS WSP ───
+            if (url.pathname === "/api/auto_respuestas" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const reglas = db.getAutoRespuestas(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, reglas }));
+            }
+            if (url.pathname === "/api/auto_respuestas" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.accion) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o accion" })); }
+                if (body.accion === "agregar") {
+                    db.agregarAutoRespuesta(body.u, body.palabra, body.respuesta);
+                } else if (body.accion === "eliminar") {
+                    db.eliminarAutoRespuesta(body.id);
+                } else if (body.accion === "limpiar") {
+                    db.limpiarAutoRespuestas(body.u);
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── GRUPO STATS WSP ───
+            if (url.pathname === "/api/grupo_stats" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const stats = db.getStatsPorGrupo(userId);
+                const mapped = stats.map(s => ({
+                    grupo_link: s.grupo_link,
+                    enviados: s.enviados || 0,
+                    exitos: s.enviados || 0,
+                    fallidos: s.errores || 0,
+                    tasa_exito: (s.enviados + s.errores) > 0 ? Math.round(s.enviados * 100 / (s.enviados + s.errores)) : 0,
+                }));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, stats: mapped }));
+            }
+
+            // ─── DETECTAR GRUPOS (cliente) WSP ───
+            if (url.pathname === "/api/detectar_cliente" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const cuenta = url.searchParams.get("cuenta");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                try {
+                    const allGroups = await botSock.groupFetchAllParticipating();
+                    const grupos = Object.values(allGroups).filter(g => motor.esGrupoReal(g.id, g)).map(g => ({
+                        jid: g.id, subject: g.subject, size: (g.participants || []).length
+                    }));
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, grupos }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // ─── MIEMBROS GRUPO WSP ───
+            if (url.pathname === "/api/miembros_grupo" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const grupoJid = url.searchParams.get("grupo");
+                if (!userId || !grupoJid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
+                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                try {
+                    const meta = await botSock.groupMetadata(grupoJid);
+                    const miembros = (meta.participants || []).map(p => ({
+                        id: p.id, admin: p.admin === "admin" || p.admin === "superadmin"
+                    }));
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, miembros }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // ─── ENVIAR A MIEMBROS WSP ───
+            if (url.pathname === "/api/enviar_miembros" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.grupo || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, grupo o mensaje" })); }
+                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                try {
+                    const meta = await botSock.groupMetadata(body.grupo);
+                    const jids = (meta.participants || []).map(p => p.id);
+                    motor.enviarASeleccionados(body.u, jids, body.mensaje, null, botSock);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, total: jids.length }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // ─── AGREGAR MIEMBROS A GRUPO ───
+            if (url.pathname === "/api/agregar_miembros" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.origen || !body.destino) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, origen o destino" })); }
+                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                try {
+                    const meta = await botSock.groupMetadata(body.origen);
+                    const jids = (meta.participants || []).map(p => p.id);
+                    let agregados = 0, fallidos = 0;
+                    for (const jid of jids) {
+                        try {
+                            await botSock.groupParticipantsUpdate(body.destino, [jid], "add");
+                            agregados++;
+                        } catch { fallidos++; }
+                    }
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, agregados, fallidos }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // ─── CHAT PERSONAL AGREGAR/ELIMINAR ───
+            if (url.pathname === "/api/chat_personal_agregar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.numero) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o numero" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/chat_personal_eliminar" && req.method === "POST") {
+                const body = await readBody();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── HISTORIAL PANEL ───
+            if (url.pathname === "/api/historial_panel" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const envios = db.getHistorialEnvios(userId, 100);
+                const historial = envios.map(e => ({
+                    fecha: e.fecha, tipo: "envio", destino: e.grupo_link,
+                    mensaje_preview: "", total: 1, exitosos: e.resultado === "enviado" ? 1 : 0,
+                    fallidos: e.resultado !== "enviado" ? 1 : 0, resultado: e.resultado,
+                }));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, historial }));
+            }
+
+            // ─── ACTIVIDAD ───
+            if (url.pathname === "/api/actividad" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs: [] }));
+            }
+
+            // ─── LIMITES ───
+            if (url.pathname === "/api/limites" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const maxG = db.getMaxGrupos(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, max_grupos: maxG }));
+            }
+
+            // ─── ENVIOS CHART ───
+            if (url.pathname === "/api/envios_chart" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const diarios = db.getEnviosDiariosTotal(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, datos: diarios }));
+            }
+
+            // ─── AUTOJOIN ───
+            if (url.pathname === "/api/autojoin" && req.method === "POST") {
+                const body = await readBody();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── ADMIN ENDPOINTS ───
+            if (url.pathname === "/api/admin/usuarios" && req.method === "GET") {
+                const usuarios = db.getTodosUsuarios();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, usuarios }));
+            }
+            if (url.pathname === "/api/admin/membresia" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.user_id || !body.dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta user_id o dias" })); }
+                let user = db.getUsuario(body.user_id);
+                if (!user) user = db.findUserByNumber(body.user_id);
+                if (!user) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "usuario no encontrado" })); }
+                db.activarMembresia(user.wsp_id, parseInt(body.dias));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/admin/set_admin" && req.method === "POST") {
+                const body = await readBody();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/admin/tipo_membresia" && req.method === "POST") {
+                const body = await readBody();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/actividad_admin" && req.method === "GET") {
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs: [] }));
+            }
+
+            // ─── PROMO ENDPOINTS ───
+            if (url.pathname === "/api/promo/registrar" && req.method === "POST") {
+                const body = await readBody();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/promo/detener" && req.method === "POST") {
+                const body = await readBody();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if ((url.pathname === "/api/promo/respuestas") && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, respuestas: [] }));
+            }
+
+            // ─── GRUPOS/DEL con soporte link ───
+            if (url.pathname === "/api/grupos/del_link" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.link) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o link" })); }
+                db.eliminarGrupoPorLink(body.u, body.link);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
             }
 
             // Endpoint no encontrado

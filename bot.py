@@ -3434,24 +3434,27 @@ async def cb_wsp_mensajes(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
     import wsp_bridge as wsp
-    r = await wsp.wsp_campanas(call.from_user.id)
+    r = await wsp.wsp_mensajes(call.from_user.id)
     if not r.get("ok"):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, f"❌ Error: {r.get('error', 'sin conexión')}", reply_markup=kb)
         await call.answer()
         return
-    campanas = r.get("campanas", [])
-    texto = f"📝 MENSAJES WSP ({len(campanas)}):\n\n"
-    if campanas:
-        for c in campanas[:10]:
-            nombre = c.get("nombre", "?")
-            msg_prev = (c.get("mensaje", "") or "")[:60]
-            texto += f"• {nombre}: {msg_prev}...\n"
+    mensajes = r.get("mensajes", [])
+    texto = f"📝 MENSAJES/PLANTILLAS WSP ({len(mensajes)}):\n\n"
+    if mensajes:
+        for m in mensajes[:15]:
+            nombre = m.get("nombre", "?")
+            msg_prev = (m.get("mensaje", "") or "")[:50]
+            texto += f"• [{m.get('id','')}] {nombre}: {msg_prev}...\n"
     else:
-        texto += "(sin mensajes/campañas)\n"
-    texto += "\n/wspcampana nombre | mensaje — Crear campaña con mensaje"
-    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+        texto += "(sin mensajes/plantillas)\n"
+    texto += "\nGestiona desde el Panel Web o con comandos."
+    botones = [
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
@@ -3479,12 +3482,27 @@ async def cb_wsp_envio_unico(call: types.CallbackQuery):
 async def cb_wsp_programados(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
-    texto = (
-        "⏰ PROGRAMADOS WSP\n\n"
-        "Programa envíos automáticos en horarios específicos.\n\n"
-        "Funcionalidad próximamente disponible."
-    )
-    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    import wsp_bridge as wsp
+    r = await wsp.wsp_programados(call.from_user.id)
+    if r.get("ok"):
+        progs = r.get("programados", [])
+        texto = f"⏰ PROGRAMADOS WSP ({len(progs)}):\n\n"
+        if progs:
+            for p in progs[:10]:
+                nombre = p.get("mensaje_nombre", f"msg#{p.get('mensaje_id','?')}")
+                hora = p.get("hora", "?")
+                activo = "✅" if p.get("activo") else "⏸"
+                rep = "🔄" if p.get("repetir") else "1x"
+                texto += f"{activo} {nombre} — {hora} {rep}\n"
+        else:
+            texto += "(sin envíos programados)\n"
+        texto += "\nGestiona desde el Panel Web."
+    else:
+        texto = "⏰ PROGRAMADOS WSP\n\nGestiona desde el Panel Web."
+    botones = [
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
@@ -3515,16 +3533,23 @@ async def cb_wsp_envio_miembros(call: types.CallbackQuery):
 async def cb_wsp_config(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
-    texto = (
-        "⚙ CONFIG ENVÍO WSP\n\n"
-        "Configuración de intervalos y comportamiento de envío.\n\n"
-        "• Delay entre mensajes\n"
-        "• Tamaño de lote\n"
-        "• Pausa entre lotes\n\n"
-        "Configurable desde el Panel Web."
-    )
+    import wsp_bridge as wsp
+    r = await wsp.wsp_envio_config(call.from_user.id)
+    if r.get("ok"):
+        cfg = r.get("config", {})
+        hr = r.get("horario", {})
+        texto = (
+            "⚙ CONFIG ENVÍO WSP\n\n"
+            f"⏱ Delay: {cfg.get('delay_seg', 10)} seg\n"
+            f"📦 Lote: {cfg.get('lote_tamano', 0)} msgs\n"
+            f"⏸ Pausa lotes: {cfg.get('lote_pausa_seg', 30)} seg\n"
+            f"🕐 Horario: {hr.get('hora_inicio', 0)}:00 - {hr.get('hora_fin', 24)}:00\n\n"
+            "Modifica desde el Panel Web."
+        )
+    else:
+        texto = "⚙ CONFIG ENVÍO WSP\n\nConfigura desde el Panel Web."
     botones = [
-        [InlineKeyboardButton(text="🌐 Ir al Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="wsp_panelweb")],
         [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
@@ -3537,13 +3562,21 @@ async def cb_wsp_config(call: types.CallbackQuery):
 async def cb_wsp_listanegra(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
-    texto = (
-        "🚫 LISTA NEGRA WSP\n\n"
-        "Grupos bloqueados que no recibirán mensajes.\n\n"
-        "Gestiona la lista negra desde el Panel Web."
-    )
+    import wsp_bridge as wsp
+    r = await wsp.wsp_lista_negra(call.from_user.id)
+    if r.get("ok"):
+        lista = r.get("lista", [])
+        texto = f"🚫 LISTA NEGRA WSP ({len(lista)}):\n\n"
+        if lista:
+            for i, x in enumerate(lista[:20], 1):
+                texto += f"{i}. {x.get('numero', x.get('grupo_link', '?'))}\n"
+        else:
+            texto += "(lista vacía)\n"
+        texto += "\nGestiona desde el Panel Web."
+    else:
+        texto = "🚫 LISTA NEGRA WSP\n\nGestiona desde el Panel Web."
     botones = [
-        [InlineKeyboardButton(text="🌐 Ir al Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="wsp_panelweb")],
         [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
@@ -3556,13 +3589,23 @@ async def cb_wsp_listanegra(call: types.CallbackQuery):
 async def cb_wsp_autoresponder(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
-    texto = (
-        "🤖 AUTO-RESPONDER WSP\n\n"
-        "Responde automáticamente a mensajes con keywords específicas.\n\n"
-        "Configurable desde el Panel Web."
-    )
+    import wsp_bridge as wsp
+    r = await wsp.wsp_auto_respuestas(call.from_user.id)
+    if r.get("ok"):
+        reglas = r.get("reglas", [])
+        texto = f"🤖 AUTO-RESPONDER WSP ({len(reglas)} reglas):\n\n"
+        if reglas:
+            for i, x in enumerate(reglas[:15], 1):
+                palabra = x.get("palabra", "?")
+                resp = (x.get("respuesta", "") or "")[:40]
+                texto += f"{i}. '{palabra}' → {resp}...\n"
+        else:
+            texto += "(sin reglas configuradas)\n"
+        texto += "\nGestiona desde el Panel Web."
+    else:
+        texto = "🤖 AUTO-RESPONDER WSP\n\nConfigura desde el Panel Web."
     botones = [
-        [InlineKeyboardButton(text="🌐 Ir al Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="wsp_panelweb")],
         [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
@@ -3595,23 +3638,29 @@ async def cb_wsp_stats(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
     import wsp_bridge as wsp
-    r = await wsp.wsp_dashboard(call.from_user.id)
-    if not r.get("ok"):
-        botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
-        kb = InlineKeyboardMarkup(inline_keyboard=botones)
-        await safe_edit(call.message, f"❌ Error: {r.get('error', 'sin conexión')}", reply_markup=kb)
-        await call.answer()
-        return
-    d = r.get("dashboard", r)
+    r_dash = await wsp.wsp_dashboard(call.from_user.id)
+    r_stats = await wsp.wsp_grupo_stats(call.from_user.id)
+    d = r_dash.get("dashboard", r_dash) if r_dash.get("ok") else {}
     texto = (
-        f"📈 STATS GRUPOS WSP\n\n"
+        f"📈 STATS WSP\n\n"
         f"🌐 Grupos: {d.get('grupos', 0)}\n"
         f"👤 Cuentas: {d.get('cuentas', d.get('sesiones', 0))}\n"
         f"📋 Campañas: {d.get('campanas', 0)}\n"
-        f"📤 Enviados: {d.get('enviados', d.get('total_enviados', 0))}\n"
-        f"❌ Errores: {d.get('errores', d.get('total_errores', 0))}\n"
+        f"📤 Enviados: {d.get('enviados', d.get('totalEnviados', 0))}\n"
+        f"❌ Errores: {d.get('errores', d.get('totalErrores', 0))}\n"
     )
-    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    if r_stats.get("ok"):
+        stats = r_stats.get("stats", [])
+        if stats:
+            texto += "\n📊 Top Grupos:\n"
+            for s in stats[:5]:
+                grupo = (s.get("grupo_link", "?"))[:30]
+                tasa = s.get("tasa_exito", 0)
+                texto += f"  • {grupo} ({tasa}%)\n"
+    botones = [
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
