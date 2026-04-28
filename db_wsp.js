@@ -1361,7 +1361,7 @@ module.exports = {
     // Message templates
     getPlantillas, crearPlantilla, eliminarPlantilla,
     // Send history with filters
-    getHistorialEnvios, registrarHistorialEnvio,
+    getHistorialEnviosPanel, registrarHistorialEnvio,
     // Membership sending limits
     getLimitesMembresia,
     // Dashboard chart data
@@ -1391,7 +1391,7 @@ function eliminarPlantilla(userId, id) {
 }
 
 // --- Send History ---
-function getHistorialEnvios(userId, filtros) {
+function getHistorialEnviosPanel(userId, filtros) {
     let sql = "SELECT * FROM historial_envios_panel WHERE user_id = ?";
     const params = [String(userId)];
     if (filtros && filtros.tipo) { sql += " AND tipo = ?"; params.push(filtros.tipo); }

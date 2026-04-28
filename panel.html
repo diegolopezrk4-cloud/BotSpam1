@@ -706,6 +706,7 @@ async function api(path,opts){
   try{const r=opts?await fetch(API+path,opts):await fetch(API+path);return await r.json()}
   catch(e){return{ok:false,error:e.message}}
 }
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/`/g,'&#96;')}
 function toast(msg,type='success'){
   const t=document.createElement('div');t.className='toast show '+type;t.textContent=msg;
   $('toastContainer').appendChild(t);
@@ -1379,7 +1380,7 @@ async function loadChart(dias){
   if(!canvas)return;
   if(_chartInstance){_chartInstance.destroy();_chartInstance=null}
   if(!r.ok||!r.data||!r.data.length){
-    canvas.parentElement.innerHTML='<div class="empty-state"><p>Sin datos de envios</p></div>';
+    canvas.parentElement.innerHTML='<div class="empty-state"><p>Sin datos de envios</p></div><canvas id="enviosChart" style="display:none"></canvas>';
     return;
   }
   const isDark=!document.documentElement.getAttribute('data-theme');
@@ -1445,16 +1446,18 @@ async function eliminarPlantilla(id){
   await api('/api/plantillas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});
   toast('Eliminada','success');loadPlantillas();
 }
+let _plantillaClipboard='';
 async function usarPlantilla(id){
   const r=await api('/api/plantillas?u='+userId);
   const p=(r.plantillas||[]).find(x=>x.id===id);
   if(!p)return;
-  showModal(`<h3>📤 Usar Plantilla: ${p.nombre}</h3>
-    <div style="background:var(--bg);padding:15px;border-radius:8px;margin-bottom:15px;font-size:14px;white-space:pre-wrap">${p.mensaje}</div>
+  _plantillaClipboard=p.mensaje||'';
+  showModal(`<h3>📤 Usar Plantilla: ${esc(p.nombre)}</h3>
+    <div style="background:var(--bg);padding:15px;border-radius:8px;margin-bottom:15px;font-size:14px;white-space:pre-wrap">${esc(p.mensaje)}</div>
     <p style="color:var(--text2);font-size:13px">Texto copiado. Pegalo en la seccion de envio que necesites.</p>
-    <div class="modal-actions"><button class="btn btn-primary" onclick="copyPlantilla('${p.mensaje.replace(/'/g,"\\'")}')">📋 Copiar</button><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
+    <div class="modal-actions"><button class="btn btn-primary" onclick="copyPlantilla()">📋 Copiar</button><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
 }
-function copyPlantilla(text){try{navigator.clipboard.writeText(text);toast('Copiado!','success')}catch(e){toast('Error al copiar','error')}closeModal()}
+function copyPlantilla(){try{navigator.clipboard.writeText(_plantillaClipboard);toast('Copiado!','success')}catch(e){toast('Error al copiar','error')}closeModal()}
 
 // --- HISTORIAL ---
 async function loadHistorial(){

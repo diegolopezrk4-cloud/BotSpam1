@@ -1344,7 +1344,7 @@ if(uid())loadAll();
                     hasta: url.searchParams.get("hasta") || null,
                     limite: parseInt(url.searchParams.get("limite")) || 100
                 };
-                const historial = db.getHistorialEnvios(uid, filtros);
+                const historial = db.getHistorialEnviosPanel(uid, filtros);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, historial }));
             }
