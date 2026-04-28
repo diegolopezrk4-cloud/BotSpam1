@@ -1,6 +1,6 @@
 const Database = require("better-sqlite3");
 const path = require("path");
-const config = require("./config");
+const config = require("./config_wsp");
 
 let db;
 
@@ -167,6 +167,142 @@ function init() {
             alternativas TEXT,
             FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
         );
+        CREATE TABLE IF NOT EXISTS mensajes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            nombre TEXT,
+            texto TEXT,
+            imagen_path TEXT DEFAULT NULL,
+            fecha_creacion TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+        CREATE TABLE IF NOT EXISTS envios_unicos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            mensaje_id INTEGER,
+            grupos_total INTEGER DEFAULT 0,
+            grupos_ok INTEGER DEFAULT 0,
+            grupos_error INTEGER DEFAULT 0,
+            estado TEXT DEFAULT 'pendiente',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            FOREIGN KEY(mensaje_id) REFERENCES mensajes(id)
+        );
+        CREATE TABLE IF NOT EXISTS envios_programados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            mensaje_id INTEGER,
+            hora INTEGER DEFAULT 0,
+            minuto INTEGER DEFAULT 0,
+            repetir INTEGER DEFAULT 0,
+            activo INTEGER DEFAULT 1,
+            ultimo_envio TEXT DEFAULT NULL,
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            FOREIGN KEY(mensaje_id) REFERENCES mensajes(id)
+        );
+        CREATE TABLE IF NOT EXISTS tasa_entrega (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            jid TEXT,
+            msg_id TEXT,
+            estado TEXT DEFAULT 'enviado',
+            fecha_enviado TEXT DEFAULT (datetime('now')),
+            fecha_entregado TEXT,
+            fecha_leido TEXT,
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+        CREATE TABLE IF NOT EXISTS auto_respuestas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            palabra_clave TEXT,
+            respuesta TEXT,
+            activo INTEGER DEFAULT 1,
+            veces_usado INTEGER DEFAULT 0,
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            UNIQUE(user_id, palabra_clave)
+        );
+        CREATE TABLE IF NOT EXISTS envio_config (
+            user_id TEXT PRIMARY KEY,
+            delay_seg INTEGER DEFAULT 10,
+            lote_tamano INTEGER DEFAULT 0,
+            lote_pausa_seg INTEGER DEFAULT 300,
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+        CREATE TABLE IF NOT EXISTS lista_negra_numeros (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            numero TEXT,
+            razon TEXT DEFAULT '',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            UNIQUE(user_id, numero)
+        );
+        CREATE TABLE IF NOT EXISTS horarios_envio (
+            user_id TEXT PRIMARY KEY,
+            hora_inicio INTEGER DEFAULT 0,
+            hora_fin INTEGER DEFAULT 24,
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+        CREATE TABLE IF NOT EXISTS panel_users (
+            telegram_id TEXT PRIMARY KEY,
+            password TEXT NOT NULL,
+            username TEXT DEFAULT '',
+            es_admin INTEGER DEFAULT 0,
+            plan TEXT DEFAULT 'demo',
+            fecha_expira TEXT DEFAULT (datetime('now', '+1 day')),
+            fecha_registro TEXT DEFAULT (datetime('now')),
+            tipo_membresia TEXT DEFAULT 'wsp+tg'
+        );
+        CREATE TABLE IF NOT EXISTS recovery_codes (
+            telegram_id TEXT NOT NULL,
+            code TEXT NOT NULL UNIQUE,
+            usado INTEGER DEFAULT 0,
+            fecha TEXT DEFAULT (datetime('now')),
+            expira TEXT DEFAULT (datetime('now', '+15 minutes'))
+        );
+        CREATE TABLE IF NOT EXISTS chats_personales (
+            user_id TEXT NOT NULL,
+            cuenta TEXT NOT NULL,
+            jid TEXT NOT NULL,
+            nombre TEXT,
+            fecha TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY(user_id, cuenta, jid)
+        );
+        CREATE TABLE IF NOT EXISTS sesiones_tg (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            nombre TEXT NOT NULL,
+            telefono TEXT DEFAULT '',
+            activa INTEGER DEFAULT 1,
+            fecha TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS actividad_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            accion TEXT,
+            detalle TEXT DEFAULT '',
+            fecha TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS plantillas_msg (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            nombre TEXT,
+            mensaje TEXT,
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES panel_users(telegram_id)
+        );
+        CREATE TABLE IF NOT EXISTS historial_envios_panel (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            tipo TEXT DEFAULT 'grupo',
+            destino TEXT DEFAULT '',
+            mensaje_preview TEXT DEFAULT '',
+            resultado TEXT DEFAULT 'enviado',
+            total INTEGER DEFAULT 0,
+            exitosos INTEGER DEFAULT 0,
+            fallidos INTEGER DEFAULT 0,
+            fecha TEXT DEFAULT (datetime('now'))
+        );
     `);
 
     // Migraciones
@@ -189,6 +325,21 @@ function init() {
         db.exec("ALTER TABLE campana_config ADD COLUMN espera_ciclo INTEGER DEFAULT 600");
         console.log("   Columnas 'espera_cuenta/espera_ciclo' agregadas");
     }
+    try {
+        db.prepare("SELECT username FROM panel_users LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE panel_users ADD COLUMN username TEXT DEFAULT ''");
+        db.exec("ALTER TABLE panel_users ADD COLUMN es_admin INTEGER DEFAULT 0");
+        db.exec("ALTER TABLE panel_users ADD COLUMN plan TEXT DEFAULT 'demo'");
+        db.exec("ALTER TABLE panel_users ADD COLUMN fecha_expira TEXT DEFAULT NULL");
+        console.log("   Columnas admin/plan/username agregadas a panel_users");
+    }
+    try {
+        db.prepare("SELECT tipo_membresia FROM panel_users LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE panel_users ADD COLUMN tipo_membresia TEXT DEFAULT 'wsp+tg'");
+        console.log("   Columna 'tipo_membresia' agregada a panel_users");
+    }
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -198,21 +349,42 @@ function getUsuario(wspId) {
 }
 
 function findUserByNumber(phoneNumber) {
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    // Limpiar el input (quitar sufijos si los tiene)
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+
+    // Busqueda exacta con sufijos comunes
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     const userLid = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(withLid);
     if (userLid) return userLid;
     const userWsp = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(withWsp);
     if (userWsp) return userWsp;
+
+    // Busqueda LIKE para LID con :device (ej: "12345:42@lid")
+    const likeUser = db.prepare("SELECT * FROM usuarios WHERE wsp_id LIKE ? LIMIT 1").get(cleanNum + ":%@lid");
+    if (likeUser) return likeUser;
+
+    // Busqueda exacta con el input original (por si ya viene con formato completo)
+    if (phoneNumber !== cleanNum) {
+        const exactUser = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(phoneNumber);
+        if (exactUser) return exactUser;
+    }
+
     return null;
 }
 
 function getAllJidsForNumber(phoneNumber) {
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
     const jids = [];
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     if (db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(withLid)) jids.push(withLid);
     if (db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(withWsp)) jids.push(withWsp);
+    // Buscar tambien JIDs con :device@lid
+    const lidDevices = db.prepare("SELECT wsp_id FROM usuarios WHERE wsp_id LIKE ?").all(cleanNum + ":%@lid");
+    for (const row of lidDevices) {
+        if (!jids.includes(row.wsp_id)) jids.push(row.wsp_id);
+    }
     return jids;
 }
 
@@ -281,10 +453,11 @@ function activarMembresia(wspId, dias) {
 }
 
 function activarMembresiaByNumber(phoneNumber, dias) {
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
     const expira = expiraPeru(dias);
     const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : "mensual";
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     let activated = false;
     const userLid = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(withLid);
     if (userLid) {
@@ -296,6 +469,12 @@ function activarMembresiaByNumber(phoneNumber, dias) {
         db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, withWsp);
         activated = true;
     }
+    // Buscar JIDs con :device@lid
+    const lidDevices = db.prepare("SELECT wsp_id FROM usuarios WHERE wsp_id LIKE ?").all(cleanNum + ":%@lid");
+    for (const row of lidDevices) {
+        db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, row.wsp_id);
+        activated = true;
+    }
     if (!activated) {
         db.prepare("INSERT OR IGNORE INTO usuarios (wsp_id, nombre) VALUES (?, '')").run(withWsp);
         db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, withWsp);
@@ -304,15 +483,20 @@ function activarMembresiaByNumber(phoneNumber, dias) {
 }
 
 function desactivarByNumber(phoneNumber) {
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     db.prepare("UPDATE usuarios SET activo = 0 WHERE wsp_id IN (?, ?)").run(withLid, withWsp);
+    // Tambien desactivar JIDs con :device@lid
+    db.prepare("UPDATE usuarios SET activo = 0 WHERE wsp_id LIKE ?").run(cleanNum + ":%@lid");
 }
 
 function banByNumber(phoneNumber) {
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     db.prepare("UPDATE usuarios SET activo = 0, plan = 'baneado' WHERE wsp_id IN (?, ?)").run(withLid, withWsp);
+    db.prepare("UPDATE usuarios SET activo = 0, plan = 'baneado' WHERE wsp_id LIKE ?").run(cleanNum + ":%@lid");
 }
 
 let botRealJid = null;
@@ -345,20 +529,27 @@ function tieneMembresia(wspId) {
         }
         return true;
     }
-    let altJid = null;
+    // Buscar en todos los formatos de JID alternativos
+    const altJids = [];
     if (wspId.endsWith("@lid")) {
-        altJid = num + "@s.whatsapp.net";
+        altJids.push(num + "@s.whatsapp.net");
+        // Si tiene :device, tambien probar sin device
+        if (wspId.includes(":")) altJids.push(num + "@lid");
     } else if (wspId.endsWith("@s.whatsapp.net")) {
-        altJid = num + "@lid";
+        altJids.push(num + "@lid");
     }
-    if (altJid) {
+    // Buscar tambien por LIKE para LID con :device
+    const lidDevices = db.prepare("SELECT * FROM usuarios WHERE wsp_id LIKE ? AND wsp_id != ? LIMIT 1").all(num + ":%@lid", wspId);
+    for (const ld of lidDevices) altJids.push(ld.wsp_id);
+
+    for (const altJid of altJids) {
         const altUser = getUsuario(altJid);
         if (altUser && altUser.activo) {
             if (altUser.fecha_expira) {
                 const expira = new Date(altUser.fecha_expira);
                 if (Date.now() > expira.getTime()) {
                     db.prepare("UPDATE usuarios SET activo = 0, plan = 'expirado' WHERE wsp_id = ?").run(altJid);
-                    return false;
+                    continue;
                 }
             }
             crearUsuario(wspId, user ? user.nombre : "");
@@ -832,6 +1023,323 @@ function exportarCampanas(userId) {
 
 function getDb() { return db; }
 
+// --- MENSAJES (CRUD) ---
+function getMensajes(userId) {
+    return db.prepare("SELECT * FROM mensajes WHERE user_id = ? ORDER BY fecha_creacion DESC").all(userId);
+}
+
+function getMensajeById(id) {
+    return db.prepare("SELECT * FROM mensajes WHERE id = ?").get(id);
+}
+
+function crearMensaje(userId, nombre, texto, imagenPath = null) {
+    const result = db.prepare("INSERT INTO mensajes (user_id, nombre, texto, imagen_path) VALUES (?, ?, ?, ?)").run(userId, nombre, texto, imagenPath);
+    return result.lastInsertRowid;
+}
+
+function editarMensaje(id, texto, imagenPath) {
+    if (imagenPath !== undefined) {
+        db.prepare("UPDATE mensajes SET texto = ?, imagen_path = ? WHERE id = ?").run(texto, imagenPath, id);
+    } else {
+        db.prepare("UPDATE mensajes SET texto = ? WHERE id = ?").run(texto, id);
+    }
+}
+
+function editarNombreMensaje(id, nombre) {
+    db.prepare("UPDATE mensajes SET nombre = ? WHERE id = ?").run(nombre, id);
+}
+
+function eliminarMensaje(id) {
+    db.prepare("DELETE FROM envios_programados WHERE mensaje_id = ?").run(id);
+    db.prepare("DELETE FROM envios_unicos WHERE mensaje_id = ?").run(id);
+    db.prepare("DELETE FROM mensajes WHERE id = ?").run(id);
+}
+
+// --- ENVIOS UNICOS ---
+function crearEnvioUnico(userId, mensajeId, gruposTotal) {
+    const result = db.prepare("INSERT INTO envios_unicos (user_id, mensaje_id, grupos_total) VALUES (?, ?, ?)").run(userId, mensajeId, gruposTotal);
+    return result.lastInsertRowid;
+}
+
+function actualizarEnvioUnico(id, ok, error, estado) {
+    db.prepare("UPDATE envios_unicos SET grupos_ok = ?, grupos_error = ?, estado = ? WHERE id = ?").run(ok, error, estado, id);
+}
+
+function getEnviosUnicos(userId) {
+    return db.prepare("SELECT eu.*, m.nombre as mensaje_nombre FROM envios_unicos eu LEFT JOIN mensajes m ON eu.mensaje_id = m.id WHERE eu.user_id = ? ORDER BY eu.fecha DESC LIMIT 20").all(userId);
+}
+
+// --- ENVIOS PROGRAMADOS ---
+function crearEnvioProgramado(userId, mensajeId, hora, minuto, repetir = 0) {
+    const result = db.prepare("INSERT INTO envios_programados (user_id, mensaje_id, hora, minuto, repetir) VALUES (?, ?, ?, ?, ?)").run(userId, mensajeId, hora, minuto, repetir);
+    return result.lastInsertRowid;
+}
+
+function getEnviosProgramados(userId) {
+    return db.prepare("SELECT ep.*, m.nombre as mensaje_nombre FROM envios_programados ep LEFT JOIN mensajes m ON ep.mensaje_id = m.id WHERE ep.user_id = ? ORDER BY ep.hora, ep.minuto").all(userId);
+}
+
+function getEnviosProgramadosActivos() {
+    return db.prepare("SELECT ep.*, m.nombre as mensaje_nombre, m.texto, m.imagen_path FROM envios_programados ep LEFT JOIN mensajes m ON ep.mensaje_id = m.id WHERE ep.activo = 1").all();
+}
+
+function actualizarUltimoEnvio(id) {
+    db.prepare("UPDATE envios_programados SET ultimo_envio = datetime('now') WHERE id = ?").run(id);
+}
+
+function toggleEnvioProgramado(id, activo) {
+    db.prepare("UPDATE envios_programados SET activo = ? WHERE id = ?").run(activo ? 1 : 0, id);
+}
+
+function eliminarEnvioProgramado(id) {
+    db.prepare("DELETE FROM envios_programados WHERE id = ?").run(id);
+}
+
+// --- DUPLICAR MENSAJE ---
+function duplicarMensaje(id) {
+    const msg = getMensajeById(id);
+    if (!msg) return null;
+    return crearMensaje(msg.user_id, msg.nombre + "_copia", msg.texto, msg.imagen_path);
+}
+
+// --- STATS POR GRUPO (MEJORADAS) ---
+function getGrupoStatsResumen(userId) {
+    return db.prepare(`
+        SELECT grupo_link, enviados, fallidos, enviados as exitos,
+               CASE WHEN (enviados + fallidos) > 0 THEN ROUND(enviados * 100.0 / (enviados + fallidos), 1) ELSE 0 END as tasa_exito,
+               ultima_fecha
+        FROM grupo_stats WHERE user_id = ? ORDER BY enviados DESC LIMIT 50
+    `).all(userId);
+}
+
+// --- TASA DE ENTREGA ---
+function registrarMsgEnviado(userId, jid, msgId) {
+    try {
+        db.prepare("INSERT INTO tasa_entrega (user_id, jid, msg_id) VALUES (?, ?, ?)").run(userId, jid, msgId);
+    } catch (e) {}
+}
+function actualizarEstadoMsg(msgId, estado) {
+    const campo = estado === "delivered" ? "fecha_entregado" : estado === "read" ? "fecha_leido" : null;
+    if (!campo) return;
+    db.prepare(`UPDATE tasa_entrega SET estado = ?, ${campo} = datetime('now') WHERE msg_id = ?`).run(estado, msgId);
+}
+function getTasaEntrega(userId) {
+    const total = db.prepare("SELECT COUNT(*) as c FROM tasa_entrega WHERE user_id = ?").get(userId)?.c || 0;
+    const entregados = db.prepare("SELECT COUNT(*) as c FROM tasa_entrega WHERE user_id = ? AND fecha_entregado IS NOT NULL").get(userId)?.c || 0;
+    const leidos = db.prepare("SELECT COUNT(*) as c FROM tasa_entrega WHERE user_id = ? AND fecha_leido IS NOT NULL").get(userId)?.c || 0;
+    return {
+        total,
+        entregados,
+        leidos,
+        tasa_entrega: total > 0 ? Math.round((entregados / total) * 100) : 0,
+        tasa_lectura: total > 0 ? Math.round((leidos / total) * 100) : 0,
+    };
+}
+
+// --- AUTO RESPUESTAS INTELIGENTES ---
+function getAutoRespuestas(userId) {
+    return db.prepare("SELECT * FROM auto_respuestas WHERE user_id = ? ORDER BY id").all(userId);
+}
+function agregarAutoRespuesta(userId, palabraClave, respuesta) {
+    try {
+        db.prepare("INSERT INTO auto_respuestas (user_id, palabra_clave, respuesta) VALUES (?, ?, ?)").run(userId, palabraClave.toLowerCase(), respuesta);
+        return true;
+    } catch (e) { return false; }
+}
+function eliminarAutoRespuesta(userId, id) {
+    return db.prepare("DELETE FROM auto_respuestas WHERE user_id = ? AND id = ?").run(userId, id).changes > 0;
+}
+function buscarAutoRespuesta(userId, texto) {
+    const respuestas = db.prepare("SELECT * FROM auto_respuestas WHERE user_id = ? AND activo = 1").all(userId);
+    const textoLower = texto.toLowerCase();
+    for (const r of respuestas) {
+        if (textoLower.includes(r.palabra_clave.toLowerCase())) {
+            db.prepare("UPDATE auto_respuestas SET veces_usado = veces_usado + 1 WHERE id = ?").run(r.id);
+            return r;
+        }
+    }
+    return null;
+}
+function limpiarAutoRespuestas(userId) {
+    return db.prepare("DELETE FROM auto_respuestas WHERE user_id = ?").run(userId).changes;
+}
+
+// --- ENVIO CONFIG (delay, lotes) ---
+function getEnvioConfig(userId) {
+    return db.prepare("SELECT * FROM envio_config WHERE user_id = ?").get(userId) || { delay_seg: 10, lote_tamano: 0, lote_pausa_seg: 300 };
+}
+function setEnvioConfig(userId, delay_seg, lote_tamano, lote_pausa_seg) {
+    db.prepare(`INSERT INTO envio_config (user_id, delay_seg, lote_tamano, lote_pausa_seg)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET delay_seg = ?, lote_tamano = ?, lote_pausa_seg = ?
+    `).run(userId, delay_seg, lote_tamano, lote_pausa_seg, delay_seg, lote_tamano, lote_pausa_seg);
+}
+
+// --- LISTA NEGRA DE NUMEROS ---
+function getListaNegra(userId) {
+    return db.prepare("SELECT * FROM lista_negra_numeros WHERE user_id = ? ORDER BY fecha DESC").all(userId);
+}
+function agregarListaNegra(userId, numero, razon) {
+    try {
+        db.prepare("INSERT INTO lista_negra_numeros (user_id, numero, razon) VALUES (?, ?, ?)").run(userId, numero, razon || "");
+        return true;
+    } catch (e) { return false; }
+}
+function eliminarListaNegra(userId, numero) {
+    return db.prepare("DELETE FROM lista_negra_numeros WHERE user_id = ? AND numero = ?").run(userId, numero).changes > 0;
+}
+function estaEnListaNegra(userId, numero) {
+    const clean = numero.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+    return !!db.prepare("SELECT 1 FROM lista_negra_numeros WHERE user_id = ? AND numero = ?").get(userId, clean);
+}
+function limpiarListaNegra(userId) {
+    return db.prepare("DELETE FROM lista_negra_numeros WHERE user_id = ?").run(userId).changes;
+}
+
+// --- HORARIOS DE ENVIO ---
+function getHorarioEnvio(userId) {
+    return db.prepare("SELECT * FROM horarios_envio WHERE user_id = ?").get(userId) || { hora_inicio: 0, hora_fin: 24 };
+}
+function setHorarioEnvio(userId, hora_inicio, hora_fin) {
+    db.prepare(`INSERT INTO horarios_envio (user_id, hora_inicio, hora_fin)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET hora_inicio = ?, hora_fin = ?
+    `).run(userId, hora_inicio, hora_fin, hora_inicio, hora_fin);
+}
+
+// --- PANEL USERS ---
+function getPanelUser(telegramId) {
+    return db.prepare("SELECT * FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+}
+function registrarPanelUser(telegramId, password) {
+    const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+    if (existing) {
+        db.prepare("UPDATE panel_users SET password = ? WHERE telegram_id = ?").run(password, String(telegramId));
+    } else {
+        db.prepare("INSERT INTO panel_users (telegram_id, password) VALUES (?, ?)").run(String(telegramId), password);
+    }
+}
+function registrarPanelUserCompleto(telegramId, password, username) {
+    const expiraDemo = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    db.prepare(`INSERT OR REPLACE INTO panel_users (telegram_id, password, username, es_admin, plan, fecha_expira)
+        VALUES (?, ?, ?, 0, 'demo', ?)`).run(String(telegramId), password, username || '', expiraDemo);
+}
+function setAdminPanel(telegramId, esAdmin) {
+    db.prepare("UPDATE panel_users SET es_admin = ? WHERE telegram_id = ?").run(esAdmin ? 1 : 0, String(telegramId));
+}
+function activarMembresiPanel(telegramId, plan, dias) {
+    if (plan === 'permanente') {
+        db.prepare("UPDATE panel_users SET plan = ?, fecha_expira = NULL WHERE telegram_id = ?").run(plan, String(telegramId));
+    } else {
+        const expira = new Date(Date.now() + dias * 24 * 60 * 60 * 1000).toISOString();
+        db.prepare("UPDATE panel_users SET plan = ?, fecha_expira = ? WHERE telegram_id = ?").run(plan, expira, String(telegramId));
+    }
+}
+function checkMembresiPanel(telegramId) {
+    const user = getPanelUser(telegramId);
+    if (!user) return { activo: false, plan: null, expira: null };
+    if (user.es_admin) return { activo: true, plan: 'admin', expira: null, es_admin: true };
+    if (user.plan === 'permanente') return { activo: true, plan: 'permanente', expira: null, es_admin: false };
+    if (!user.fecha_expira) return { activo: false, plan: user.plan || 'sin_plan', expira: null };
+    const expira = new Date(user.fecha_expira);
+    const activo = Date.now() < expira.getTime();
+    return { activo, plan: user.plan, expira: user.fecha_expira, es_admin: false };
+}
+function getAllPanelUsers() {
+    const panelUsers = db.prepare("SELECT telegram_id, username, es_admin, plan, fecha_expira, fecha_registro, tipo_membresia FROM panel_users").all();
+    let botDb;
+    try {
+        botDb = openBotDb();
+        if (!botDb) return panelUsers;
+        const botUsers = botDb.prepare("SELECT telegram_id, username, plan, fecha_expira, activo, fecha_registro FROM usuarios").all();
+        const panelIds = new Set(panelUsers.map(u => String(u.telegram_id)));
+        botUsers.forEach(bu => {
+            if (!panelIds.has(String(bu.telegram_id))) {
+                panelUsers.push({
+                    telegram_id: String(bu.telegram_id),
+                    username: bu.username || '',
+                    es_admin: 0,
+                    plan: bu.plan || 'sin_plan',
+                    fecha_expira: bu.fecha_expira || null,
+                    fecha_registro: bu.fecha_registro || null,
+                    tipo_membresia: 'tg',
+                    origen: 'bot'
+                });
+            }
+        });
+    } catch (e) {}
+    finally { if (botDb) botDb.close(); }
+    return panelUsers;
+}
+function setTipoMembresia(telegramId, tipo) {
+    db.prepare("UPDATE panel_users SET tipo_membresia = ? WHERE telegram_id = ?").run(tipo, String(telegramId));
+}
+
+// --- RECOVERY CODES ---
+function crearRecoveryCode(telegramId) {
+    const crypto = require("crypto");
+    const code = crypto.randomBytes(4).toString("hex").toUpperCase();
+    db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(String(telegramId));
+    db.prepare("INSERT INTO recovery_codes (telegram_id, code) VALUES (?, ?)").run(String(telegramId), code);
+    return code;
+}
+function validarRecoveryCode(code) {
+    const row = db.prepare("SELECT * FROM recovery_codes WHERE code = ? AND usado = 0 AND datetime('now') < expira").get(String(code).toUpperCase());
+    return row || null;
+}
+function marcarRecoveryCodeUsado(code) {
+    db.prepare("UPDATE recovery_codes SET usado = 1 WHERE code = ?").run(String(code).toUpperCase());
+}
+function resetPasswordConCodigo(code, newPasswordHash) {
+    const row = validarRecoveryCode(code);
+    if (!row) return false;
+    marcarRecoveryCodeUsado(code);
+    registrarPanelUser(row.telegram_id, newPasswordHash);
+    return true;
+}
+
+// --- CHATS PERSONALES (persistencia) ---
+function guardarChatsPersonales(userId, cuenta, chats) {
+    const ins = db.prepare("INSERT OR REPLACE INTO chats_personales (user_id, cuenta, jid, nombre) VALUES (?, ?, ?, ?)");
+    const tr = db.transaction(() => {
+        for (const c of chats) {
+            ins.run(String(userId), String(cuenta), c.jid, c.nombre || null);
+        }
+    });
+    tr();
+}
+function getChatsPersonales(userId, cuenta) {
+    if (cuenta) {
+        return db.prepare("SELECT jid, nombre FROM chats_personales WHERE user_id = ? AND cuenta = ?").all(String(userId), String(cuenta));
+    }
+    return db.prepare("SELECT jid, nombre FROM chats_personales WHERE user_id = ?").all(String(userId));
+}
+function eliminarChatPersonal(userId, cuenta, jid) {
+    db.prepare("DELETE FROM chats_personales WHERE user_id = ? AND cuenta = ? AND jid = ?").run(String(userId), String(cuenta), String(jid));
+}
+function agregarChatPersonalManual(userId, cuenta, numero) {
+    const jid = numero.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+    db.prepare("INSERT OR REPLACE INTO chats_personales (user_id, cuenta, jid, nombre) VALUES (?, ?, ?, ?)").run(String(userId), String(cuenta), jid, numero);
+    return jid;
+}
+
+function checkMembresiaTg(telegramId) {
+    try {
+        const Database = require("better-sqlite3");
+        const tgDb = new Database("./titan.db", { readonly: true });
+        const user = tgDb.prepare("SELECT activo, fecha_expira FROM usuarios WHERE telegram_id = ?").get(String(telegramId));
+        tgDb.close();
+        if (!user || !user.activo) return false;
+        if (user.fecha_expira) {
+            const expira = new Date(user.fecha_expira);
+            if (Date.now() > expira.getTime()) return false;
+        }
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -859,4 +1367,488 @@ module.exports = {
     getSinonimos, agregarSinonimo, eliminarSinonimo, limpiarSinonimos,
     getReporteDiario,
     exportarGrupos, importarGrupos, exportarCampanas,
+    // Mensajes y envios unicos
+    getMensajes, getMensajeById, crearMensaje, editarMensaje, editarNombreMensaje, eliminarMensaje,
+    crearEnvioUnico, actualizarEnvioUnico, getEnviosUnicos,
+    // Envios programados
+    crearEnvioProgramado, getEnviosProgramados, getEnviosProgramadosActivos,
+    actualizarUltimoEnvio, toggleEnvioProgramado, eliminarEnvioProgramado,
+    // Duplicar y stats
+    duplicarMensaje, getGrupoStatsResumen,
+    // Envio config (delay, lotes)
+    getEnvioConfig, setEnvioConfig,
+    // Lista negra numeros
+    getListaNegra, agregarListaNegra, eliminarListaNegra, estaEnListaNegra, limpiarListaNegra,
+    // Horarios envio
+    getHorarioEnvio, setHorarioEnvio,
+    // Auto respuestas inteligentes
+    getAutoRespuestas, agregarAutoRespuesta, eliminarAutoRespuesta, buscarAutoRespuesta, limpiarAutoRespuestas,
+    // Tasa de entrega
+    registrarMsgEnviado, actualizarEstadoMsg, getTasaEntrega,
+    // Membresia TG
+    checkMembresiaTg,
+    // Panel users
+    getPanelUser, registrarPanelUser, registrarPanelUserCompleto,
+    setAdminPanel, activarMembresiPanel, checkMembresiPanel, getAllPanelUsers, setTipoMembresia,
+    // Recovery codes
+    crearRecoveryCode, validarRecoveryCode, marcarRecoveryCodeUsado, resetPasswordConCodigo,
+    // Chats personales (persistencia)
+    guardarChatsPersonales, getChatsPersonales, eliminarChatPersonal, agregarChatPersonalManual,
+    // Activity logs
+    registrarActividad, getActividadUsuario, getActividadTodos,
+    // Message templates
+    getPlantillas, crearPlantilla, eliminarPlantilla,
+    // Send history with filters
+    getHistorialEnviosPanel, registrarHistorialEnvio,
+    // Membership sending limits
+    getLimitesMembresia,
+    // Dashboard chart data
+    getEnviosPorDia,
+    // Sesiones Telegram
+    getSesionesTg, agregarSesionTg, eliminarSesionTg, getAllSesionesTg,
+    // TG Bot data (read from titan.db)
+    getTgGrupos, getTgMensajes, getTgCampanas, getTgHistorialEnvios, getTgProgramados, getTgAutoResponder, getTgStats,
+    // TG Bot data (write to titan.db)
+    addTgGrupo, delTgGrupo, delAllTgGrupos,
+    crearTgMensaje, editarTgMensaje, eliminarTgMensaje, duplicarTgMensaje,
+    crearTgCampana, eliminarTgCampana,
+    crearTgProgramado, toggleTgProgramado, eliminarTgProgramado,
+    setTgAutoResponder, addTgKeyword, delTgKeyword, delAllTgKeywords,
+    getTgListaNegra, addTgListaNegra, delTgListaNegra, limpiarTgListaNegra,
+    getTgConfigEnvio, setTgConfigEnvio,
 };
+
+// --- Sesiones Telegram ---
+function getSesionesTgFromBot(userId) {
+    let botDb;
+    try {
+        const botDbPath = path.resolve(__dirname, "titan.db");
+        const fs = require("fs");
+        if (!fs.existsSync(botDbPath)) return [];
+        botDb = new Database(botDbPath, { readonly: true });
+        const rows = botDb.prepare("SELECT * FROM sesiones WHERE user_id = ? AND activa = 1 ORDER BY id DESC").all(Number(userId));
+        return rows;
+    } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
+}
+function getSesionesTg(userId) {
+    const panelSesiones = db.prepare("SELECT * FROM sesiones_tg WHERE user_id = ? AND activa = 1 ORDER BY id DESC").all(String(userId));
+    const botSesiones = getSesionesTgFromBot(userId);
+    const panelNombres = new Set(panelSesiones.map(s => s.nombre));
+    botSesiones.forEach(s => {
+        if (!panelNombres.has(s.nombre)) {
+            panelSesiones.push({ id: s.id, user_id: String(s.user_id), nombre: s.nombre, telefono: s.telefono || '', activa: 1, fecha: s.fecha || '—', origen: 'bot' });
+        }
+    });
+    return panelSesiones;
+}
+function agregarSesionTg(userId, nombre, telefono) {
+    const existing = db.prepare("SELECT id FROM sesiones_tg WHERE user_id = ? AND nombre = ? AND activa = 1").get(String(userId), nombre);
+    if (existing) {
+        db.prepare("UPDATE sesiones_tg SET telefono = ? WHERE id = ?").run(telefono || '', existing.id);
+    } else {
+        db.prepare("INSERT INTO sesiones_tg (user_id, nombre, telefono) VALUES (?, ?, ?)").run(String(userId), nombre, telefono || '');
+    }
+}
+function eliminarSesionTg(userId, nombre) {
+    db.prepare("UPDATE sesiones_tg SET activa = 0 WHERE user_id = ? AND nombre = ?").run(String(userId), nombre);
+}
+function getAllSesionesTg() {
+    return db.prepare("SELECT * FROM sesiones_tg WHERE activa = 1 ORDER BY id DESC").all();
+}
+
+// --- Activity Logs ---
+function registrarActividad(userId, accion, detalle) {
+    db.prepare("INSERT INTO actividad_log (user_id, accion, detalle, fecha) VALUES (?, ?, ?, datetime('now'))").run(String(userId), accion, detalle || '');
+}
+function getActividadUsuario(userId, limite) {
+    return db.prepare("SELECT * FROM actividad_log WHERE user_id = ? ORDER BY id DESC LIMIT ?").all(String(userId), limite || 50);
+}
+function getActividadTodos(limite) {
+    return db.prepare("SELECT * FROM actividad_log ORDER BY id DESC LIMIT ?").all(limite || 100);
+}
+
+// --- Message Templates ---
+function getPlantillas(userId) {
+    return db.prepare("SELECT * FROM plantillas_msg WHERE user_id = ? ORDER BY id DESC").all(String(userId));
+}
+function crearPlantilla(userId, nombre, mensaje) {
+    db.prepare("INSERT INTO plantillas_msg (user_id, nombre, mensaje) VALUES (?, ?, ?)").run(String(userId), nombre, mensaje);
+}
+function eliminarPlantilla(userId, id) {
+    db.prepare("DELETE FROM plantillas_msg WHERE id = ? AND user_id = ?").run(id, String(userId));
+}
+
+// --- Send History ---
+function getHistorialEnviosPanel(userId, filtros) {
+    let sql = "SELECT * FROM historial_envios_panel WHERE user_id = ?";
+    const params = [String(userId)];
+    if (filtros && filtros.tipo) { sql += " AND tipo = ?"; params.push(filtros.tipo); }
+    if (filtros && filtros.resultado) { sql += " AND resultado = ?"; params.push(filtros.resultado); }
+    if (filtros && filtros.desde) { sql += " AND fecha >= ?"; params.push(filtros.desde); }
+    if (filtros && filtros.hasta) { sql += " AND fecha <= ?"; params.push(filtros.hasta); }
+    sql += " ORDER BY id DESC LIMIT ?";
+    params.push(filtros && filtros.limite ? filtros.limite : 100);
+    return db.prepare(sql).all(...params);
+}
+function registrarHistorialEnvio(userId, tipo, destino, msgPreview, resultado, total, exitosos, fallidos) {
+    db.prepare("INSERT INTO historial_envios_panel (user_id, tipo, destino, mensaje_preview, resultado, total, exitosos, fallidos) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(String(userId), tipo, destino, (msgPreview || '').slice(0, 100), resultado, total || 0, exitosos || 0, fallidos || 0);
+}
+
+// --- Membership Limits ---
+function getLimitesMembresia(userId) {
+    const user = getPanelUser(userId);
+    if (!user) return { max_envios_dia: 10, max_grupos: 5 };
+    if (user.es_admin) return { max_envios_dia: 999999, max_grupos: 999999 };
+    if (user.plan === 'permanente') return { max_envios_dia: 999999, max_grupos: 999999 };
+    if (user.fecha_expira) {
+        const expira = new Date(user.fecha_expira);
+        if (Date.now() >= expira.getTime()) return { max_envios_dia: 10, max_grupos: 5 };
+    } else {
+        return { max_envios_dia: 10, max_grupos: 5 };
+    }
+    if (user.plan === 'mensual') return { max_envios_dia: 500, max_grupos: 50 };
+    if (user.plan === 'semanal') return { max_envios_dia: 200, max_grupos: 25 };
+    return { max_envios_dia: 10, max_grupos: 5 };
+}
+
+// --- Dashboard chart data ---
+function getEnviosPorDia(userId, dias) {
+    return db.prepare(`SELECT date(fecha) as dia, COUNT(*) as total, SUM(exitosos) as ok, SUM(fallidos) as err FROM historial_envios_panel WHERE user_id = ? AND fecha >= date('now', '-' || ? || ' days') GROUP BY date(fecha) ORDER BY dia ASC`).all(String(userId), dias || 7);
+}
+
+// --- TG Bot data (read from titan.db) ---
+function openBotDb() {
+    const botDbPath = path.resolve(__dirname, "titan.db");
+    const fs = require("fs");
+    if (!fs.existsSync(botDbPath)) return null;
+    return new Database(botDbPath, { readonly: true });
+}
+
+function getTgGrupos(userId) {
+    let botDb;
+    try {
+        botDb = openBotDb(); if (!botDb) return [];
+        return botDb.prepare("SELECT * FROM grupos WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
+    } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function getTgMensajes(userId) {
+    let botDb;
+    try {
+        botDb = openBotDb(); if (!botDb) return [];
+        return botDb.prepare("SELECT * FROM tg_mensajes WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
+    } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function getTgCampanas(userId) {
+    let botDb;
+    try {
+        botDb = openBotDb(); if (!botDb) return [];
+        const camps = botDb.prepare("SELECT * FROM campanas WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
+        camps.forEach(c => {
+            try {
+                c.sesiones = botDb.prepare("SELECT sesion_nombre FROM campana_sesiones WHERE campana_id = ?").all(c.id).map(s => s.sesion_nombre);
+                c.grupos = botDb.prepare("SELECT grupo_link FROM campana_grupos WHERE campana_id = ?").all(c.id).map(g => g.grupo_link);
+                const cfg = botDb.prepare("SELECT * FROM campana_config WHERE campana_id = ?").get(c.id);
+                c.intervalo_min = cfg ? cfg.intervalo_min : 30;
+                c.intervalo_max = cfg ? cfg.intervalo_max : 60;
+            } catch (e) {}
+        });
+        return camps;
+    } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function getTgHistorialEnvios(userId, limite) {
+    let botDb;
+    try {
+        botDb = openBotDb(); if (!botDb) return [];
+        return botDb.prepare("SELECT * FROM historial_envios WHERE user_id = ? ORDER BY id DESC LIMIT ?").all(Number(userId), limite || 50);
+    } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function getTgProgramados(userId) {
+    let botDb;
+    try {
+        botDb = openBotDb(); if (!botDb) return [];
+        return botDb.prepare("SELECT p.*, m.nombre as msg_nombre, m.texto as msg_texto FROM tg_envios_programados p LEFT JOIN tg_mensajes m ON p.mensaje_id = m.id WHERE p.user_id = ? ORDER BY p.id DESC").all(Number(userId));
+    } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function getTgAutoResponder(userId) {
+    let botDb;
+    try {
+        botDb = openBotDb(); if (!botDb) return { config: null, keywords: [] };
+        const config = botDb.prepare("SELECT * FROM responder_config WHERE user_id = ?").get(Number(userId));
+        const keywords = botDb.prepare("SELECT * FROM responder_keywords WHERE user_id = ?").all(Number(userId));
+        return { config: config || null, keywords };
+    } catch (e) { return { config: null, keywords: [] }; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function getTgStats(userId) {
+    let botDb;
+    try {
+        botDb = openBotDb(); if (!botDb) return {};
+        const totalEnvios = botDb.prepare("SELECT COUNT(*) as total FROM historial_envios WHERE user_id = ?").get(Number(userId));
+        const exitosos = botDb.prepare("SELECT COUNT(*) as total FROM historial_envios WHERE user_id = ? AND resultado = 'enviado'").get(Number(userId));
+        const fallidos = botDb.prepare("SELECT COUNT(*) as total FROM historial_envios WHERE user_id = ? AND resultado != 'enviado'").get(Number(userId));
+        const grupos = botDb.prepare("SELECT COUNT(*) as total FROM grupos WHERE user_id = ?").get(Number(userId));
+        const cuentas = botDb.prepare("SELECT COUNT(*) as total FROM sesiones WHERE user_id = ? AND activa = 1").get(Number(userId));
+        const campanas = botDb.prepare("SELECT COUNT(*) as total FROM campanas WHERE user_id = ?").get(Number(userId));
+        const campanasActivas = botDb.prepare("SELECT COUNT(*) as total FROM campanas WHERE user_id = ? AND activa = 1").get(Number(userId));
+        return {
+            total_envios: totalEnvios ? totalEnvios.total : 0,
+            exitosos: exitosos ? exitosos.total : 0,
+            fallidos: fallidos ? fallidos.total : 0,
+            grupos: grupos ? grupos.total : 0,
+            cuentas: cuentas ? cuentas.total : 0,
+            campanas: campanas ? campanas.total : 0,
+            campanas_activas: campanasActivas ? campanasActivas.total : 0,
+        };
+    } catch (e) { return {}; }
+    finally { if (botDb) botDb.close(); }
+}
+
+// --- TG Bot data (write to titan.db) ---
+function openBotDbWrite() {
+    const botDbPath = path.resolve(__dirname, "titan.db");
+    const fs = require("fs");
+    if (!fs.existsSync(botDbPath)) return null;
+    return new Database(botDbPath);
+}
+
+function addTgGrupo(userId, link) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        const existing = botDb.prepare("SELECT id FROM grupos WHERE user_id = ? AND link = ?").get(Number(userId), link);
+        if (existing) return false;
+        botDb.prepare("INSERT INTO grupos (user_id, link) VALUES (?, ?)").run(Number(userId), link);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function delTgGrupo(userId, link) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM grupos WHERE user_id = ? AND link = ?").run(Number(userId), link);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function delAllTgGrupos(userId) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM grupos WHERE user_id = ?").run(Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function crearTgMensaje(userId, nombre, texto, foto) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return null;
+        const r = botDb.prepare("INSERT INTO tg_mensajes (user_id, nombre, texto, foto_path) VALUES (?, ?, ?, ?)").run(Number(userId), nombre, texto, foto || null);
+        return r.lastInsertRowid;
+    } catch (e) { return null; }
+    finally { if (botDb) botDb.close(); }
+}
+function editarTgMensaje(userId, id, nombre, texto) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("UPDATE tg_mensajes SET nombre = ?, texto = ? WHERE id = ? AND user_id = ?").run(nombre, texto, id, Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function eliminarTgMensaje(userId, id) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM tg_mensajes WHERE id = ? AND user_id = ?").run(id, Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function duplicarTgMensaje(userId, id) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        const orig = botDb.prepare("SELECT * FROM tg_mensajes WHERE id = ? AND user_id = ?").get(id, Number(userId));
+        if (!orig) return false;
+        botDb.prepare("INSERT INTO tg_mensajes (user_id, nombre, texto, foto_path) VALUES (?, ?, ?, ?)").run(Number(userId), (orig.nombre || '') + ' (copia)', orig.texto, orig.foto_path);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function crearTgCampana(userId, nombre, mensajeId) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return null;
+        const r = botDb.prepare("INSERT INTO campanas (user_id, nombre, mensaje, activa) VALUES (?, ?, ?, 0)").run(Number(userId), nombre, mensajeId);
+        return r.lastInsertRowid;
+    } catch (e) { return null; }
+    finally { if (botDb) botDb.close(); }
+}
+function eliminarTgCampana(userId, id) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        const owns = botDb.prepare("SELECT id FROM campanas WHERE id = ? AND user_id = ?").get(id, Number(userId));
+        if (!owns) return false;
+        botDb.prepare("DELETE FROM campana_sesiones WHERE campana_id = ?").run(id);
+        botDb.prepare("DELETE FROM campana_grupos WHERE campana_id = ?").run(id);
+        botDb.prepare("DELETE FROM campana_config WHERE campana_id = ?").run(id);
+        botDb.prepare("DELETE FROM campanas WHERE id = ?").run(id);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function crearTgProgramado(userId, mensajeId, hora, minuto, repetir) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return null;
+        const rep = (repetir === 'diario' || repetir === true || repetir === 1) ? 1 : 0;
+        const r = botDb.prepare("INSERT INTO tg_envios_programados (user_id, mensaje_id, hora, minuto, repetir, activo) VALUES (?, ?, ?, ?, ?, 1)").run(Number(userId), mensajeId, hora, minuto, rep);
+        return r.lastInsertRowid;
+    } catch (e) { return null; }
+    finally { if (botDb) botDb.close(); }
+}
+function toggleTgProgramado(userId, id) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        const row = botDb.prepare("SELECT activo FROM tg_envios_programados WHERE id = ? AND user_id = ?").get(id, Number(userId));
+        if (!row) return false;
+        botDb.prepare("UPDATE tg_envios_programados SET activo = ? WHERE id = ?").run(row.activo ? 0 : 1, id);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function eliminarTgProgramado(userId, id) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM tg_envios_programados WHERE id = ? AND user_id = ?").run(id, Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function setTgAutoResponder(userId, activo) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        const existing = botDb.prepare("SELECT id FROM responder_config WHERE user_id = ?").get(Number(userId));
+        if (existing) botDb.prepare("UPDATE responder_config SET activo = ? WHERE user_id = ?").run(activo ? 1 : 0, Number(userId));
+        else botDb.prepare("INSERT INTO responder_config (user_id, activo) VALUES (?, ?)").run(Number(userId), activo ? 1 : 0);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function _ensureRespuestaCol(db) {
+    try { db.prepare("ALTER TABLE responder_keywords ADD COLUMN respuesta TEXT DEFAULT ''").run(); } catch (e) { /* column already exists */ }
+}
+function addTgKeyword(userId, keyword, respuesta) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        _ensureRespuestaCol(botDb);
+        botDb.prepare("INSERT INTO responder_keywords (user_id, palabra, respuesta) VALUES (?, ?, ?)").run(Number(userId), keyword, respuesta || '');
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function delTgKeyword(userId, id) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM responder_keywords WHERE id = ? AND user_id = ?").run(id, Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function delAllTgKeywords(userId) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM responder_keywords WHERE user_id = ?").run(Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function _ensureTgListaNegra(db) {
+    db.prepare("CREATE TABLE IF NOT EXISTS tg_lista_negra (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, grupo TEXT, UNIQUE(user_id, grupo))").run();
+}
+function getTgListaNegra(userId) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return [];
+        _ensureTgListaNegra(botDb);
+        return botDb.prepare("SELECT * FROM tg_lista_negra WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
+    } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
+}
+function addTgListaNegra(userId, grupo) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        _ensureTgListaNegra(botDb);
+        botDb.prepare("INSERT OR IGNORE INTO tg_lista_negra (user_id, grupo) VALUES (?, ?)").run(Number(userId), grupo);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function delTgListaNegra(userId, grupo) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        _ensureTgListaNegra(botDb);
+        botDb.prepare("DELETE FROM tg_lista_negra WHERE user_id = ? AND grupo = ?").run(Number(userId), grupo);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function limpiarTgListaNegra(userId) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        _ensureTgListaNegra(botDb);
+        botDb.prepare("DELETE FROM tg_lista_negra WHERE user_id = ?").run(Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function getTgConfigEnvio(userId) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return { delay_seg: 10, lote_tamano: 0, lote_pausa_seg: 30 };
+        botDb.prepare("CREATE TABLE IF NOT EXISTS tg_config_envio (user_id INTEGER PRIMARY KEY, delay_seg INTEGER DEFAULT 10, lote_tamano INTEGER DEFAULT 0, lote_pausa_seg INTEGER DEFAULT 30)").run();
+        return botDb.prepare("SELECT * FROM tg_config_envio WHERE user_id = ?").get(Number(userId)) || { delay_seg: 10, lote_tamano: 0, lote_pausa_seg: 30 };
+    } catch (e) { return { delay_seg: 10, lote_tamano: 0, lote_pausa_seg: 30 }; }
+    finally { if (botDb) botDb.close(); }
+}
+function setTgConfigEnvio(userId, delay, lote, pausa) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("CREATE TABLE IF NOT EXISTS tg_config_envio (user_id INTEGER PRIMARY KEY, delay_seg INTEGER DEFAULT 10, lote_tamano INTEGER DEFAULT 0, lote_pausa_seg INTEGER DEFAULT 30)").run();
+        botDb.prepare("INSERT OR REPLACE INTO tg_config_envio (user_id, delay_seg, lote_tamano, lote_pausa_seg) VALUES (?, ?, ?, ?)").run(Number(userId), delay ?? 10, lote ?? 0, pausa ?? 30);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}

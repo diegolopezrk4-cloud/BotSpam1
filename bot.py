@@ -1,6 +1,9 @@
 import asyncio
 import os
 import re
+import io
+import json
+import base64
 import logging
 from datetime import datetime, timezone, timedelta
 
@@ -14,7 +17,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (InlineKeyboardMarkup, InlineKeyboardButton,
-                           ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove)
+                           ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+                           BufferedInputFile)
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
 
@@ -23,7 +27,8 @@ import wsp_bridge
 from motor import (iniciar_campana, detener_campana, tareas_activas, get_session_path,
                    iniciar_responder, detener_responder, responder_activos,
                    detectar_grupos_telegram, detectar_carpetas_telegram,
-                   detectar_grupos_carpeta, verificar_grupos_estado)
+                   detectar_grupos_carpeta, verificar_grupos_estado,
+                   listar_chats_telegram, auto_unirse_grupo)
 
 # ─────────────────────────────────────────
 #   CONFIGURACIÓN CENTRAL
@@ -52,6 +57,7 @@ dp  = Dispatcher(storage=MemoryStorage())
 #   ESTADOS FSM
 # ─────────────────────────────────────────
 class CuentaState(StatesGroup):
+    esperando_telefono_nombre = State()
     esperando_codigo   = State()
     esperando_2fa      = State()
 
@@ -91,10 +97,55 @@ class GrupoDetectState(StatesGroup):
     esperando_seleccion_grupos = State()
     esperando_seleccion_grupos_carpeta = State()
 
+class MensajeWspState(StatesGroup):
+    esperando_nombre = State()
+    esperando_texto = State()
+    editando_texto = State()
+
+class ProgramarState(StatesGroup):
+    esperando_hora = State()
+
+class AutoJoinState(StatesGroup):
+    esperando_links_wsp = State()
+    esperando_links_tg = State()
+
+class SeleccionGruposState(StatesGroup):
+    esperando_numeros_wsp = State()
+    esperando_numeros_tg = State()
+    esperando_numeros_detectar = State()
+
+class RecuperPassState(StatesGroup):
+    esperando_nueva_password = State()
+
+class MensajeTgState(StatesGroup):
+    esperando_nombre = State()
+    esperando_texto = State()
+    editando_texto = State()
+
+class ProgramarTgState(StatesGroup):
+    esperando_hora = State()
+
+class TgPersonalState(StatesGroup):
+    esperando_mensaje_personal = State()
+
+class TgAutoJoinState(StatesGroup):
+    esperando_link_unirse = State()
+
+class WspEnvioInteractivoState(StatesGroup):
+    esperando_mensaje_promo = State()
+    esperando_palabra_aceptar = State()
+    esperando_palabra_rechazar = State()
+
 # Sesiones Telethon temporales
 login_sessions = {}
 sesiones_seleccionadas = {}
 grupos_seleccionados   = {}
+
+# Tareas de polling QR de WhatsApp activas: {user_id: asyncio.Task}
+wsp_qr_tasks = {}
+
+# Envíos interactivos activos (esperan respuesta): {user_id: config_dict}
+envios_interactivos = {}
 
 # ─────────────────────────────────────────
 #   HELPERS
@@ -225,6 +276,15 @@ async def cmd_start(msg: types.Message, state: FSMContext):
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await msg.answer(texto, reply_markup=kb, parse_mode="Markdown")
 
+@dp.message(Command("miid"))
+async def cmd_miid(msg: types.Message):
+    await msg.answer(
+        f"🆔 Tu ID de Telegram es:\n\n"
+        f"`{msg.from_user.id}`\n\n"
+        f"Copia este número para registrarte en el panel web.",
+        parse_mode="Markdown"
+    )
+
 @dp.callback_query(F.data == "main_menu")
 async def cb_main_menu(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -251,6 +311,7 @@ async def build_cuentas_view(user_id):
         "/cuentas +51999999999 Nombre"
     )
     botones = []
+    botones.append([InlineKeyboardButton(text="➕ Agregar cuenta", callback_data="acc_add")])
     if sesiones:
         botones.append([InlineKeyboardButton(text="🗑 Eliminar cuenta", callback_data="acc_del")])
     botones.append(kb_volver())
@@ -264,6 +325,53 @@ async def cb_sec_cuentas(call: types.CallbackQuery):
     texto, kb = await build_cuentas_view(call.from_user.id)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
+
+@dp.callback_query(F.data == "acc_add")
+async def cb_acc_add(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    sesiones = await db.get_sesiones(call.from_user.id)
+    if len(sesiones) >= MAX_CUENTAS_POR_USUARIO:
+        await call.answer(f"Limite de {MAX_CUENTAS_POR_USUARIO} cuentas alcanzado.", show_alert=True)
+        return
+    await state.set_state(CuentaState.esperando_telefono_nombre)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="sec_cuentas")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        "➕ AGREGAR CUENTA TELEGRAM\n\n"
+        "Envía tu número y nombre en este formato:\n\n"
+        "+51987654321 MiCuenta\n\n"
+        "📱 El número debe incluir código de país (+51 para Perú)\n"
+        "📝 El nombre es para identificar la cuenta",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@dp.message(CuentaState.esperando_telefono_nombre)
+async def recibir_telefono_nombre(msg: types.Message, state: FSMContext):
+    partes = msg.text.strip().split()
+    if len(partes) < 2 or not partes[0].startswith("+"):
+        return await msg.answer(
+            "❌ Formato incorrecto.\n\n"
+            "Envía: +51987654321 NombreCuenta\n\n"
+            "Ejemplo: +51999999999 MiBot"
+        )
+    telefono = partes[0]
+    nombre = partes[1]
+    if not validar_telefono(telefono):
+        return await msg.answer("❌ Número inválido. Debe incluir código de país.\nEjemplo: +51987654321")
+    if not re.match(r'^[a-zA-Z0-9_áéíóúÁÉÍÓÚñÑ]{1,30}$', nombre):
+        return await msg.answer("❌ Nombre inválido. Solo letras, números y guión bajo (máx 30).")
+
+    sesiones = await db.get_sesiones(msg.from_user.id)
+    for s in sesiones:
+        if s['nombre'].lower() == nombre.lower():
+            return await msg.answer(f"⚠ Ya tienes una cuenta llamada '{nombre}'.")
+
+    await state.clear()
+    await procesar_login_cuenta(msg, state, telefono, nombre)
+
 
 @dp.callback_query(F.data == "acc_del")
 async def cb_acc_del(call: types.CallbackQuery):
@@ -482,7 +590,12 @@ async def build_grupos_view(user_id):
     )
     botones = [
         [InlineKeyboardButton(text="🔍 Detectar de Telegram", callback_data="grp_detectar_tg")],
-        [InlineKeyboardButton(text="➕ Agregar grupos", callback_data="grp_add")],
+        [InlineKeyboardButton(text="➕ Agregar grupos", callback_data="grp_add"),
+         InlineKeyboardButton(text="🔗 Auto-unirse", callback_data="grp_autojoin")],
+        [InlineKeyboardButton(text="✉ Mensajes TG", callback_data="tg_mensajes")],
+        [InlineKeyboardButton(text="📤 Enviar Único TG", callback_data="tg_enviar_unico"),
+         InlineKeyboardButton(text="⏰ Programados TG", callback_data="tg_programados")],
+        [InlineKeyboardButton(text="📈 Stats Grupos TG", callback_data="tg_grupo_stats")],
     ]
     if grupos:
         botones.append([
@@ -611,6 +724,567 @@ async def cb_grp_delall_ok(call: types.CallbackQuery):
     texto = f"✅ Todos los grupos eliminados.\n\n{texto}"
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
+
+
+# ╔══════════════════════════════════════╗
+# ║  AUTO-UNIRSE A GRUPOS (TG)          ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "grp_autojoin")
+async def cb_grp_autojoin(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.set_state(AutoJoinState.esperando_links_tg)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="sec_grupos")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        "🔗 AUTO-UNIRSE A GRUPOS TELEGRAM\n\n"
+        "Envía los links de los grupos (uno por línea):\n\n"
+        "Ejemplo:\nhttps://t.me/+abc123\nhttps://t.me/grupo1\n\n"
+        "El bot intentará unirse automáticamente a cada grupo.",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@dp.message(AutoJoinState.esperando_links_tg)
+async def msg_autojoin_tg(msg: types.Message, state: FSMContext):
+    await state.clear()
+    links = [l.strip() for l in msg.text.strip().split("\n") if l.strip()]
+    if not links:
+        await msg.answer("❌ No se recibieron links.")
+        return
+
+    sesiones = await db.get_sesiones(msg.from_user.id)
+    if not sesiones:
+        await msg.answer("❌ No tienes cuentas TG vinculadas. Vincula una primero con /cuenta.")
+        return
+
+    await msg.answer(f"🔗 Intentando unirse a {len(links)} grupo(s)...\nTe notificaré cuando termine.")
+    unidos = 0
+    fallidos = 0
+    reporte = ""
+    sesion = sesiones[0]
+    try:
+        from telethon import TelegramClient
+        from telethon.tl.functions.messages import ImportChatInviteRequest
+        from telethon.tl.functions.channels import JoinChannelRequest
+        import re
+
+        client = TelegramClient(f"sessions/{sesion['nombre']}", int(os.environ.get("API_ID", "0")), os.environ.get("API_HASH", ""))
+        await client.connect()
+        if not await client.is_user_authorized():
+            await msg.answer("❌ La sesión TG no está autorizada. Revíncula la cuenta.")
+            return
+
+        for link in links:
+            try:
+                if "/+" in link or "/joinchat/" in link:
+                    invite_hash = re.search(r'(?:/\+|/joinchat/)(.+)', link)
+                    if invite_hash:
+                        await client(ImportChatInviteRequest(invite_hash.group(1)))
+                else:
+                    entity = await client.get_entity(link)
+                    await client(JoinChannelRequest(entity))
+                unidos += 1
+                reporte += f"✅ {link}\n"
+                await db.agregar_grupo(msg.from_user.id, link)
+            except Exception as e:
+                fallidos += 1
+                error_msg = str(e)[:50]
+                reporte += f"❌ {link} — {error_msg}\n"
+            import asyncio
+            await asyncio.sleep(3 + __import__('random').random() * 5)
+
+        await client.disconnect()
+    except Exception as e:
+        await msg.answer(f"❌ Error general: {str(e)[:100]}")
+        return
+
+    texto = (
+        f"🔗 RESULTADO AUTO-UNIRSE\n\n"
+        f"✅ Unidos: {unidos}\n"
+        f"❌ Fallidos: {fallidos}\n\n"
+        f"{reporte}"
+    )
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    await msg.answer(texto)
+
+
+# ╔══════════════════════════════════════╗
+# ║  MENSAJES TG (CRUD)                 ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "tg_mensajes")
+async def cb_tg_mensajes(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    mensajes = await db.tg_get_mensajes(call.from_user.id)
+    texto = "✉ MENSAJES TELEGRAM\n\n"
+    if mensajes:
+        for i, m in enumerate(mensajes, 1):
+            preview = (m["texto"][:40] + "...") if len(m["texto"]) > 40 else m["texto"]
+            texto += f"{i}. 📝 {m['nombre']}\n   {preview}\n\n"
+    else:
+        texto += "(sin mensajes guardados)\n\n"
+    texto += "Crea un mensaje para enviarlo a todos tus grupos TG."
+    botones = [
+        [InlineKeyboardButton(text="➕ Crear mensaje", callback_data="tg_msg_crear")],
+    ]
+    if mensajes:
+        for m in mensajes[:10]:
+            botones.append([
+                InlineKeyboardButton(text=f"📝 {m['nombre']}", callback_data=f"tg_msg_ver_{m['id']}"),
+                InlineKeyboardButton(text="🗑", callback_data=f"tg_msg_del_{m['id']}"),
+            ])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a Grupos", callback_data="sec_grupos")])
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "tg_msg_crear")
+async def cb_tg_msg_crear(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.set_state(MensajeTgState.esperando_nombre)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="tg_mensajes")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "📝 Envía el *nombre* para este mensaje TG:\n\n(Ejemplo: promo_curso, oferta_pack)", reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(MensajeTgState.esperando_nombre)
+async def msg_tg_nombre(msg: types.Message, state: FSMContext):
+    nombre = msg.text.strip()
+    if not nombre:
+        await msg.answer("❌ El nombre no puede estar vacío.")
+        return
+    await state.update_data(tg_msg_nombre=nombre)
+    await state.set_state(MensajeTgState.esperando_texto)
+    await msg.answer(f"✅ Nombre: *{nombre}*\n\nAhora envía el *texto del mensaje*:", parse_mode="Markdown")
+
+
+@dp.message(MensajeTgState.esperando_texto)
+async def msg_tg_texto(msg: types.Message, state: FSMContext):
+    texto = msg.text
+    if not texto:
+        await msg.answer("❌ El texto no puede estar vacío.")
+        return
+    data = await state.get_data()
+    nombre = data.get("tg_msg_nombre", "sin_nombre")
+    msg_id = await db.tg_crear_mensaje(msg.from_user.id, nombre, texto)
+    await state.clear()
+    if msg_id:
+        await msg.answer(f"✅ Mensaje TG '{nombre}' creado (ID: {msg_id})!")
+    else:
+        await msg.answer("❌ Error al crear mensaje.")
+
+
+@dp.callback_query(F.data.startswith("tg_msg_ver_"))
+async def cb_tg_msg_ver(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_msg_ver_", ""))
+    mensaje = await db.tg_get_mensaje_by_id(msg_id)
+    if not mensaje:
+        await call.answer("Mensaje no encontrado.", show_alert=True)
+        return
+    texto = (
+        f"📝 MENSAJE TG: {mensaje['nombre']}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"{mensaje['texto']}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📅 Creado: {mensaje.get('fecha_creacion', '?')}\n"
+    )
+    botones = [
+        [InlineKeyboardButton(text="📤 Enviar a todos los grupos TG", callback_data=f"tg_enviar_msg_{msg_id}")],
+        [InlineKeyboardButton(text="⏰ Programar envío TG", callback_data=f"tg_prog_msg_{msg_id}")],
+        [InlineKeyboardButton(text="✏ Editar", callback_data=f"tg_msg_edit_{msg_id}"),
+         InlineKeyboardButton(text="📋 Duplicar", callback_data=f"tg_msg_dup_{msg_id}")],
+        [InlineKeyboardButton(text="🗑 Eliminar", callback_data=f"tg_msg_del_{msg_id}")],
+        [InlineKeyboardButton(text="🔙 Volver a mensajes TG", callback_data="tg_mensajes")],
+    ]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("tg_msg_edit_"))
+async def cb_tg_msg_edit(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_msg_edit_", ""))
+    await state.set_state(MensajeTgState.editando_texto)
+    await state.update_data(tg_edit_msg_id=msg_id)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data=f"tg_msg_ver_{msg_id}")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "✏ Envía el nuevo texto:", reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(MensajeTgState.editando_texto)
+async def msg_tg_editar(msg: types.Message, state: FSMContext):
+    texto = msg.text
+    if not texto:
+        await msg.answer("❌ El texto no puede estar vacío.")
+        return
+    data = await state.get_data()
+    msg_id = data.get("tg_edit_msg_id")
+    await db.tg_editar_mensaje(msg_id, texto)
+    await state.clear()
+    await msg.answer("✅ Mensaje TG editado!")
+
+
+@dp.callback_query(F.data.startswith("tg_msg_del_"))
+async def cb_tg_msg_del(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_msg_del_", ""))
+    await db.tg_eliminar_mensaje(msg_id)
+    await call.answer("✅ Mensaje eliminado.", show_alert=True)
+    await cb_tg_mensajes(call)
+
+
+@dp.callback_query(F.data.startswith("tg_msg_dup_"))
+async def cb_tg_msg_dup(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_msg_dup_", ""))
+    new_id = await db.tg_duplicar_mensaje(msg_id)
+    if new_id:
+        await call.answer("✅ Mensaje duplicado!", show_alert=True)
+    else:
+        await call.answer("❌ Error al duplicar.", show_alert=True)
+    await cb_tg_mensajes(call)
+
+
+# ╔══════════════════════════════════════╗
+# ║  ENVIO UNICO TG                     ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "tg_enviar_unico")
+async def cb_tg_enviar_unico(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    mensajes = await db.tg_get_mensajes(call.from_user.id)
+    if not mensajes:
+        botones = [
+            [InlineKeyboardButton(text="➕ Crear mensaje primero", callback_data="tg_msg_crear")],
+            [InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")],
+        ]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, "📤 ENVIO UNICO TG\n\nNo tienes mensajes. Crea uno primero.", reply_markup=kb)
+        await call.answer()
+        return
+    texto = "📤 ENVIO UNICO TG\n\nSelecciona el mensaje:\n\n"
+    botones = []
+    for m in mensajes[:10]:
+        preview = (m["texto"][:30] + "...") if len(m["texto"]) > 30 else m["texto"]
+        texto += f"• {m['nombre']}: {preview}\n"
+        botones.append([InlineKeyboardButton(text=f"📤 {m['nombre']}", callback_data=f"tg_enviar_msg_{m['id']}")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")])
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("tg_enviar_msg_"))
+async def cb_tg_enviar_msg(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_enviar_msg_", ""))
+    grupos = await db.get_grupos(call.from_user.id)
+    if not grupos:
+        await call.answer("No tienes grupos TG.", show_alert=True)
+        return
+    texto = f"📤 SELECCIONAR GRUPOS TG\n\nMensaje ID: {msg_id}\n\n"
+    for i, g in enumerate(grupos, 1):
+        link = g.get("link", "?")
+        if len(link) > 35:
+            link = link[:35] + "..."
+        texto += f"{i}. {link}\n"
+    texto += (
+        f"\nTotal: {len(grupos)} grupo(s)\n"
+        f"\n━━━━━━━━━━━━━━━━━━\n"
+        f"Envía los números de los grupos separados por coma:\n"
+        f"Ejemplo: 1,3,5,7\n\n"
+        f"O envía T para enviar a TODOS"
+    )
+    await state.set_state(SeleccionGruposState.esperando_numeros_tg)
+    await state.update_data(tg_enviar_msg_id=msg_id, tg_grupos_disponibles=grupos)
+    botones = [
+        [InlineKeyboardButton(text="📤 Enviar a TODOS", callback_data=f"tg_confirmar_envio_{msg_id}")],
+        [InlineKeyboardButton(text="❌ Cancelar", callback_data="tg_enviar_unico")],
+    ]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(SeleccionGruposState.esperando_numeros_tg)
+async def msg_seleccion_grupos_tg(msg: types.Message, state: FSMContext):
+    texto_input = msg.text.strip().upper()
+    data = await state.get_data()
+    msg_id = data.get("tg_enviar_msg_id")
+    all_grupos = data.get("tg_grupos_disponibles", [])
+    await state.clear()
+
+    if texto_input == "T":
+        grupos = all_grupos
+    else:
+        try:
+            numeros = [int(n.strip()) for n in texto_input.replace(" ", ",").split(",") if n.strip().isdigit()]
+        except ValueError:
+            await msg.answer("❌ Formato inválido. Envía números separados por coma (ej: 1,3,5) o T para todos.")
+            return
+        if not numeros:
+            await msg.answer("❌ No se recibieron números válidos.")
+            return
+        grupos = []
+        for n in numeros:
+            if 1 <= n <= len(all_grupos):
+                grupos.append(all_grupos[n - 1])
+        if not grupos:
+            await msg.answer("❌ Ningún número válido. Rango: 1-" + str(len(all_grupos)))
+            return
+
+    await _ejecutar_envio_tg(msg, msg_id, grupos)
+
+
+async def _ejecutar_envio_tg(msg_or_call, msg_id, grupos):
+    """Envía mensaje TG a los grupos dados. msg_or_call: Message o CallbackQuery."""
+    if isinstance(msg_or_call, types.CallbackQuery):
+        user_id = msg_or_call.from_user.id
+        reply = msg_or_call.message
+    else:
+        user_id = msg_or_call.from_user.id
+        reply = msg_or_call
+
+    mensaje = await db.tg_get_mensaje_by_id(msg_id)
+    if not mensaje:
+        await reply.answer("❌ Mensaje no encontrado.")
+        return
+    sesiones = await db.get_sesiones(user_id)
+    if not sesiones:
+        await reply.answer("❌ No tienes cuentas TG vinculadas.")
+        return
+    await reply.answer(f"🚀 Enviando a {len(grupos)} grupo(s) TG...")
+
+    envio_id = await db.tg_crear_envio_unico(user_id, msg_id, len(grupos))
+    ok = 0
+    errores = 0
+    sesion = sesiones[0]
+    try:
+        from telethon import TelegramClient
+        client = TelegramClient(f"sessions/{sesion['nombre']}", int(os.environ.get("API_ID", "0")), os.environ.get("API_HASH", ""))
+        await client.connect()
+        for g in grupos:
+            try:
+                entity = await client.get_entity(g["link"])
+                await client.send_message(entity, mensaje["texto"])
+                ok += 1
+                await db.registrar_envio(user_id, 0, g["link"], "enviado")
+            except Exception as e:
+                errores += 1
+                await db.registrar_envio(user_id, 0, g["link"], f"error: {str(e)[:50]}")
+            import asyncio
+            await asyncio.sleep(5 + __import__('random').random() * 10)
+        await client.disconnect()
+    except Exception as e:
+        errores = len(grupos)
+    await db.tg_actualizar_envio_unico(envio_id, ok, errores, "completado")
+
+    botones = [
+        [InlineKeyboardButton(text="📊 Ver historial", callback_data="tg_historial_envios")],
+        [InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await reply.answer(f"✅ Envío TG completado!\n\n📤 {ok}/{len(grupos)} enviados\n❌ {errores} errores", reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("tg_confirmar_envio_"))
+async def cb_tg_confirmar_envio(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.clear()
+    msg_id = int(call.data.replace("tg_confirmar_envio_", ""))
+    grupos = await db.get_grupos(call.from_user.id)
+    if not grupos:
+        await call.answer("No tienes grupos.", show_alert=True)
+        return
+    await safe_edit(call.message, f"🚀 Enviando a {len(grupos)} grupo(s) TG...")
+    await call.answer()
+    await _ejecutar_envio_tg(call, msg_id, grupos)
+
+
+@dp.callback_query(F.data == "tg_historial_envios")
+async def cb_tg_historial_envios(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    envios = await db.tg_get_envios_unicos(call.from_user.id)
+    texto = "📊 HISTORIAL ENVIOS TG\n\n"
+    if envios:
+        for e in envios[:15]:
+            estado_emoji = {"completado": "✅", "pendiente": "⏳", "enviando": "🔄", "error": "❌"}.get(e.get("estado"), "❓")
+            texto += (
+                f"{estado_emoji} {e.get('mensaje_nombre', '?')}\n"
+                f"   📤 {e.get('grupos_ok', 0)}/{e.get('grupos_total', 0)} | "
+                f"❌ {e.get('grupos_error', 0)} | {e.get('fecha', '?')}\n\n"
+            )
+    else:
+        texto += "(sin envíos)\n"
+    botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")]]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# ╔══════════════════════════════════════╗
+# ║  ENVIOS PROGRAMADOS TG              ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data.startswith("tg_prog_msg_"))
+async def cb_tg_prog_msg(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("tg_prog_msg_", ""))
+    await state.set_state(ProgramarTgState.esperando_hora)
+    await state.update_data(tg_prog_msg_id=msg_id)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data=f"tg_msg_ver_{msg_id}")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        "⏰ PROGRAMAR ENVÍO TG\n\n"
+        "Envía la hora en formato HH:MM (hora de Perú)\n"
+        "Ejemplo: 14:30\n\n"
+        "Para repetir diariamente: 14:30 repetir",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@dp.message(ProgramarTgState.esperando_hora)
+async def msg_tg_programar(msg: types.Message, state: FSMContext):
+    texto = msg.text.strip().lower()
+    repetir = "repetir" in texto
+    tiempo = texto.replace("repetir", "").strip()
+    try:
+        partes = tiempo.split(":")
+        hora = int(partes[0])
+        minuto = int(partes[1]) if len(partes) > 1 else 0
+        if hora < 0 or hora > 23 or minuto < 0 or minuto > 59:
+            raise ValueError
+    except (ValueError, IndexError):
+        await msg.answer("❌ Formato inválido. Envía como HH:MM (ej: 14:30)")
+        return
+    data = await state.get_data()
+    msg_id = data.get("tg_prog_msg_id")
+    await db.tg_crear_envio_programado(msg.from_user.id, msg_id, hora, minuto, 1 if repetir else 0)
+    await state.clear()
+    rep_txt = "🔄 (diariamente)" if repetir else "1️⃣ (una sola vez)"
+    await msg.answer(f"✅ Envío TG programado para {hora:02d}:{minuto:02d} (Perú)\n{rep_txt}")
+
+
+@dp.callback_query(F.data == "tg_programados")
+async def cb_tg_programados(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    programados = await db.tg_get_envios_programados(call.from_user.id)
+    texto = "⏰ ENVÍOS PROGRAMADOS TG\n\n"
+    if programados:
+        for p in programados:
+            estado = "🟢" if p.get("activo") else "🔴"
+            rep = "🔄" if p.get("repetir") else "1️⃣"
+            texto += f"{estado} {p.get('mensaje_nombre', '?')} — {p['hora']:02d}:{p['minuto']:02d} {rep}\n"
+            if p.get("ultimo_envio"):
+                texto += f"   Último: {p['ultimo_envio']}\n"
+            texto += "\n"
+    else:
+        texto += "(sin programados)\n\n"
+    texto += "Para programar, ve a un mensaje y presiona 'Programar envío TG'."
+    botones = []
+    for p in programados[:10]:
+        botones.append([
+            InlineKeyboardButton(
+                text=f"{'🔴' if p.get('activo') else '🟢'} {p.get('mensaje_nombre', '?')}",
+                callback_data=f"tg_prog_toggle_{p['id']}_{0 if p.get('activo') else 1}"
+            ),
+            InlineKeyboardButton(text="🗑", callback_data=f"tg_prog_del_{p['id']}"),
+        ])
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")])
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("tg_prog_toggle_"))
+async def cb_tg_prog_toggle(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    parts = call.data.replace("tg_prog_toggle_", "").split("_")
+    prog_id = int(parts[0])
+    activo = int(parts[1]) if len(parts) > 1 else 1
+    await db.tg_toggle_envio_programado(prog_id, activo)
+    await call.answer(f"{'🟢 Activado' if activo else '🔴 Desactivado'}", show_alert=True)
+    await cb_tg_programados(call)
+
+
+@dp.callback_query(F.data.startswith("tg_prog_del_"))
+async def cb_tg_prog_del(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    prog_id = int(call.data.replace("tg_prog_del_", ""))
+    await db.tg_eliminar_envio_programado(prog_id)
+    await call.answer("✅ Eliminado.", show_alert=True)
+    await cb_tg_programados(call)
+
+
+# ╔══════════════════════════════════════╗
+# ║  STATS POR GRUPO TG                 ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "tg_grupo_stats")
+async def cb_tg_grupo_stats(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    stats = await db.tg_get_stats_por_grupo_resumen(call.from_user.id)
+    texto = "📊 ESTADÍSTICAS POR GRUPO TG\n\n"
+    if stats:
+        for i, s in enumerate(stats[:30], 1):
+            link = s.get("grupo_link", "?")
+            if len(link) > 30:
+                link = link[:30] + "..."
+            total = s.get("total", 0)
+            exitos = s.get("exitos", 0)
+            tasa = round(exitos * 100 / total, 1) if total > 0 else 0
+            emoji = "🟢" if tasa >= 80 else ("🟡" if tasa >= 50 else "🔴")
+            texto += (
+                f"{i}. {emoji} {link}\n"
+                f"   ✅{exitos} ❌{s.get('fallidos', 0)} "
+                f"📊{tasa}% | {s.get('ultima_fecha', '?')}\n\n"
+            )
+    else:
+        texto += "(sin estadísticas aún)\n"
+    botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_grupos")]]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
 
 # /grupos command
 @dp.message(Command("grupos"))
@@ -2676,6 +3350,8 @@ async def cb_sec_cmdtlg(call: types.CallbackQuery):
          InlineKeyboardButton(text="🚀 Iniciar", callback_data="sec_iniciar")],
         [InlineKeyboardButton(text="🤖 Responder", callback_data="sec_responder"),
          InlineKeyboardButton(text="📊 Historial", callback_data="sec_historial")],
+        [InlineKeyboardButton(text="📨 Envio Personal TG", callback_data="sec_tg_personal")],
+        [InlineKeyboardButton(text="🔗 Auto-unirse a grupo", callback_data="sec_tg_autojoin")],
         [InlineKeyboardButton(text="🗑 Eliminar", callback_data="sec_eliminar"),
          InlineKeyboardButton(text="🛑 Detener", callback_data="sec_detener")],
         [InlineKeyboardButton(text="🔙 Volver", callback_data="menu_principal")],
@@ -2685,6 +3361,191 @@ async def cb_sec_cmdtlg(call: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
+
+
+# ╔══════════════════════════════════════╗
+# ║    TELEGRAM: ENVIO PERSONAL         ║
+# ╚══════════════════════════════════════╝
+@dp.callback_query(F.data == "sec_tg_personal")
+async def cb_sec_tg_personal(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    await safe_edit(call.message, "⏳ Leyendo tus chats de Telegram...")
+    await call.answer()
+
+    chats, info = await listar_chats_telegram(call.from_user.id)
+
+    if chats is None:
+        botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, f"❌ {info}", reply_markup=kb)
+        return
+
+    if not chats:
+        botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, "📭 No tienes chats personales.", reply_markup=kb)
+        return
+
+    texto = f"📨 CHATS PERSONALES TG ({len(chats)}):\n"
+    texto += f"👤 Cuenta: {info}\n\n"
+
+    for i, c in enumerate(chats[:40], 1):
+        username = f" @{c['username']}" if c['username'] else ""
+        phone = f" ({c['telefono']})" if c['telefono'] else ""
+        texto += f"{i}. {c['nombre']}{username}{phone}\n"
+
+    if len(chats) > 40:
+        texto += f"\n... y {len(chats) - 40} más"
+
+    texto += (
+        f"\n\n📊 Total: {len(chats)} chats\n\n"
+        f"Para enviar a todos:\n/tgpersonal Tu mensaje aqui\n\n"
+        f"Delay: 8-15 seg entre cada envio (anti-ban)"
+    )
+
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+
+    botones = [
+        [InlineKeyboardButton(text="📨 Enviar mensaje a todos", callback_data="tg_personal_enviar")],
+        [InlineKeyboardButton(text="🔙 Volver a Telegram", callback_data="sec_cmdtlg")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+
+
+@dp.callback_query(F.data == "tg_personal_enviar")
+async def cb_tg_personal_enviar(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.set_state(TgPersonalState.esperando_mensaje_personal)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="sec_cmdtlg")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        "📝 Escribe el mensaje que quieres enviar a todos tus chats personales:",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@dp.message(TgPersonalState.esperando_mensaje_personal)
+async def recibir_mensaje_personal_tg(msg: types.Message, state: FSMContext):
+    await state.clear()
+    mensaje = msg.text
+    if not mensaje:
+        return await msg.answer("❌ Mensaje vacío.", reply_markup=kb_menu_principal(msg.from_user.id))
+
+    from motor import enviar_personal_telegram
+    status_msg = await msg.answer("🚀 Enviando a todos tus chats personales...\nEsto puede tardar varios minutos.")
+
+    enviados, errores_count, total = await enviar_personal_telegram(msg.from_user.id, mensaje, bot)
+
+    await status_msg.edit_text(
+        f"📨 ENVIO PERSONAL TG COMPLETADO\n\n"
+        f"📊 Total chats: {total}\n"
+        f"✅ Enviados: {enviados}\n"
+        f"❌ Errores: {errores_count}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Volver a Telegram", callback_data="sec_cmdtlg")]
+        ])
+    )
+
+
+@dp.message(Command("tgpersonal"))
+async def cmd_tg_personal(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args:
+        return await msg.answer(
+            "Uso: /tgpersonal Tu mensaje aqui\n\n"
+            "Envia un mensaje a todos tus chats personales de Telegram."
+        )
+
+    from motor import enviar_personal_telegram
+    status_msg = await msg.answer("🚀 Enviando a todos tus chats personales...\nEsto puede tardar varios minutos.")
+    enviados, errores_count, total = await enviar_personal_telegram(msg.from_user.id, args, bot)
+    await status_msg.edit_text(
+        f"📨 ENVIO PERSONAL TG COMPLETADO\n\n"
+        f"📊 Total chats: {total}\n"
+        f"✅ Enviados: {enviados}\n"
+        f"❌ Errores: {errores_count}"
+    )
+
+
+# ╔══════════════════════════════════════╗
+# ║    TELEGRAM: AUTO-UNIRSE A GRUPOS   ║
+# ╚══════════════════════════════════════╝
+@dp.callback_query(F.data == "sec_tg_autojoin")
+async def cb_sec_tg_autojoin(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.set_state(TgAutoJoinState.esperando_link_unirse)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="sec_cmdtlg")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        "🔗 AUTO-UNIRSE A GRUPO\n\n"
+        "Envía el link o @username del grupo al que quieres unirte.\n\n"
+        "Formatos aceptados:\n"
+        "• https://t.me/nombre_grupo\n"
+        "• https://t.me/+INVITEHASH\n"
+        "• https://t.me/joinchat/HASH\n"
+        "• @nombre_grupo\n\n"
+        "Puedes enviar varios links separados por lineas.",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@dp.message(TgAutoJoinState.esperando_link_unirse)
+async def recibir_link_autojoin(msg: types.Message, state: FSMContext):
+    await state.clear()
+    links = [l.strip() for l in msg.text.strip().split("\n") if l.strip()]
+    if not links:
+        return await msg.answer("❌ No se encontraron links.", reply_markup=kb_menu_principal(msg.from_user.id))
+
+    status_msg = await msg.answer(f"🔗 Intentando unirse a {len(links)} grupo(s)...")
+    resultados = []
+    for link in links:
+        ok, mensaje = await auto_unirse_grupo(msg.from_user.id, link)
+        icono = "✅" if ok else "❌"
+        resultados.append(f"{icono} {link[:30]}... → {mensaje}")
+        await asyncio.sleep(2)
+
+    texto = "🔗 RESULTADO AUTO-UNIRSE:\n\n"
+    texto += "\n".join(resultados)
+
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+
+    await status_msg.edit_text(texto, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Volver a Telegram", callback_data="sec_cmdtlg")]
+    ]))
+
+
+@dp.message(Command("tgunirse"))
+async def cmd_tg_unirse(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args:
+        return await msg.answer(
+            "Uso: /tgunirse link_grupo\n\n"
+            "Ejemplo: /tgunirse https://t.me/migrupo\n"
+            "Ejemplo: /tgunirse https://t.me/+ABC123\n"
+            "Ejemplo: /tgunirse @migrupo"
+        )
+    links = [l.strip() for l in args.split() if l.strip()]
+    resultados = []
+    for link in links:
+        ok, mensaje = await auto_unirse_grupo(msg.from_user.id, link)
+        icono = "✅" if ok else "❌"
+        resultados.append(f"{icono} {link[:30]} → {mensaje}")
+        await asyncio.sleep(2)
+
+    texto = "🔗 RESULTADO:\n\n" + "\n".join(resultados)
+    await msg.answer(texto)
 
 
 @dp.callback_query(F.data == "sec_cmdwsp")
@@ -2725,10 +3586,18 @@ async def cb_sec_wsp(call: types.CallbackQuery):
     import wsp_bridge as wsp
     r = await wsp.wsp_status()
     if r.get("ok"):
-        estado = "🟢 Conectado" if r["status"] == "conectado" else "🔴 Desconectado"
-        numero = r.get("bot_number", "---")
+        st = r["status"]
+        if st == "conectado":
+            estado = "🟢 Conectado"
+        elif st == "solo_api":
+            estado = "🟢 API activa (sin cuenta bot WSP)"
+        elif st == "esperando_qr":
+            estado = "🟡 Esperando QR"
+        else:
+            estado = "🔴 Desconectado"
+        numero = r.get("bot_number") or "(modo solo API)"
     else:
-        estado = "⚠ Sin conexión al bot WSP"
+        estado = "⚠ Sin conexión al servidor WSP"
         numero = "---"
 
     texto = (
@@ -2739,18 +3608,178 @@ async def cb_sec_wsp(call: types.CallbackQuery):
     )
     botones = [
         [InlineKeyboardButton(text="👤 Cuentas WSP", callback_data="wsp_cuentas")],
-        [InlineKeyboardButton(text="🌐 Grupos WSP", callback_data="wsp_grupos")],
+        [InlineKeyboardButton(text="🌐 Grupos WSP", callback_data="wsp_grupos"),
+         InlineKeyboardButton(text="🔍 Detectar Grupos", callback_data="wsp_detectar")],
+        [InlineKeyboardButton(text="✉ Mensajes", callback_data="wsp_mensajes")],
+        [InlineKeyboardButton(text="📤 Enviar Único", callback_data="wsp_enviar_unico"),
+         InlineKeyboardButton(text="⏰ Programados", callback_data="wsp_programados")],
         [InlineKeyboardButton(text="📋 Campañas WSP", callback_data="wsp_campanas")],
         [InlineKeyboardButton(text="🚀 Iniciar campaña", callback_data="wsp_iniciar"),
          InlineKeyboardButton(text="🛑 Detener", callback_data="wsp_detener")],
-        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial")],
+        [InlineKeyboardButton(text="📨 Envio Personal", callback_data="wsp_personal"),
+         InlineKeyboardButton(text="👥 Envio a Miembros", callback_data="wsp_miembros")],
+        [InlineKeyboardButton(text="⚙ Config Envio", callback_data="wsp_config_envio"),
+         InlineKeyboardButton(text="🚫 Lista Negra", callback_data="wsp_lista_negra")],
+        [InlineKeyboardButton(text="🤖 Auto-Responder", callback_data="wsp_auto_resp")],
+        [InlineKeyboardButton(text="📨 Envio Interactivo", callback_data="wsp_promo_menu")],
+        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial"),
+         InlineKeyboardButton(text="📈 Stats Grupos", callback_data="wsp_grupo_stats")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="wsp_panelweb")],
         [InlineKeyboardButton(text="👑 Membresía WSP", callback_data="wsp_membresia")],
         kb_volver(),
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
+
+
+@dp.callback_query(F.data == "wsp_panelweb")
+async def cb_wsp_panelweb(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    link = f"http://{WSP_IP}:3001/panel?u={call.from_user.id}"
+    texto = (
+        f"🌐 PANEL WEB COMPLETO\n\n"
+        f"Abre este enlace en tu navegador:\n\n"
+        f"{link}\n\n"
+        f"Desde el panel puedes manejar TODO:\n"
+        f"• Dashboard con estadísticas\n"
+        f"• Cuentas WSP (ver, eliminar)\n"
+        f"• Grupos (ver, detectar, agregar, eliminar)\n"
+        f"• Mensajes (crear, editar, duplicar, eliminar)\n"
+        f"• Envío único a grupos\n"
+        f"• Envíos programados\n"
+        f"• Campañas\n"
+        f"• Config de envío (delay, lotes, horarios)\n"
+        f"• Lista negra\n"
+        f"• Auto-responder\n"
+        f"• Estadísticas por grupo"
+    )
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(Command("panelweb"))
+async def cmd_panelweb(msg: types.Message):
+    if not await verificar_membresia(msg):
+        return
+    link = f"http://{WSP_IP}:3001/panel?u={msg.from_user.id}"
+    await msg.answer(
+        f"🌐 PANEL WEB COMPLETO\n\n"
+        f"Abre en tu navegador:\n{link}\n\n"
+        f"Maneja TODO desde el panel: cuentas, grupos, mensajes, envíos, campañas, config, stats y más."
+    )
+
+
+# --- RECUPERAR CONTRASEÑA DEL PANEL ---
+@dp.message(Command("recuperpass"))
+async def cmd_recuperpass(msg: types.Message, command: CommandObject, state: FSMContext):
+    codigo = (command.args or "").strip().upper()
+    if not codigo:
+        import wsp_bridge as wsp
+        r = await wsp.wsp_generar_recovery(msg.from_user.id)
+        if not r.get("ok"):
+            error = r.get("error", "")
+            if error == "no_registrado":
+                await msg.answer("❌ No tienes cuenta en el panel web. Primero regístrate desde el panel.")
+            else:
+                await msg.answer(f"❌ Error: {error}")
+            return
+        code = r.get("code", "???")
+        await msg.answer(
+            f"🔑 *RECUPERAR CONTRASEÑA*\n\n"
+            f"Tu código de recuperación es:\n\n"
+            f"```{code}```\n\n"
+            f"⚠️ Este código es de *un solo uso* y expira en *15 minutos*.\n\n"
+            f"Ahora escribe:\n"
+            f"`/recuperpass {code}`\n\n"
+            f"Y te pediré tu nueva contraseña.",
+            parse_mode="Markdown"
+        )
+        return
+
+    await state.set_state(RecuperPassState.esperando_nueva_password)
+    await state.update_data(recovery_code=codigo)
+    await msg.answer(
+        "✏️ Escribe tu *nueva contraseña* (mínimo 4 caracteres):\n\n"
+        "Escribe /cancelar para cancelar.",
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(RecuperPassState.esperando_nueva_password)
+async def process_nueva_password(msg: types.Message, state: FSMContext):
+    if msg.text and msg.text.strip().lower() == "/cancelar":
+        await state.clear()
+        await msg.answer("❌ Recuperación cancelada.")
+        return
+
+    nueva = (msg.text or "").strip()
+    if len(nueva) < 4:
+        await msg.answer("⚠️ La contraseña debe tener mínimo 4 caracteres. Intenta de nuevo:")
+        return
+
+    data = await state.get_data()
+    codigo = data.get("recovery_code", "")
+    await state.clear()
+
+    import wsp_bridge as wsp
+    r = await wsp.wsp_reset_password(codigo, nueva)
+    if r.get("ok"):
+        await msg.answer(
+            "✅ *Contraseña actualizada exitosamente*\n\n"
+            "Ya puedes iniciar sesión en el panel web con tu nueva contraseña.",
+            parse_mode="Markdown"
+        )
+    else:
+        error = r.get("error", "")
+        if error == "codigo_invalido":
+            await msg.answer("❌ Código inválido o expirado. Genera uno nuevo con /recuperpass")
+        else:
+            await msg.answer(f"❌ Error: {error}")
+
+
+@dp.callback_query(F.data == "wsp_promo_menu")
+async def cb_wsp_promo_menu(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    uid = call.from_user.id
+    config = envios_interactivos.get(uid)
+    if config and config.get("activo"):
+        botones = [
+            [InlineKeyboardButton(text="📊 Ver respuestas", callback_data="promo_ver_resp")],
+            [InlineKeyboardButton(text="🛑 Detener espera", callback_data="promo_detener")],
+            [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+        ]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message,
+            f"📨 ENVIO INTERACTIVO ACTIVO\n\n"
+            f"📝 Mensaje: {config['mensaje'][:50]}...\n"
+            f"✅ Aceptar: '{config['aceptar']}'\n"
+            f"❌ Rechazar: '{config['rechazar']}'\n"
+            f"✅ Aceptados: {len(config['aceptados'])}\n"
+            f"❌ Rechazados: {len(config['rechazados'])}",
+            reply_markup=kb
+        )
+    else:
+        await state.set_state(WspEnvioInteractivoState.esperando_mensaje_promo)
+        botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="sec_wsp")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message,
+            "📨 ENVIO INTERACTIVO CON RESPUESTA\n\n"
+            "Escribe el mensaje promocional que enviarás.\n"
+            "El bot esperará la respuesta de cada cliente.\n\n"
+            "Ejemplo:\n"
+            "Promocion Netflix 8 soles\n"
+            "Para aceptar comenta SI\n"
+            "Para ignorar comenta NO",
+            reply_markup=kb
+        )
+    await call.answer()
+
 
 
 # --- CUENTAS WSP ---
@@ -2774,17 +3803,57 @@ async def cb_wsp_cuentas(call: types.CallbackQuery):
     texto = f"👤 CUENTAS WHATSAPP ({len(sesiones)}):\n\n"
     if sesiones:
         for i, s in enumerate(sesiones, 1):
-            estado = "⛔ BANEADA" if s.get("nombre") in ban_nombres else "✅ Activa"
+            if s.get("nombre") in ban_nombres:
+                estado = "⛔ BANEADA"
+            elif s.get("telefono") and s["telefono"] != "pendiente":
+                estado = "✅ Vinculada"
+            else:
+                estado = "🟡 Pendiente"
             texto += f"{i}. {s.get('nombre', '?')} — {s.get('telefono', '?')} {estado}\n"
     else:
         texto += "(sin cuentas vinculadas)\n"
 
     texto += f"\nPara vincular una cuenta WSP, envía:\n/vincularwsp nombre_cuenta"
 
-    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    botones = []
+    if sesiones:
+        for s in sesiones:
+            botones.append([InlineKeyboardButton(text=f"🗑 Eliminar {s.get('nombre', '?')}", callback_data=f"wsp_del_cuenta_{s.get('nombre', '')}")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wsp_del_cuenta_"))
+async def cb_wsp_del_cuenta(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    nombre = call.data.replace("wsp_del_cuenta_", "")
+    botones = [
+        [InlineKeyboardButton(text=f"✅ Sí, eliminar '{nombre}'", callback_data=f"wsp_del_ok_{nombre}")],
+        [InlineKeyboardButton(text="❌ Cancelar", callback_data="wsp_cuentas")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, f"⚠ ¿Seguro que quieres eliminar la cuenta '{nombre}'?\n\nSe desconectará y eliminará del sistema.", reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wsp_del_ok_"))
+async def cb_wsp_del_ok(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    nombre = call.data.replace("wsp_del_ok_", "")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_eliminar_sesion(call.from_user.id, nombre)
+    if r.get("ok"):
+        await safe_edit(call.message, f"✅ Cuenta '{nombre}' eliminada correctamente.")
+    else:
+        await safe_edit(call.message, f"❌ Error: {r.get('error', 'desconocido')}")
+    await call.answer()
+    call.data = "wsp_cuentas"
+    await cb_wsp_cuentas(call)
+
 
 
 @dp.message(Command("vincularwsp"))
@@ -2795,25 +3864,103 @@ async def cmd_vincular_wsp(msg: types.Message, command: CommandObject):
     if not nombre:
         return await msg.answer("Uso: /vincularwsp nombre_cuenta\nEjemplo: /vincularwsp micuenta1")
 
+    nombre = nombre.strip()
     import wsp_bridge as wsp
-    r = await wsp.wsp_vincular(msg.from_user.id, nombre.strip())
-    if r.get("ok"):
-        link = f"http://{WSP_IP}:3000{r['link_url']}"
-        botones_v = [
-            [InlineKeyboardButton(text="🔄 Verificar vinculación", callback_data=f"wsp_check_link_{nombre.strip()}")],
-            [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
-        ]
-        kb_v = InlineKeyboardMarkup(inline_keyboard=botones_v)
-        await msg.answer(
-            f"📱 Vincular cuenta WSP: *{nombre}*\n\n"
-            f"Abre este link en tu navegador:\n{link}\n\n"
-            f"Escanea el QR con WhatsApp del celular que quieres vincular.\n\n"
-            f"Después presiona 🔄 Verificar para confirmar.",
-            reply_markup=kb_v,
-            parse_mode="Markdown"
-        )
-    else:
-        await msg.answer(f"❌ Error: {r.get('error', 'sin conexión')}")
+    r = await wsp.wsp_vincular(msg.from_user.id, nombre)
+    if not r.get("ok"):
+        return await msg.answer(f"❌ Error: {r.get('error', 'sin conexión')}")
+
+    status_msg = await msg.answer(
+        f"📱 Vincular cuenta WSP: {nombre}\n\n"
+        f"⏳ Generando QR... espera unos segundos."
+    )
+
+    uid = msg.from_user.id
+    if uid in wsp_qr_tasks:
+        wsp_qr_tasks[uid].cancel()
+
+    async def poll_qr():
+        last_qr = ""
+        qr_msg = None
+        for _ in range(40):
+            await asyncio.sleep(3)
+            try:
+                st = await wsp.wsp_link_status(uid, nombre)
+            except Exception:
+                continue
+
+            status = st.get("status", "no_iniciado")
+
+            if status == "conectado":
+                botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+                kb = InlineKeyboardMarkup(inline_keyboard=botones)
+                try:
+                    await status_msg.edit_text(
+                        f"✅ Cuenta WSP '{nombre}' vinculada exitosamente!\n\n"
+                        f"Ya puedes usarla desde el panel de WhatsApp.",
+                        reply_markup=kb
+                    )
+                except Exception:
+                    await bot.send_message(uid,
+                        f"✅ Cuenta WSP '{nombre}' vinculada exitosamente!",
+                        reply_markup=kb
+                    )
+                if qr_msg:
+                    try:
+                        await qr_msg.delete()
+                    except Exception:
+                        pass
+                return
+
+            if status == "esperando_qr" and st.get("qr"):
+                qr_data = st["qr"]
+                if qr_data != last_qr:
+                    last_qr = qr_data
+                    if qr_data.startswith("data:image"):
+                        img_b64 = qr_data.split(",", 1)[1]
+                        img_bytes = base64.b64decode(img_b64)
+                    else:
+                        img_bytes = base64.b64decode(qr_data)
+
+                    photo = BufferedInputFile(img_bytes, filename="qr_wsp.png")
+                    caption = (
+                        f"📱 Escanea este QR con WhatsApp\n\n"
+                        f"Cuenta: {nombre}\n\n"
+                        f"📲 Instrucciones:\n"
+                        f"1. Abre WhatsApp en tu celular\n"
+                        f"2. Ve a Ajustes > Dispositivos vinculados\n"
+                        f"3. Toca 'Vincular dispositivo'\n"
+                        f"4. Escanea este QR"
+                    )
+                    try:
+                        if qr_msg:
+                            await qr_msg.delete()
+                    except Exception:
+                        pass
+                    try:
+                        qr_msg = await bot.send_photo(uid, photo, caption=caption)
+                    except Exception:
+                        pass
+
+            if status in ("error", "timeout"):
+                botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+                kb = InlineKeyboardMarkup(inline_keyboard=botones)
+                err = st.get("error", "Error desconocido")
+                try:
+                    await status_msg.edit_text(f"❌ {err}\n\nIntenta de nuevo con /vincularwsp {nombre}", reply_markup=kb)
+                except Exception:
+                    pass
+                return
+
+        botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        try:
+            await status_msg.edit_text(f"⏰ Tiempo agotado. Intenta de nuevo con /vincularwsp {nombre}", reply_markup=kb)
+        except Exception:
+            pass
+
+    task = asyncio.create_task(poll_qr())
+    wsp_qr_tasks[uid] = task
 
 
 # --- GRUPOS WSP ---
@@ -2850,6 +3997,7 @@ async def cb_wsp_grupos(call: types.CallbackQuery):
         texto = texto[:4000] + "\n(truncado)"
 
     botones = [
+        [InlineKeyboardButton(text="🔗 Auto-unirse a grupos", callback_data="wsp_autojoin")],
         [InlineKeyboardButton(text="🗑 Eliminar todos", callback_data="wsp_grupos_delall")],
         [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
     ]
@@ -2891,13 +4039,435 @@ async def cb_wsp_grupos_delall(call: types.CallbackQuery):
     await call.answer()
 
 
+# --- AUTO-UNIRSE WSP ---
+@dp.callback_query(F.data == "wsp_autojoin")
+async def cb_wsp_autojoin(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    if await _mostrar_selector_cuenta(call, "wsp_autojoin_c_", "auto-unirse a grupos"):
+        return
+    await _ejecutar_autojoin_prompt(call, state, None)
+
+
+@dp.callback_query(F.data.startswith("wsp_autojoin_c_"))
+async def cb_wsp_autojoin_cuenta(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    cuenta = call.data.replace("wsp_autojoin_c_", "")
+    await _ejecutar_autojoin_prompt(call, state, cuenta)
+
+
+async def _ejecutar_autojoin_prompt(call, state, cuenta):
+    await state.set_state(AutoJoinState.esperando_links_wsp)
+    if cuenta:
+        await state.update_data(autojoin_cuenta=cuenta)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="wsp_grupos")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    cuenta_txt = f" (cuenta: {cuenta})" if cuenta else ""
+    await safe_edit(call.message,
+        f"🔗 AUTO-UNIRSE A GRUPOS WHATSAPP{cuenta_txt}\n\n"
+        "Envía los links de invitación (uno por línea):\n\n"
+        "Ejemplo:\nhttps://chat.whatsapp.com/abc123\nhttps://chat.whatsapp.com/xyz456\n\n"
+        "El bot usará tu cuenta WSP para unirse automáticamente.",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@dp.message(AutoJoinState.esperando_links_wsp)
+async def msg_autojoin_wsp(msg: types.Message, state: FSMContext):
+    data = await state.get_data()
+    cuenta = data.get("autojoin_cuenta")
+    await state.clear()
+    links = [l.strip() for l in msg.text.strip().split("\n") if l.strip()]
+    if not links:
+        await msg.answer("❌ No se recibieron links.")
+        return
+    await msg.answer(f"🔗 Intentando unirse a {len(links)} grupo(s) WSP...\nTe notificaré cuando termine.")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_autojoin(msg.from_user.id, links, cuenta)
+    if not r.get("ok"):
+        await msg.answer(f"❌ Error: {r.get('error')}")
+        return
+    resultados = r.get("resultados", [])
+    unidos = r.get("unidos", 0)
+    fallidos = r.get("fallidos", 0)
+    reporte = ""
+    for res in resultados:
+        if res.get("ok"):
+            reporte += f"✅ {res['link']}\n"
+        else:
+            reporte += f"❌ {res['link']} — {res.get('error', '?')}\n"
+    texto = (
+        f"🔗 RESULTADO AUTO-UNIRSE WSP\n\n"
+        f"Cuenta: {r.get('cuenta', '?')}\n"
+        f"✅ Unidos: {unidos}\n"
+        f"❌ Fallidos: {fallidos}\n\n"
+        f"{reporte}"
+    )
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    await msg.answer(texto)
+
+
+# --- CONFIG DE ENVIO WSP ---
+_config_state = {}
+
+@dp.callback_query(F.data == "wsp_config_envio")
+async def cb_wsp_config_envio(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    await call.answer()
+    r = await wsp.wsp_get_envio_config(call.from_user.id)
+    cfg = r.get("config", {})
+    horario = r.get("horario", {})
+    delay_seg = cfg.get("delay_seg", 10)
+    lote_tamano = cfg.get("lote_tamano", 0)
+    lote_pausa = cfg.get("lote_pausa_seg", 300)
+    h_inicio = horario.get("hora_inicio", 0)
+    h_fin = horario.get("hora_fin", 24)
+    horario_txt = f"{h_inicio}:00 - {h_fin}:00" if (h_inicio != 0 or h_fin != 24) else "Sin limite (24h)"
+    lotes_txt = f"{lote_tamano} envios, pausa {lote_pausa}s" if lote_tamano > 0 else "Desactivado"
+    texto = (
+        f"⚙ *CONFIG DE ENVIO*\n\n"
+        f"⏱ Delay entre envios: *{delay_seg}s*\n"
+        f"📦 Sistema de lotes: *{lotes_txt}*\n"
+        f"🕐 Horario: *{horario_txt}*\n\n"
+        f"📝 Variables disponibles en mensajes:\n"
+        f"  `{{nombre}}` — nombre del contacto\n"
+        f"  `{{numero}}` — numero del contacto\n\n"
+        f"Selecciona que quieres cambiar:"
+    )
+    botones = [
+        [InlineKeyboardButton(text=f"⏱ Delay: {delay_seg}s", callback_data="wcfg_delay")],
+        [InlineKeyboardButton(text=f"📦 Lotes: {lotes_txt}", callback_data="wcfg_lotes")],
+        [InlineKeyboardButton(text=f"🕐 Horario: {horario_txt}", callback_data="wcfg_horario")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    await safe_edit(call.message, texto, reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+@dp.callback_query(F.data == "wcfg_delay")
+async def cb_wcfg_delay(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    await call.answer()
+    botones = []
+    for d in [5, 10, 15, 20, 30, 45, 60]:
+        botones.append([InlineKeyboardButton(text=f"{d} segundos", callback_data=f"wcfg_dset_{d}")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_config_envio")])
+    await safe_edit(call.message, "⏱ *Selecciona el delay entre envios:*", reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+@dp.callback_query(F.data.startswith("wcfg_dset_"))
+async def cb_wcfg_dset(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    delay_seg = int(call.data.replace("wcfg_dset_", ""))
+    import wsp_bridge as wsp
+    # Obtener config actual para preservar lotes
+    r = await wsp.wsp_get_envio_config(call.from_user.id)
+    cfg = r.get("config", {})
+    await wsp.wsp_set_envio_config(call.from_user.id,
+        delay_seg=delay_seg,
+        lote_tamano=cfg.get("lote_tamano", 0),
+        lote_pausa_seg=cfg.get("lote_pausa_seg", 300))
+    await call.answer(f"Delay actualizado a {delay_seg}s")
+    call.data = "wsp_config_envio"
+    await cb_wsp_config_envio(call)
+
+
+@dp.callback_query(F.data == "wcfg_lotes")
+async def cb_wcfg_lotes(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    await call.answer()
+    botones = [
+        [InlineKeyboardButton(text="Desactivado (envio continuo)", callback_data="wcfg_lset_0_0")],
+        [InlineKeyboardButton(text="5 envios, pausa 3 min", callback_data="wcfg_lset_5_180")],
+        [InlineKeyboardButton(text="10 envios, pausa 5 min", callback_data="wcfg_lset_10_300")],
+        [InlineKeyboardButton(text="10 envios, pausa 10 min", callback_data="wcfg_lset_10_600")],
+        [InlineKeyboardButton(text="15 envios, pausa 5 min", callback_data="wcfg_lset_15_300")],
+        [InlineKeyboardButton(text="20 envios, pausa 10 min", callback_data="wcfg_lset_20_600")],
+        [InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_config_envio")],
+    ]
+    await safe_edit(call.message,
+        "📦 *SISTEMA DE LOTES*\n\n"
+        "Envia X mensajes, luego pausa Y minutos.\n"
+        "Esto ayuda a evitar bloqueos.\n\n"
+        "Selecciona una opcion:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+@dp.callback_query(F.data.startswith("wcfg_lset_"))
+async def cb_wcfg_lset(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    parts = call.data.replace("wcfg_lset_", "").split("_")
+    lote_tamano = int(parts[0])
+    lote_pausa = int(parts[1])
+    import wsp_bridge as wsp
+    r = await wsp.wsp_get_envio_config(call.from_user.id)
+    cfg = r.get("config", {})
+    await wsp.wsp_set_envio_config(call.from_user.id,
+        delay_seg=cfg.get("delay_seg", 10),
+        lote_tamano=lote_tamano,
+        lote_pausa_seg=lote_pausa)
+    await call.answer("Lotes actualizado")
+    call.data = "wsp_config_envio"
+    await cb_wsp_config_envio(call)
+
+
+@dp.callback_query(F.data == "wcfg_horario")
+async def cb_wcfg_horario(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    await call.answer()
+    botones = [
+        [InlineKeyboardButton(text="Sin limite (24h)", callback_data="wcfg_hset_0_24")],
+        [InlineKeyboardButton(text="6:00 - 22:00", callback_data="wcfg_hset_6_22")],
+        [InlineKeyboardButton(text="8:00 - 20:00", callback_data="wcfg_hset_8_20")],
+        [InlineKeyboardButton(text="9:00 - 18:00", callback_data="wcfg_hset_9_18")],
+        [InlineKeyboardButton(text="9:00 - 21:00", callback_data="wcfg_hset_9_21")],
+        [InlineKeyboardButton(text="10:00 - 22:00", callback_data="wcfg_hset_10_22")],
+        [InlineKeyboardButton(text="7:00 - 23:00", callback_data="wcfg_hset_7_23")],
+        [InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_config_envio")],
+    ]
+    await safe_edit(call.message,
+        "🕐 *HORARIO DE ENVIO*\n\n"
+        "Solo envia mensajes dentro del horario seleccionado.\n"
+        "Si esta fuera de horario, el envio se pausa automaticamente.\n\n"
+        "Selecciona un horario:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+@dp.callback_query(F.data.startswith("wcfg_hset_"))
+async def cb_wcfg_hset(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    parts = call.data.replace("wcfg_hset_", "").split("_")
+    h_inicio = int(parts[0])
+    h_fin = int(parts[1])
+    import wsp_bridge as wsp
+    await wsp.wsp_set_envio_config(call.from_user.id, hora_inicio=h_inicio, hora_fin=h_fin)
+    txt = "Sin limite (24h)" if (h_inicio == 0 and h_fin == 24) else f"{h_inicio}:00 - {h_fin}:00"
+    await call.answer(f"Horario: {txt}")
+    call.data = "wsp_config_envio"
+    await cb_wsp_config_envio(call)
+
+
+# --- LISTA NEGRA WSP ---
+@dp.callback_query(F.data == "wsp_lista_negra")
+async def cb_wsp_lista_negra(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    await call.answer()
+    r = await wsp.wsp_get_lista_negra(call.from_user.id)
+    numeros = r.get("numeros", [])
+    total = r.get("total", 0)
+    texto = f"🚫 *LISTA NEGRA* ({total} numeros)\n\n"
+    if numeros:
+        for i, n in enumerate(numeros[:30], 1):
+            texto += f"  {i}. {n.get('numero', '?')}"
+            if n.get("razon"):
+                texto += f" — {n['razon']}"
+            texto += "\n"
+        if total > 30:
+            texto += f"  ... y {total - 30} mas\n"
+    else:
+        texto += "Lista vacia. Los numeros en esta lista no recibiran mensajes.\n"
+    texto += "\nUsa estos comandos:\n"
+    texto += "`/wspbloquear 51999999999` — Agregar numero\n"
+    texto += "`/wspdesbloquear 51999999999` — Quitar numero\n"
+    texto += "`/wsplimpiarbloqueos` — Limpiar toda la lista\n"
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    botones = [
+        [InlineKeyboardButton(text="🗑 Limpiar toda la lista", callback_data="wsp_ln_limpiar")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    await safe_edit(call.message, texto, reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+@dp.callback_query(F.data == "wsp_ln_limpiar")
+async def cb_wsp_ln_limpiar(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_lista_negra_accion(call.from_user.id, "limpiar")
+    eliminados = r.get("eliminados", 0)
+    await call.answer(f"Lista negra limpiada ({eliminados} eliminados)")
+    call.data = "wsp_lista_negra"
+    await cb_wsp_lista_negra(call)
+
+
+@dp.message(Command("wspbloquear"))
+async def cmd_wsp_bloquear(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    numero = command.args
+    if not numero:
+        return await msg.answer("Uso: /wspbloquear NUMERO\nEjemplo: /wspbloquear 51999999999")
+    numero = numero.strip().split()[0]
+    import wsp_bridge as wsp
+    r = await wsp.wsp_lista_negra_accion(msg.from_user.id, "agregar", numero=numero)
+    if r.get("ok"):
+        await msg.answer(f"🚫 Numero {numero} agregado a lista negra.")
+    else:
+        await msg.answer(f"Ya esta en la lista o error: {r.get('message', '')}")
+
+
+@dp.message(Command("wspdesbloquear"))
+async def cmd_wsp_desbloquear(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    numero = command.args
+    if not numero:
+        return await msg.answer("Uso: /wspdesbloquear NUMERO\nEjemplo: /wspdesbloquear 51999999999")
+    numero = numero.strip().split()[0]
+    import wsp_bridge as wsp
+    r = await wsp.wsp_lista_negra_accion(msg.from_user.id, "eliminar", numero=numero)
+    if r.get("ok"):
+        await msg.answer(f"✅ Numero {numero} removido de lista negra.")
+    else:
+        await msg.answer("No se encontro en la lista.")
+
+
+@dp.message(Command("wsplimpiarbloqueos"))
+async def cmd_wsp_limpiar_bloqueos(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_lista_negra_accion(msg.from_user.id, "limpiar")
+    eliminados = r.get("eliminados", 0)
+    await msg.answer(f"🗑 Lista negra limpiada. {eliminados} numero(s) eliminados.")
+
+
+# --- AUTO-RESPONDER INTELIGENTE WSP ---
+@dp.callback_query(F.data == "wsp_auto_resp")
+async def cb_wsp_auto_resp(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    await call.answer()
+    r = await wsp.wsp_get_auto_respuestas(call.from_user.id)
+    respuestas = r.get("respuestas", [])
+    total = r.get("total", 0)
+    texto = f"🤖 *AUTO-RESPONDER INTELIGENTE* ({total} reglas)\n\n"
+    if respuestas:
+        for i, ar in enumerate(respuestas[:20], 1):
+            estado = "🟢" if ar.get("activo") else "🔴"
+            texto += f"  {i}. {estado} *{ar.get('palabra_clave', '?')}* → {ar.get('respuesta', '')[:50]}\n"
+            texto += f"      (usado {ar.get('veces_usado', 0)} veces)\n"
+        if total > 20:
+            texto += f"  ... y {total - 20} mas\n"
+    else:
+        texto += "No hay reglas. Cuando alguien te escriba un mensaje con la palabra clave, el bot respondera automaticamente.\n"
+    texto += (
+        "\n📝 *Comandos:*\n"
+        "`/wspautoagregar PALABRA | RESPUESTA`\n"
+        "`/wspautoquitar ID`\n"
+        "`/wspautolimpiar` — borrar todas\n"
+    )
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    botones = [
+        [InlineKeyboardButton(text="🗑 Limpiar todas las reglas", callback_data="wsp_ar_limpiar")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    await safe_edit(call.message, texto, reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+@dp.callback_query(F.data == "wsp_ar_limpiar")
+async def cb_wsp_ar_limpiar(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_auto_respuesta_accion(call.from_user.id, "limpiar")
+    eliminados = r.get("eliminados", 0)
+    await call.answer(f"Reglas limpiadas ({eliminados} eliminadas)")
+    call.data = "wsp_auto_resp"
+    await cb_wsp_auto_resp(call)
+
+
+@dp.message(Command("wspautoagregar"))
+async def cmd_wsp_auto_agregar(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args or "|" not in args:
+        return await msg.answer(
+            "Uso: `/wspautoagregar PALABRA_CLAVE | RESPUESTA`\n\n"
+            "Ejemplo:\n"
+            "`/wspautoagregar precio | Nuestros precios son: Plan Basico $10, Plan Pro $25`\n"
+            "`/wspautoagregar hola | Hola! Gracias por escribirnos. En que podemos ayudarte?`"
+        )
+    parts = args.split("|", 1)
+    palabra = parts[0].strip()
+    respuesta = parts[1].strip()
+    if not palabra or not respuesta:
+        return await msg.answer("Faltan datos. Uso: /wspautoagregar PALABRA | RESPUESTA")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_auto_respuesta_accion(msg.from_user.id, "agregar",
+        palabra_clave=palabra, respuesta=respuesta)
+    if r.get("ok"):
+        await msg.answer(f"🤖 Auto-respuesta agregada!\n\nCuando alguien escriba *{palabra}*, el bot respondera automaticamente.")
+    else:
+        await msg.answer(f"Error: {r.get('message', 'ya existe esta palabra clave')}")
+
+
+@dp.message(Command("wspautoquitar"))
+async def cmd_wsp_auto_quitar(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args:
+        return await msg.answer("Uso: /wspautoquitar ID\n\nVe las IDs en el panel Auto-Responder (/wsp)")
+    try:
+        ar_id = int(args.strip())
+    except ValueError:
+        return await msg.answer("El ID debe ser un numero.")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_auto_respuesta_accion(msg.from_user.id, "eliminar", id=ar_id)
+    if r.get("ok"):
+        await msg.answer("Regla eliminada.")
+    else:
+        await msg.answer("No se encontro la regla.")
+
+
+@dp.message(Command("wspautolimpiar"))
+async def cmd_wsp_auto_limpiar(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_auto_respuesta_accion(msg.from_user.id, "limpiar")
+    eliminados = r.get("eliminados", 0)
+    await msg.answer(f"🗑 {eliminados} regla(s) eliminadas.")
+
+
 # --- ENVIO PERSONAL WSP ---
 @dp.callback_query(F.data == "wsp_personal")
 async def cb_wsp_personal(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
+    if await _mostrar_selector_cuenta(call, "wsp_personal_c_", "envío personal"):
+        return
+    await _ejecutar_personal(call, None)
+
+
+@dp.callback_query(F.data.startswith("wsp_personal_c_"))
+async def cb_wsp_personal_cuenta(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    cuenta = call.data.replace("wsp_personal_c_", "")
+    await _ejecutar_personal(call, cuenta)
+
+
+async def _ejecutar_personal(call, cuenta):
     import wsp_bridge as wsp
-    r = await wsp.wsp_chats_personales(call.from_user.id)
+    r = await wsp.wsp_chats_personales(call.from_user.id, cuenta)
     botones_back = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
     if not r.get("ok"):
@@ -2915,12 +4485,67 @@ async def cb_wsp_personal(call: types.CallbackQuery):
 
     texto += f"\nPara enviar a todos:\n/wsppersonal Tu mensaje aqui\n\nDelay: 10 seg entre cada envio (anti-ban)"
     botones = [
-        [InlineKeyboardButton(text="Cancelar envio activo", callback_data="wsp_cancelar_personal")],
-        [InlineKeyboardButton(text="Volver a WSP", callback_data="sec_wsp")],
+        [InlineKeyboardButton(text="🔍 Detectar chats", callback_data="wsp_detectar_chats")],
+        [InlineKeyboardButton(text="🛑 Cancelar envio activo", callback_data="wsp_cancelar_personal")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
+
+
+@dp.callback_query(F.data == "wsp_detectar_chats")
+async def cb_wsp_detectar_chats(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    if await _mostrar_selector_cuenta(call, "wsp_detchats_c_", "detectar chats personales"):
+        return
+    await _ejecutar_detectar_chats(call, None)
+
+
+@dp.callback_query(F.data.startswith("wsp_detchats_c_"))
+async def cb_wsp_detectar_chats_cuenta(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    cuenta = call.data.replace("wsp_detchats_c_", "")
+    await _ejecutar_detectar_chats(call, cuenta)
+
+
+async def _ejecutar_detectar_chats(call, cuenta):
+    import wsp_bridge as wsp
+    await safe_edit(call.message, "🔍 Detectando todos los chats personales...")
+    await call.answer()
+    r = await wsp.wsp_chats_personales(call.from_user.id, cuenta)
+    botones_back = [
+        [InlineKeyboardButton(text="🔙 Volver a Envio Personal", callback_data="wsp_personal")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
+    if not r.get("ok"):
+        await safe_edit(call.message, f"Error: {r.get('error')}", reply_markup=kb_back)
+        return
+
+    total = r.get("total", 0)
+    chats = r.get("chats", [])
+    if not total:
+        await safe_edit(call.message,
+            "📭 No se encontraron chats personales.\n\n"
+            "La cuenta WSP no tiene conversaciones abiertas aun.",
+            reply_markup=kb_back)
+        return
+
+    texto = f"🔍 *CHATS PERSONALES DETECTADOS: {total}*\n\n"
+    for i, c in enumerate(chats[:50], 1):
+        nombre = c.get("nombre", "?")
+        numero = c.get("numero", "?")
+        texto += f"  {i}. {nombre} — {numero}\n"
+    if total > 50:
+        texto += f"\n  ... y {total - 50} chats mas\n"
+    texto += f"\n━━━━━━━━━━━━━━━━━━\nTotal: {total} chat(s) personales"
+    texto += f"\n\nPara enviar a todos:\n/wsppersonal Tu mensaje aqui"
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    await safe_edit(call.message, texto, reply_markup=kb_back)
 
 
 @dp.message(Command("wsppersonal"))
@@ -2966,6 +4591,419 @@ async def cb_wsp_cancelar_personal(call: types.CallbackQuery):
     else:
         await safe_edit(call.message, "No hay envio personal activo.", reply_markup=kb)
     await call.answer()
+
+
+# --- ENVIO A MIEMBROS DE GRUPO WSP ---
+# Cache de grupos detectados por usuario para paginacion y seleccion
+_miembros_grupos_cache = {}
+GRUPOS_POR_PAGINA = 10
+
+def _render_miembros_page(grupos, page):
+    total_grupos = len(grupos)
+    start = page * GRUPOS_POR_PAGINA
+    end = min(start + GRUPOS_POR_PAGINA, total_grupos)
+    total_pages = (total_grupos + GRUPOS_POR_PAGINA - 1) // GRUPOS_POR_PAGINA
+
+    texto = f"👥 *ENVIO A MIEMBROS* (pag {page+1}/{total_pages})\n\nSelecciona un grupo:\n\n"
+    botones = []
+    for i in range(start, end):
+        g = grupos[i]
+        nombre = g.get("subject", "Sin nombre")[:28]
+        size = g.get("size", "?")
+        texto += f"  {i+1}. {nombre} ({size})\n"
+        botones.append([InlineKeyboardButton(
+            text=f"{i+1}. {nombre} ({size})",
+            callback_data=f"wsp_msel_{i}"
+        )])
+    texto += f"\nTotal: {total_grupos} grupo(s)"
+    texto += "\nDelay: 10 seg entre cada DM (anti-ban)"
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅ Anterior", callback_data=f"wsp_mpag_{page-1}"))
+    if end < total_grupos:
+        nav.append(InlineKeyboardButton(text="Siguiente ➡", callback_data=f"wsp_mpag_{page+1}"))
+    if nav:
+        botones.append(nav)
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    return texto, InlineKeyboardMarkup(inline_keyboard=botones)
+
+
+@dp.callback_query(F.data == "wsp_miembros")
+async def cb_wsp_miembros(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    if await _mostrar_selector_cuenta(call, "wsp_miembros_c_", "envío a miembros"):
+        return
+    await _ejecutar_miembros(call, None)
+
+
+@dp.callback_query(F.data.startswith("wsp_miembros_c_"))
+async def cb_wsp_miembros_cuenta(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    cuenta = call.data.replace("wsp_miembros_c_", "")
+    await _ejecutar_miembros(call, cuenta)
+
+
+async def _ejecutar_miembros(call, cuenta):
+    import wsp_bridge as wsp
+    await safe_edit(call.message, "🔍 Buscando grupos desde tus cuentas WSP...")
+    await call.answer()
+    r = await wsp.wsp_detectar_cliente(call.from_user.id, cuenta)
+    botones_back = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
+    if not r.get("ok"):
+        await safe_edit(call.message, f"Error: {r.get('error')}", reply_markup=kb_back)
+        return
+
+    grupos = r.get("grupos", [])
+    if not grupos:
+        await safe_edit(call.message, "No se encontraron grupos.", reply_markup=kb_back)
+        return
+
+    _miembros_grupos_cache[call.from_user.id] = grupos
+    texto, kb = _render_miembros_page(grupos, 0)
+    await safe_edit(call.message, texto, reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("wsp_mpag_"))
+async def cb_wsp_miembros_pag(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    page = int(call.data.replace("wsp_mpag_", ""))
+    grupos = _miembros_grupos_cache.get(call.from_user.id, [])
+    if not grupos:
+        await call.answer("Vuelve a cargar los grupos")
+        return
+    texto, kb = _render_miembros_page(grupos, page)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wsp_msel_"))
+async def cb_wsp_miembros_grupo(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    idx = int(call.data.replace("wsp_msel_", ""))
+    grupos = _miembros_grupos_cache.get(call.from_user.id, [])
+    if not grupos or idx >= len(grupos):
+        await call.answer("Grupo no encontrado, vuelve a cargar")
+        return
+    grupo = grupos[idx]
+    grupo_jid = grupo.get("jid", "")
+    grupo_nombre = grupo.get("subject", "Sin nombre")
+
+    import wsp_bridge as wsp
+    await safe_edit(call.message, f"🔍 Buscando miembros de '{grupo_nombre}'...")
+    await call.answer()
+    r = await wsp.wsp_miembros_grupo(call.from_user.id, grupo_jid)
+    botones_back = [
+        [InlineKeyboardButton(text="🔙 Volver a grupos", callback_data="wsp_miembros")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
+    if not r.get("ok"):
+        await safe_edit(call.message, f"Error: {r.get('error')}", reply_markup=kb_back)
+        return
+
+    total = r.get("total", 0)
+    miembros = r.get("miembros", [])
+    texto = f"👥 *Miembros de {grupo_nombre}: {total}*\n\n"
+    for i, m in enumerate(miembros[:30], 1):
+        admin_tag = " (admin)" if m.get("admin") else ""
+        texto += f"  {i}. {m.get('numero', '?')}{admin_tag}\n"
+    if total > 30:
+        texto += f"  ... y {total - 30} mas\n"
+
+    texto += f"\nPara enviar DM a todos:\n/wspmiembros {grupo_jid} Tu mensaje aqui\n\nDelay: 10 seg entre cada envio (anti-ban)"
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    botones_back = [
+        [InlineKeyboardButton(text=f"📨 Enviar DM a {total} miembros", callback_data=f"wsp_mdm_{idx}")],
+        [InlineKeyboardButton(text=f"➕ Agregar {total} a otro grupo", callback_data=f"wsp_madd_{idx}")],
+        [InlineKeyboardButton(text="🔙 Volver a grupos", callback_data="wsp_miembros")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
+    await safe_edit(call.message, texto, reply_markup=kb_back)
+
+
+# Cache del grupo origen seleccionado para agregar miembros
+_agregar_origen_cache = {}
+
+# Handler: Enviar DM a miembros desde boton
+@dp.callback_query(F.data.startswith("wsp_mdm_"))
+async def cb_wsp_mdm(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    idx = int(call.data.replace("wsp_mdm_", ""))
+    grupos = _miembros_grupos_cache.get(call.from_user.id, [])
+    if not grupos or idx >= len(grupos):
+        await call.answer("Grupo no encontrado, vuelve a cargar")
+        return
+    grupo = grupos[idx]
+    grupo_jid = grupo.get("jid", "")
+    grupo_nombre = grupo.get("subject", "Sin nombre")
+    botones = [
+        [InlineKeyboardButton(text="🔙 Volver a grupos", callback_data="wsp_miembros")],
+    ]
+    await safe_edit(call.message,
+        f"📨 *Enviar DM a miembros de {grupo_nombre}*\n\n"
+        f"Usa este comando:\n"
+        f"`/wspmiembros {grupo_jid} Tu mensaje aqui`\n\n"
+        f"Reemplaza 'Tu mensaje aqui' con el texto que quieras enviar.\n"
+        f"Delay: 10 seg entre cada envio (anti-ban)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=botones)
+    )
+    await call.answer()
+
+
+# Handler: Agregar miembros a otro grupo - seleccionar destino
+@dp.callback_query(F.data.startswith("wsp_madd_"))
+async def cb_wsp_madd(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    idx = int(call.data.replace("wsp_madd_", ""))
+    grupos = _miembros_grupos_cache.get(call.from_user.id, [])
+    if not grupos or idx >= len(grupos):
+        await call.answer("Grupo no encontrado, vuelve a cargar")
+        return
+    grupo = grupos[idx]
+    grupo_jid = grupo.get("jid", "")
+    grupo_nombre = grupo.get("subject", "Sin nombre")
+    _agregar_origen_cache[call.from_user.id] = {"jid": grupo_jid, "nombre": grupo_nombre, "action": "add"}
+
+    # Mostrar lista de grupos donde soy admin para elegir destino
+    import wsp_bridge as wsp
+    await safe_edit(call.message, "🔍 Buscando grupos donde eres admin...")
+    await call.answer()
+    r = await wsp.wsp_detectar_cliente(call.from_user.id)
+    if not r.get("ok"):
+        await safe_edit(call.message, f"Error: {r.get('error')}")
+        return
+
+    grupos_destino = r.get("grupos", [])
+    # Filtrar el grupo origen
+    grupos_destino = [g for g in grupos_destino if g.get("jid") != grupo_jid]
+    if not grupos_destino:
+        await safe_edit(call.message, "No se encontraron otros grupos donde agregar miembros.")
+        return
+
+    _miembros_grupos_cache[f"{call.from_user.id}_dest"] = grupos_destino
+    texto = f"➕ *AGREGAR MIEMBROS*\n\n"
+    texto += f"Origen: {grupo_nombre}\n\n"
+    texto += f"Selecciona el grupo DESTINO:\n\n"
+    botones = []
+    for i, g in enumerate(grupos_destino[:20]):
+        nombre = g.get("subject", "Sin nombre")[:28]
+        size = g.get("size", "?")
+        texto += f"  {i+1}. {nombre} ({size})\n"
+        botones.append([InlineKeyboardButton(
+            text=f"{i+1}. {nombre} ({size})",
+            callback_data=f"wsp_mdest_{i}"
+        )])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    await safe_edit(call.message, texto, reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+# Handler: Destino seleccionado - ejecutar agregar miembros
+@dp.callback_query(F.data.startswith("wsp_mdest_"))
+async def cb_wsp_mdest(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    idx = int(call.data.replace("wsp_mdest_", ""))
+    grupos_destino = _miembros_grupos_cache.get(f"{call.from_user.id}_dest", [])
+    origen_info = _agregar_origen_cache.get(call.from_user.id, {})
+    if not grupos_destino or idx >= len(grupos_destino) or not origen_info:
+        await call.answer("Datos no encontrados, vuelve a cargar")
+        return
+
+    grupo_destino = grupos_destino[idx]
+    destino_jid = grupo_destino.get("jid", "")
+    destino_nombre = grupo_destino.get("subject", "Sin nombre")
+    origen_jid = origen_info.get("jid", "")
+    origen_nombre = origen_info.get("nombre", "")
+
+    import wsp_bridge as wsp
+    await safe_edit(call.message,
+        f"⏳ *Agregando miembros...*\n\n"
+        f"Origen: {origen_nombre}\n"
+        f"Destino: {destino_nombre}\n\n"
+        f"Esto puede tomar unos minutos..."
+    )
+    await call.answer()
+
+    r = await wsp.wsp_agregar_miembros(call.from_user.id, origen_jid, destino_jid)
+    botones_back = [
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
+
+    if not r.get("ok"):
+        await safe_edit(call.message,
+            f"❌ Error: {r.get('error', 'error desconocido')}",
+            reply_markup=kb_back
+        )
+        return
+
+    agregados = r.get("agregados", 0)
+    errores = r.get("errores", 0)
+    total = r.get("total", 0)
+    texto = f"✅ *Miembros agregados*\n\n"
+    texto += f"Origen: {origen_nombre}\n"
+    texto += f"Destino: {destino_nombre}\n\n"
+    texto += f"📊 Resultados:\n"
+    texto += f"  ✅ Agregados: {agregados}\n"
+    texto += f"  ❌ Errores: {errores}\n"
+    texto += f"  📋 Total intentados: {total}\n"
+    if r.get("error"):
+        texto += f"\n⚠️ {r.get('error')}"
+    await safe_edit(call.message, texto, reply_markup=kb_back)
+
+
+@dp.message(Command("wspmiembros"))
+async def cmd_wsp_miembros(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args or " " not in args:
+        return await msg.answer(
+            "Uso: /wspmiembros GRUPO_JID Tu mensaje aqui\n\n"
+            "Ejemplo: /wspmiembros 120363123456@g.us Hola, te contacto desde el grupo\n\n"
+            "Envia un DM a cada miembro del grupo con delay configurable.\n"
+            "Variables: {nombre} {numero}"
+        )
+    parts = args.split(" ", 1)
+    grupo_jid = parts[0]
+    mensaje = parts[1]
+    import wsp_bridge as wsp
+    r = await wsp.wsp_enviar_miembros(msg.from_user.id, grupo_jid, mensaje)
+    if r.get("ok"):
+        await msg.answer("Envio a miembros iniciado! Recibiras progreso en WhatsApp.\n\nUsa /wspcancelarpersonal para detener.")
+    else:
+        await msg.answer(f"Error: {r.get('error', r.get('message', 'error desconocido'))}")
+
+
+@dp.message(Command("wsplista"))
+async def cmd_wsp_lista(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args:
+        return await msg.answer(
+            "📋 *Enviar a lista de numeros*\n\n"
+            "Formato:\n"
+            "`/wsplista NUMERO1,NUMERO2,NUMERO3 Tu mensaje`\n\n"
+            "Ejemplo:\n"
+            "`/wsplista 51999888777,51999666555 Hola {nombre}!`\n\n"
+            "Variables: {nombre} {numero}\n"
+            "Separa los numeros con comas."
+        )
+    parts = args.split(" ", 1)
+    if len(parts) < 2:
+        return await msg.answer("Falta el mensaje. Uso: /wsplista NUMEROS mensaje")
+    numeros = [n.strip() for n in parts[0].split(",") if n.strip()]
+    mensaje = parts[1]
+    import wsp_bridge as wsp
+    r = await wsp.wsp_enviar_a_lista(msg.from_user.id, numeros, mensaje)
+    if r.get("ok"):
+        await msg.answer(f"Envio iniciado a {len(numeros)} numero(s).\n\nUsa /wspcancelarpersonal para detener.")
+    else:
+        await msg.answer(f"Error: {r.get('error', 'error desconocido')}")
+
+
+@dp.message(Command("wsptasa"))
+async def cmd_wsp_tasa(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_tasa_entrega(msg.from_user.id)
+    if r.get("ok"):
+        texto = (
+            f"📈 *TASA DE ENTREGA*\n\n"
+            f"📨 Total enviados: {r.get('total', 0)}\n"
+            f"✅ Entregados: {r.get('entregados', 0)} ({r.get('tasa_entrega', 0)}%)\n"
+            f"👁 Leidos: {r.get('leidos', 0)} ({r.get('tasa_lectura', 0)}%)\n"
+        )
+        await msg.answer(texto)
+    else:
+        await msg.answer("No hay datos de entrega todavia.")
+
+
+@dp.message(Command("wspbuscargrupos"))
+async def cmd_wsp_buscar_grupos(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args:
+        return await msg.answer(
+            "🔍 *Buscar grupos publicos de WhatsApp*\n\n"
+            "Uso: `/wspbuscargrupos PALABRA_CLAVE`\n\n"
+            "Ejemplo: `/wspbuscargrupos marketing digital`\n\n"
+            "Busca grupos publicos por palabra clave."
+        )
+    import aiohttp
+    await msg.answer(f"🔍 Buscando grupos sobre '{args}'...")
+    try:
+        # Buscar en sitios conocidos de grupos publicos de WhatsApp
+        links_encontrados = []
+        async with aiohttp.ClientSession() as session:
+            urls_busqueda = [
+                f"https://www.google.com/search?q=site:chat.whatsapp.com+{args.replace(' ', '+')}&num=20",
+            ]
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            for url_busqueda in urls_busqueda:
+                try:
+                    async with session.get(url_busqueda, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        html = await resp.text()
+                        import re
+                        links = re.findall(r'https://chat\.whatsapp\.com/[A-Za-z0-9]{15,25}', html)
+                        links_encontrados.extend(links)
+                except Exception:
+                    pass
+        links_encontrados = list(set(links_encontrados))
+        if links_encontrados:
+            texto = f"🔍 *Grupos encontrados para '{args}':* ({len(links_encontrados)})\n\n"
+            for i, link in enumerate(links_encontrados[:20], 1):
+                texto += f"  {i}. {link}\n"
+            texto += "\nUsa estos links para unirte desde el bot (opcion Unirse a Grupo)."
+            if len(texto) > 4000:
+                texto = texto[:4000] + "\n(truncado)"
+            await msg.answer(texto)
+        else:
+            await msg.answer(f"No se encontraron grupos para '{args}'. Intenta con otras palabras clave.")
+    except Exception as e:
+        await msg.answer(f"Error en la busqueda: {str(e)[:200]}")
+
+
+@dp.message(Command("wspreporte"))
+async def cmd_wsp_reporte(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_reporte_diario(msg.from_user.id)
+    if r.get("ok"):
+        texto = (
+            f"📊 *REPORTE DEL DIA*\n\n"
+            f"📨 Total envios: {r.get('totalEnvios', 0)}\n"
+            f"✅ Exitosos: {r.get('exitosos', 0)}\n"
+            f"❌ Fallidos: {r.get('fallidos', 0)}\n"
+            f"💬 Respuestas: {r.get('respuestas', 0)}\n"
+        )
+        por_cuenta = r.get("porCuenta", [])
+        if por_cuenta:
+            texto += "\n📱 Por cuenta:\n"
+            for c in por_cuenta:
+                texto += f"  {c.get('cuenta_nombre', '?')}: {c.get('total', 0)} envios\n"
+        await msg.answer(texto)
+    else:
+        await msg.answer("No hay datos para hoy.")
 
 
 # --- CAMPAÑAS WSP ---
@@ -3212,10 +5250,18 @@ async def cmd_wsp(msg: types.Message):
     import wsp_bridge as wsp
     r = await wsp.wsp_status()
     if r.get("ok"):
-        estado = "🟢 Conectado" if r["status"] == "conectado" else "🔴 Desconectado"
-        numero = r.get("bot_number", "---")
+        st = r["status"]
+        if st == "conectado":
+            estado = "🟢 Conectado"
+        elif st == "solo_api":
+            estado = "🟢 API activa (sin cuenta bot WSP)"
+        elif st == "esperando_qr":
+            estado = "🟡 Esperando QR"
+        else:
+            estado = "🔴 Desconectado"
+        numero = r.get("bot_number") or "(modo solo API)"
     else:
-        estado = "⚠ Sin conexión al bot WSP"
+        estado = "⚠ Sin conexión al servidor WSP"
         numero = "---"
 
     texto = (
@@ -3226,13 +5272,24 @@ async def cmd_wsp(msg: types.Message):
     )
     botones = [
         [InlineKeyboardButton(text="👤 Cuentas WSP", callback_data="wsp_cuentas")],
-        [InlineKeyboardButton(text="🌐 Grupos WSP", callback_data="wsp_grupos")],
+        [InlineKeyboardButton(text="🌐 Grupos WSP", callback_data="wsp_grupos"),
+         InlineKeyboardButton(text="🔍 Detectar Grupos", callback_data="wsp_detectar")],
+        [InlineKeyboardButton(text="✉ Mensajes", callback_data="wsp_mensajes")],
+        [InlineKeyboardButton(text="📤 Enviar Único", callback_data="wsp_enviar_unico"),
+         InlineKeyboardButton(text="⏰ Programados", callback_data="wsp_programados")],
         [InlineKeyboardButton(text="📋 Campañas WSP", callback_data="wsp_campanas")],
         [InlineKeyboardButton(text="🚀 Iniciar campaña", callback_data="wsp_iniciar"),
          InlineKeyboardButton(text="🛑 Detener", callback_data="wsp_detener")],
-        [InlineKeyboardButton(text="📨 Envio Personal", callback_data="wsp_personal")],
-        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial")],
+        [InlineKeyboardButton(text="📨 Envio Personal", callback_data="wsp_personal"),
+         InlineKeyboardButton(text="👥 Envio a Miembros", callback_data="wsp_miembros")],
+        [InlineKeyboardButton(text="⚙ Config Envio", callback_data="wsp_config_envio"),
+         InlineKeyboardButton(text="🚫 Lista Negra", callback_data="wsp_lista_negra")],
+        [InlineKeyboardButton(text="🤖 Auto-Responder", callback_data="wsp_auto_resp")],
+        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial"),
+         InlineKeyboardButton(text="📈 Stats Grupos", callback_data="wsp_grupo_stats")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="👑 Membresía WSP", callback_data="wsp_membresia")],
         kb_volver(),
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
@@ -3384,12 +5441,183 @@ async def cmd_cmdwsp(msg: types.Message):
         "/wspstop ID — Detener campaña\n"
         "/wsppersonal mensaje — Envio a chats personales\n"
         "/wspcancelarpersonal — Cancelar envio personal\n"
+        "/wsppromo — Envio interactivo (espera respuesta)\n"
         "/wspactivar ID dias — Activar membresía WSP\n"
         "/wspdesactivar ID — Desactivar membresía WSP\n"
         "/wspmembresia — Ver membresías WSP\n"
         "/cmdwsp — Esta lista\n"
+        "\n📱 COMANDOS TELEGRAM\n\n"
+        "/tgpersonal mensaje — Envio personal TG\n"
+        "/tgunirse link — Auto-unirse a grupo TG\n"
     )
     await msg.answer(texto)
+
+
+# ╔══════════════════════════════════════╗
+# ║    ENVIO INTERACTIVO (ESPERA RESP)  ║
+# ╚══════════════════════════════════════╝
+@dp.message(Command("wsppromo"))
+async def cmd_wsp_promo(msg: types.Message, state: FSMContext):
+    if not await verificar_membresia(msg):
+        return
+    await state.set_state(WspEnvioInteractivoState.esperando_mensaje_promo)
+    await msg.answer(
+        "📨 ENVIO INTERACTIVO CON RESPUESTA\n\n"
+        "Escribe el mensaje promocional que enviarás.\n"
+        "El bot esperará la respuesta de cada cliente.\n\n"
+        "Ejemplo:\n"
+        "Promocion Netflix 8 soles\n"
+        "Para aceptar comenta SI\n"
+        "Para ignorar comenta NO"
+    )
+
+
+@dp.message(WspEnvioInteractivoState.esperando_mensaje_promo)
+async def recibir_promo_mensaje(msg: types.Message, state: FSMContext):
+    await state.update_data(promo_mensaje=msg.text)
+    await state.set_state(WspEnvioInteractivoState.esperando_palabra_aceptar)
+    await msg.answer(
+        "✅ Mensaje guardado.\n\n"
+        "Ahora escribe la PALABRA CLAVE para ACEPTAR\n"
+        "(la que el cliente debe responder para ser notificado)\n\n"
+        "Ejemplo: si"
+    )
+
+
+@dp.message(WspEnvioInteractivoState.esperando_palabra_aceptar)
+async def recibir_palabra_aceptar(msg: types.Message, state: FSMContext):
+    await state.update_data(palabra_aceptar=msg.text.strip().lower())
+    await state.set_state(WspEnvioInteractivoState.esperando_palabra_rechazar)
+    await msg.answer(
+        "❌ Palabra de aceptar guardada.\n\n"
+        "Ahora escribe la PALABRA CLAVE para RECHAZAR\n"
+        "(la que ignora al cliente)\n\n"
+        "Ejemplo: no"
+    )
+
+
+@dp.message(WspEnvioInteractivoState.esperando_palabra_rechazar)
+async def recibir_palabra_rechazar(msg: types.Message, state: FSMContext):
+    data = await state.get_data()
+    await state.clear()
+
+    palabra_rechazar = msg.text.strip().lower()
+    promo_mensaje = data['promo_mensaje']
+    palabra_aceptar = data['palabra_aceptar']
+    uid = msg.from_user.id
+
+    envios_interactivos[uid] = {
+        "mensaje": promo_mensaje,
+        "aceptar": palabra_aceptar,
+        "rechazar": palabra_rechazar,
+        "aceptados": [],
+        "rechazados": [],
+        "activo": True,
+    }
+
+    import wsp_bridge as wsp
+    await wsp.wsp_promo_registrar(uid, palabra_aceptar, palabra_rechazar)
+    r = await wsp.wsp_enviar_personal(uid, promo_mensaje)
+
+    botones = [
+        [InlineKeyboardButton(text="📊 Ver respuestas", callback_data="promo_ver_resp")],
+        [InlineKeyboardButton(text="🛑 Detener espera", callback_data="promo_detener")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+
+    if r.get("ok"):
+        await msg.answer(
+            f"🚀 ENVIO INTERACTIVO INICIADO\n\n"
+            f"📨 Mensaje: {promo_mensaje[:50]}...\n"
+            f"✅ Aceptar: '{palabra_aceptar}'\n"
+            f"❌ Rechazar: '{palabra_rechazar}'\n\n"
+            f"El bot esta esperando respuestas.\n"
+            f"Te notificaré cuando alguien acepte.",
+            reply_markup=kb
+        )
+    else:
+        await msg.answer(
+            f"⚠ Envio configurado pero hubo un error al enviar:\n"
+            f"{r.get('error', 'error desconocido')}\n\n"
+            f"El bot sigue esperando respuestas de mensajes anteriores.",
+            reply_markup=kb
+        )
+
+
+@dp.callback_query(F.data == "promo_ver_resp")
+async def cb_promo_ver_resp(call: types.CallbackQuery):
+    uid = call.from_user.id
+    import wsp_bridge as wsp
+    r = await wsp.wsp_promo_respuestas(uid)
+    aceptados = r.get("aceptados", [])
+    rechazados = r.get("rechazados", [])
+    activo = r.get("activo", False)
+
+    if not activo:
+        local = envios_interactivos.get(uid)
+        if local:
+            aceptados = local.get("aceptados", [])
+            rechazados = local.get("rechazados", [])
+        else:
+            await call.answer("No hay envio interactivo activo.", show_alert=True)
+            return
+
+    texto = "📊 RESPUESTAS DEL ENVIO INTERACTIVO\n\n"
+    texto += f"✅ Aceptados ({len(aceptados)}):\n"
+    if aceptados:
+        for a in aceptados[:20]:
+            if isinstance(a, dict):
+                texto += f"  • {a.get('nombre', '?')} ({a.get('numero', '?')})\n"
+            else:
+                texto += f"  • {a}\n"
+    else:
+        texto += "  (ninguno aún)\n"
+
+    texto += f"\n❌ Rechazados ({len(rechazados)}):\n"
+    if rechazados:
+        for rec in rechazados[:20]:
+            if isinstance(rec, dict):
+                texto += f"  • {rec.get('nombre', '?')} ({rec.get('numero', '?')})\n"
+            else:
+                texto += f"  • {rec}\n"
+    else:
+        texto += "  (ninguno aún)\n"
+
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+
+    botones = [
+        [InlineKeyboardButton(text="🔄 Actualizar", callback_data="promo_ver_resp")],
+        [InlineKeyboardButton(text="🛑 Detener espera", callback_data="promo_detener")],
+        [InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "promo_detener")
+async def cb_promo_detener(call: types.CallbackQuery):
+    uid = call.from_user.id
+    import wsp_bridge as wsp
+    r = await wsp.wsp_promo_detener(uid)
+    envios_interactivos.pop(uid, None)
+    aceptados = r.get("aceptados", [])
+    rechazados = r.get("rechazados", [])
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+
+    texto = "🛑 Envio interactivo detenido.\n\n📊 Resumen final:\n"
+    texto += f"✅ Aceptados: {len(aceptados)}\n"
+    if aceptados:
+        for a in aceptados[:10]:
+            if isinstance(a, dict):
+                texto += f"  • {a.get('nombre', '?')} ({a.get('numero', '?')})\n"
+    texto += f"❌ Rechazados: {len(rechazados)}"
+
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
 
 
 
@@ -3420,6 +5648,654 @@ async def cb_wsp_check_link(call: types.CallbackQuery):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, f"❌ Error: {r.get('error')}", reply_markup=kb)
+    await call.answer()
+
+
+# ╔══════════════════════════════════════╗
+# ║    DETECTAR GRUPOS VIA CUENTA       ║
+# ╚══════════════════════════════════════╝
+
+async def _mostrar_selector_cuenta(call, prefijo_callback, texto_accion="esta acción"):
+    """Muestra selector de cuenta WSP si hay más de una. Retorna True si se mostró selector."""
+    import wsp_bridge as wsp
+    r = await wsp.wsp_sesiones(call.from_user.id)
+    if not r.get("ok"):
+        return False
+    sesiones = r.get("sesiones", [])
+    if len(sesiones) <= 1:
+        return False
+    texto = f"👤 Selecciona la cuenta WSP para {texto_accion}:\n\n"
+    botones = []
+    for i, s in enumerate(sesiones, 1):
+        texto += f"{i}. {s.get('nombre', '?')} — {s.get('telefono', '?')}\n"
+        botones.append([InlineKeyboardButton(text=f"📱 {s.get('nombre', '?')}", callback_data=f"{prefijo_callback}{s.get('nombre', '')}")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+    return True
+
+
+@dp.callback_query(F.data == "wsp_detectar")
+async def cb_wsp_detectar(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    if await _mostrar_selector_cuenta(call, "wsp_detectar_c_", "detectar grupos"):
+        return
+    await _ejecutar_detectar(call, state, None)
+
+
+@dp.callback_query(F.data.startswith("wsp_detectar_c_"))
+async def cb_wsp_detectar_cuenta(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    cuenta = call.data.replace("wsp_detectar_c_", "")
+    await _ejecutar_detectar(call, state, cuenta)
+
+
+async def _ejecutar_detectar(call, state, cuenta):
+    import wsp_bridge as wsp
+    await safe_edit(call.message, "🔍 Detectando grupos desde tus cuentas WSP...\nEsto puede tardar unos segundos.")
+    await call.answer()
+    r = await wsp.wsp_detectar_cliente(call.from_user.id, cuenta)
+    if not r.get("ok"):
+        botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, f"❌ Error: {r.get('error', 'sin conexión')}", reply_markup=kb)
+        return
+    grupos = r.get("grupos", [])
+    cuenta_nombre = r.get("cuenta", "?")
+    if not grupos:
+        botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, f"📭 La cuenta '{cuenta_nombre}' no está en ningún grupo.", reply_markup=kb)
+        return
+    texto = f"🔍 GRUPOS DETECTADOS (cuenta: {cuenta_nombre})\n\n"
+    for i, g in enumerate(grupos[:50], 1):
+        texto += f"{i}. {g['subject']} ({g['size']} miembros)\n"
+    if len(grupos) > 50:
+        texto += f"\n... y {len(grupos) - 50} más\n"
+    texto += f"\nTotal: {len(grupos)} grupo(s)\n"
+    texto += (
+        "\n━━━━━━━━━━━━━━━━━━\n"
+        "Envía los números de los grupos que quieres agregar:\n"
+        "Ejemplo: 1,3,5,7\n\n"
+        "O presiona 'Agregar todos' para agregar todos"
+    )
+    botones = [
+        [InlineKeyboardButton(text="✅ Agregar todos", callback_data="wsp_detectar_add_all")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    _detected_groups[call.from_user.id] = grupos
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await state.set_state(SeleccionGruposState.esperando_numeros_detectar)
+    await state.update_data(detectar_plataforma="wsp")
+
+_detected_groups = {}
+
+
+@dp.message(SeleccionGruposState.esperando_numeros_detectar)
+async def msg_seleccion_detectar(msg: types.Message, state: FSMContext):
+    texto_input = msg.text.strip().upper()
+    data = await state.get_data()
+    plataforma = data.get("detectar_plataforma", "wsp")
+    await state.clear()
+
+    grupos = _detected_groups.get(msg.from_user.id, [])
+    if not grupos:
+        await msg.answer("❌ No hay grupos detectados. Vuelve a detectar.")
+        return
+
+    if texto_input == "T":
+        seleccionados = grupos
+    else:
+        try:
+            numeros = [int(n.strip()) for n in texto_input.replace(" ", ",").split(",") if n.strip().isdigit()]
+        except ValueError:
+            await msg.answer("❌ Formato inválido. Envía números separados por coma (ej: 1,3,5) o T para todos.")
+            return
+        if not numeros:
+            await msg.answer("❌ No se recibieron números válidos.")
+            return
+        seleccionados = []
+        for n in numeros:
+            if 1 <= n <= len(grupos):
+                seleccionados.append(grupos[n - 1])
+        if not seleccionados:
+            await msg.answer("❌ Ningún número válido. Rango: 1-" + str(len(grupos)))
+            return
+
+    if plataforma == "wsp":
+        import wsp_bridge as wsp
+        added = 0
+        for g in seleccionados:
+            link = g.get("link") or g.get("jid")
+            if link:
+                r = await wsp.wsp_agregar_grupo(msg.from_user.id, link)
+                if r.get("ok"):
+                    added += 1
+        _detected_groups.pop(msg.from_user.id, None)
+        await msg.answer(f"✅ {added} grupo(s) agregados de {len(seleccionados)} seleccionados.")
+    else:
+        added = 0
+        for g in seleccionados:
+            link = g.get("link") or g.get("username") or g.get("title", "")
+            if link:
+                await db.agregar_grupo(msg.from_user.id, link)
+                added += 1
+        _detected_groups.pop(msg.from_user.id, None)
+        await msg.answer(f"✅ {added} grupo(s) TG agregados de {len(seleccionados)} seleccionados.")
+
+
+@dp.callback_query(F.data == "wsp_detectar_add_all")
+async def cb_wsp_detectar_add_all(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.clear()
+    import wsp_bridge as wsp
+    grupos = _detected_groups.get(call.from_user.id, [])
+    if not grupos:
+        await call.answer("No hay grupos detectados.", show_alert=True)
+        return
+    added = 0
+    for g in grupos:
+        link = g.get("link") or g.get("jid")
+        if link:
+            r = await wsp.wsp_agregar_grupo(call.from_user.id, link)
+            if r.get("ok"):
+                added += 1
+    _detected_groups.pop(call.from_user.id, None)
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, f"✅ {added} grupo(s) agregados de {len(grupos)} detectados.", reply_markup=kb)
+    await call.answer()
+
+
+# ╔══════════════════════════════════════╗
+# ║    MENSAJES WSP (CRUD)              ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "wsp_mensajes")
+async def cb_wsp_mensajes(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_mensajes(call.from_user.id)
+    mensajes = r.get("mensajes", []) if r.get("ok") else []
+    texto = "✉ MENSAJES GUARDADOS\n\n"
+    if mensajes:
+        for i, m in enumerate(mensajes, 1):
+            preview = (m.get("texto", "")[:40] + "...") if len(m.get("texto", "")) > 40 else m.get("texto", "")
+            texto += f"{i}. 📝 {m['nombre']}\n   {preview}\n\n"
+    else:
+        texto += "(sin mensajes guardados)\n\n"
+    texto += "Crea un mensaje para luego enviarlo a todos tus grupos de una sola vez."
+    botones = [
+        [InlineKeyboardButton(text="➕ Crear mensaje", callback_data="wsp_msg_crear")],
+    ]
+    if mensajes:
+        for m in mensajes[:10]:
+            botones.append([
+                InlineKeyboardButton(text=f"📝 {m['nombre']}", callback_data=f"wsp_msg_ver_{m['id']}"),
+                InlineKeyboardButton(text="🗑", callback_data=f"wsp_msg_del_{m['id']}"),
+            ])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "wsp_msg_crear")
+async def cb_wsp_msg_crear(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.set_state(MensajeWspState.esperando_nombre)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="wsp_mensajes")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "📝 Envía el *nombre* para identificar este mensaje:\n\n(Ejemplo: promo_netflix, oferta_disney)", reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(MensajeWspState.esperando_nombre)
+async def msg_wsp_nombre(msg: types.Message, state: FSMContext):
+    nombre = msg.text.strip()
+    if not nombre:
+        await msg.answer("❌ El nombre no puede estar vacío.")
+        return
+    await state.update_data(msg_nombre=nombre)
+    await state.set_state(MensajeWspState.esperando_texto)
+    await msg.answer(f"✅ Nombre: *{nombre}*\n\nAhora envía el *texto del mensaje* que quieres guardar:", parse_mode="Markdown")
+
+
+@dp.message(MensajeWspState.esperando_texto)
+async def msg_wsp_texto(msg: types.Message, state: FSMContext):
+    texto = msg.text
+    if not texto:
+        await msg.answer("❌ El texto no puede estar vacío.")
+        return
+    data = await state.get_data()
+    nombre = data.get("msg_nombre", "sin_nombre")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_crear_mensaje(msg.from_user.id, nombre, texto)
+    await state.clear()
+    if r.get("ok"):
+        await msg.answer(f"✅ Mensaje '{nombre}' creado exitosamente!\n\nUsa /wsp para verlo y enviarlo.")
+    else:
+        await msg.answer(f"❌ Error: {r.get('error')}")
+
+
+@dp.callback_query(F.data.startswith("wsp_msg_ver_"))
+async def cb_wsp_msg_ver(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("wsp_msg_ver_", ""))
+    import wsp_bridge as wsp
+    r = await wsp.wsp_mensajes(call.from_user.id)
+    mensajes = r.get("mensajes", []) if r.get("ok") else []
+    mensaje = next((m for m in mensajes if m["id"] == msg_id), None)
+    if not mensaje:
+        await call.answer("Mensaje no encontrado.", show_alert=True)
+        return
+    texto = (
+        f"📝 MENSAJE: {mensaje['nombre']}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"{mensaje['texto']}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📅 Creado: {mensaje.get('fecha_creacion', '?')}\n"
+    )
+    botones = [
+        [InlineKeyboardButton(text="📤 Enviar a todos los grupos", callback_data=f"wsp_enviar_msg_{msg_id}")],
+        [InlineKeyboardButton(text="⏰ Programar envío", callback_data=f"wsp_prog_msg_{msg_id}")],
+        [InlineKeyboardButton(text="🛑 Detener envío", callback_data="wsp_detener")],
+        [InlineKeyboardButton(text="✏ Editar texto", callback_data=f"wsp_msg_edit_{msg_id}"),
+         InlineKeyboardButton(text="📋 Duplicar", callback_data=f"wsp_msg_dup_{msg_id}")],
+        [InlineKeyboardButton(text="🗑 Eliminar", callback_data=f"wsp_msg_del_{msg_id}")],
+        [InlineKeyboardButton(text="🔙 Volver a mensajes", callback_data="wsp_mensajes")],
+    ]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wsp_msg_edit_"))
+async def cb_wsp_msg_edit(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("wsp_msg_edit_", ""))
+    await state.set_state(MensajeWspState.editando_texto)
+    await state.update_data(edit_msg_id=msg_id)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data=f"wsp_msg_ver_{msg_id}")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "✏ Envía el nuevo texto para este mensaje:", reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(MensajeWspState.editando_texto)
+async def msg_wsp_editar_texto(msg: types.Message, state: FSMContext):
+    texto = msg.text
+    if not texto:
+        await msg.answer("❌ El texto no puede estar vacío.")
+        return
+    data = await state.get_data()
+    msg_id = data.get("edit_msg_id")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_editar_mensaje(msg_id, texto)
+    await state.clear()
+    if r.get("ok"):
+        await msg.answer("✅ Mensaje editado exitosamente!\n\nUsa /wsp para verlo.")
+    else:
+        await msg.answer(f"❌ Error: {r.get('error')}")
+
+
+@dp.callback_query(F.data.startswith("wsp_msg_del_"))
+async def cb_wsp_msg_del(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("wsp_msg_del_", ""))
+    import wsp_bridge as wsp
+    r = await wsp.wsp_eliminar_mensaje(msg_id)
+    if r.get("ok"):
+        await call.answer("✅ Mensaje eliminado.", show_alert=True)
+    else:
+        await call.answer(f"❌ Error: {r.get('error')}", show_alert=True)
+    # Volver a la lista
+    await cb_wsp_mensajes(call)
+
+
+# ╔══════════════════════════════════════╗
+# ║    ENVIO UNICO WSP                  ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "wsp_enviar_unico")
+async def cb_wsp_enviar_unico(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_mensajes(call.from_user.id)
+    mensajes = r.get("mensajes", []) if r.get("ok") else []
+    if not mensajes:
+        botones = [
+            [InlineKeyboardButton(text="➕ Crear mensaje primero", callback_data="wsp_msg_crear")],
+            [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+        ]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, "📤 ENVIO UNICO\n\nNo tienes mensajes guardados.\nCrea uno primero para poder enviarlo.", reply_markup=kb)
+        await call.answer()
+        return
+    texto = "📤 ENVIO UNICO\n\nSelecciona el mensaje que quieres enviar a todos tus grupos (una sola vez):\n\n"
+    botones = []
+    for m in mensajes[:10]:
+        preview = (m.get("texto", "")[:30] + "...") if len(m.get("texto", "")) > 30 else m.get("texto", "")
+        texto += f"• {m['nombre']}: {preview}\n"
+        botones.append([InlineKeyboardButton(text=f"📤 {m['nombre']}", callback_data=f"wsp_enviar_msg_{m['id']}")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wsp_enviar_msg_"))
+async def cb_wsp_enviar_msg(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("wsp_enviar_msg_", ""))
+    import wsp_bridge as wsp
+    r = await wsp.wsp_grupos(call.from_user.id)
+    grupos = r.get("grupos", []) if r.get("ok") else []
+    if not grupos:
+        await call.answer("No tienes grupos WSP.", show_alert=True)
+        return
+    texto = f"📤 SELECCIONAR GRUPOS WSP\n\nMensaje ID: {msg_id}\n\n"
+    for i, g in enumerate(grupos, 1):
+        link = g.get("link", "?")
+        if len(link) > 35:
+            link = link[:35] + "..."
+        texto += f"{i}. {link}\n"
+    texto += (
+        f"\nTotal: {len(grupos)} grupo(s)\n"
+        f"\n━━━━━━━━━━━━━━━━━━\n"
+        f"Envía los números de los grupos separados por coma:\n"
+        f"Ejemplo: 1,3,5,7\n\n"
+        f"O envía T para enviar a TODOS"
+    )
+    await state.set_state(SeleccionGruposState.esperando_numeros_wsp)
+    await state.update_data(wsp_enviar_msg_id=msg_id, wsp_grupos_disponibles=grupos)
+    botones = [
+        [InlineKeyboardButton(text="📤 Enviar a TODOS", callback_data=f"wsp_confirmar_envio_{msg_id}")],
+        [InlineKeyboardButton(text="❌ Cancelar", callback_data="wsp_enviar_unico")],
+    ]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(SeleccionGruposState.esperando_numeros_wsp)
+async def msg_seleccion_grupos_wsp(msg: types.Message, state: FSMContext):
+    texto_input = msg.text.strip().upper()
+    data = await state.get_data()
+    msg_id = data.get("wsp_enviar_msg_id")
+    grupos = data.get("wsp_grupos_disponibles", [])
+    await state.clear()
+
+    if texto_input == "T":
+        import wsp_bridge as wsp
+        await msg.answer("🚀 Enviando a TODOS los grupos WSP...")
+        r = await wsp.wsp_enviar_unico(msg.from_user.id, msg_id)
+        if r.get("ok"):
+            await msg.answer(f"✅ Envío iniciado! Enviando a {r.get('grupos', '?')} grupo(s) en segundo plano.")
+        else:
+            await msg.answer(f"❌ Error: {r.get('error')}")
+        return
+
+    try:
+        numeros = [int(n.strip()) for n in texto_input.replace(" ", ",").split(",") if n.strip().isdigit()]
+    except ValueError:
+        await msg.answer("❌ Formato inválido. Envía números separados por coma (ej: 1,3,5) o T para todos.")
+        return
+
+    if not numeros:
+        await msg.answer("❌ No se recibieron números válidos.")
+        return
+
+    seleccionados = []
+    for n in numeros:
+        if 1 <= n <= len(grupos):
+            seleccionados.append(grupos[n - 1])
+
+    if not seleccionados:
+        await msg.answer("❌ Ningún número válido. Rango: 1-" + str(len(grupos)))
+        return
+
+    import wsp_bridge as wsp
+    await msg.answer(f"🚀 Enviando a {len(seleccionados)} grupo(s) seleccionados...")
+    r = await wsp.wsp_enviar_unico(msg.from_user.id, msg_id, grupos_seleccionados=[g.get("link") for g in seleccionados])
+    if r.get("ok"):
+        await msg.answer(f"✅ Envío iniciado! Enviando a {r.get('grupos', len(seleccionados))} grupo(s) en segundo plano.")
+    else:
+        await msg.answer(f"❌ Error: {r.get('error')}")
+
+
+@dp.callback_query(F.data.startswith("wsp_confirmar_envio_"))
+async def cb_wsp_confirmar_envio(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    await state.clear()
+    msg_id = int(call.data.replace("wsp_confirmar_envio_", ""))
+    import wsp_bridge as wsp
+    await safe_edit(call.message, "🚀 Enviando mensaje a todos los grupos...\nTe notificaré cuando termine.")
+    await call.answer()
+    r = await wsp.wsp_enviar_unico(call.from_user.id, msg_id)
+    if r.get("ok"):
+        botones = [
+            [InlineKeyboardButton(text="📊 Ver historial envíos", callback_data="wsp_historial_envios")],
+            [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+        ]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, f"✅ Envío iniciado!\n\n📤 Enviando a {r.get('grupos', '?')} grupo(s).\nEl envío se procesa en segundo plano.", reply_markup=kb)
+    else:
+        botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, f"❌ Error: {r.get('error')}", reply_markup=kb)
+
+
+@dp.callback_query(F.data == "wsp_historial_envios")
+async def cb_wsp_historial_envios(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_envios_unicos(call.from_user.id)
+    envios = r.get("envios", []) if r.get("ok") else []
+    texto = "📊 HISTORIAL DE ENVIOS UNICOS\n\n"
+    if envios:
+        for e in envios[:15]:
+            estado_emoji = {"completado": "✅", "pendiente": "⏳", "enviando": "🔄", "error": "❌"}.get(e.get("estado"), "❓")
+            texto += (
+                f"{estado_emoji} {e.get('mensaje_nombre', '?')}\n"
+                f"   📤 {e.get('grupos_ok', 0)}/{e.get('grupos_total', 0)} | "
+                f"❌ {e.get('grupos_error', 0)} | {e.get('fecha', '?')}\n\n"
+            )
+    else:
+        texto += "(sin envíos registrados)\n"
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# ╔══════════════════════════════════════╗
+# ║    DUPLICAR MENSAJE WSP             ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data.startswith("wsp_msg_dup_"))
+async def cb_wsp_msg_dup(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("wsp_msg_dup_", ""))
+    import wsp_bridge as wsp
+    r = await wsp.wsp_duplicar_mensaje(msg_id)
+    if r.get("ok"):
+        await call.answer("✅ Mensaje duplicado!", show_alert=True)
+        # Volver a la lista de mensajes
+        await cb_wsp_mensajes(call)
+    else:
+        await call.answer(f"❌ Error: {r.get('error')}", show_alert=True)
+
+
+# ╔══════════════════════════════════════╗
+# ║    ENVIOS PROGRAMADOS WSP           ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data.startswith("wsp_prog_msg_"))
+async def cb_wsp_prog_msg(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("wsp_prog_msg_", ""))
+    await state.set_state(ProgramarState.esperando_hora)
+    await state.update_data(prog_msg_id=msg_id)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data=f"wsp_msg_ver_{msg_id}")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        "⏰ PROGRAMAR ENVÍO\n\n"
+        "Envía la hora en formato HH:MM (hora de Perú)\n"
+        "Ejemplo: 14:30\n\n"
+        "¿Quieres que se repita diariamente?\n"
+        "Envía: 14:30 repetir\n"
+        "O solo: 14:30 (una sola vez)",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@dp.message(ProgramarState.esperando_hora)
+async def msg_programar_hora(msg: types.Message, state: FSMContext):
+    texto = msg.text.strip().lower()
+    repetir = "repetir" in texto
+    tiempo = texto.replace("repetir", "").strip()
+    try:
+        partes = tiempo.split(":")
+        hora = int(partes[0])
+        minuto = int(partes[1]) if len(partes) > 1 else 0
+        if hora < 0 or hora > 23 or minuto < 0 or minuto > 59:
+            raise ValueError
+    except (ValueError, IndexError):
+        await msg.answer("❌ Formato inválido. Envía la hora como HH:MM (ej: 14:30)")
+        return
+    data = await state.get_data()
+    msg_id = data.get("prog_msg_id")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_crear_programado(msg.from_user.id, msg_id, hora, minuto, repetir)
+    await state.clear()
+    if r.get("ok"):
+        rep_txt = "🔄 (se repite diariamente)" if repetir else "1️⃣ (una sola vez)"
+        await msg.answer(f"✅ Envío programado para las {hora:02d}:{minuto:02d} (Perú)\n{rep_txt}")
+    else:
+        await msg.answer(f"❌ Error: {r.get('error')}")
+
+
+@dp.callback_query(F.data == "wsp_programados")
+async def cb_wsp_programados(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_programados(call.from_user.id)
+    programados = r.get("programados", []) if r.get("ok") else []
+    texto = "⏰ ENVÍOS PROGRAMADOS\n\n"
+    if programados:
+        for p in programados:
+            estado = "🟢" if p.get("activo") else "🔴"
+            rep = "🔄" if p.get("repetir") else "1️⃣"
+            texto += f"{estado} {p.get('mensaje_nombre', '?')} — {p['hora']:02d}:{p['minuto']:02d} {rep}\n"
+            if p.get("ultimo_envio"):
+                texto += f"   Último: {p['ultimo_envio']}\n"
+            texto += "\n"
+    else:
+        texto += "(sin envíos programados)\n\n"
+    texto += "Para programar, ve a un mensaje y presiona 'Programar envío'."
+    botones = []
+    for p in programados[:10]:
+        botones.append([
+            InlineKeyboardButton(
+                text=f"{'🔴 Desactivar' if p.get('activo') else '🟢 Activar'} {p.get('mensaje_nombre', '?')}",
+                callback_data=f"wsp_prog_toggle_{p['id']}_{0 if p.get('activo') else 1}"
+            ),
+            InlineKeyboardButton(text="🗑", callback_data=f"wsp_prog_del_{p['id']}"),
+        ])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wsp_prog_toggle_"))
+async def cb_wsp_prog_toggle(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    parts = call.data.replace("wsp_prog_toggle_", "").split("_")
+    prog_id = int(parts[0])
+    activo = int(parts[1]) if len(parts) > 1 else 1
+    import wsp_bridge as wsp
+    await wsp.wsp_toggle_programado(prog_id, activo)
+    await call.answer(f"{'🟢 Activado' if activo else '🔴 Desactivado'}", show_alert=True)
+    await cb_wsp_programados(call)
+
+
+@dp.callback_query(F.data.startswith("wsp_prog_del_"))
+async def cb_wsp_prog_del(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    prog_id = int(call.data.replace("wsp_prog_del_", ""))
+    import wsp_bridge as wsp
+    await wsp.wsp_eliminar_programado(prog_id)
+    await call.answer("✅ Envío programado eliminado.", show_alert=True)
+    await cb_wsp_programados(call)
+
+
+# ╔══════════════════════════════════════╗
+# ║    ESTADISTICAS POR GRUPO WSP       ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "wsp_grupo_stats")
+async def cb_wsp_grupo_stats(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_grupo_stats(call.from_user.id)
+    stats = r.get("stats", []) if r.get("ok") else []
+    texto = "📊 ESTADÍSTICAS POR GRUPO\n\n"
+    if stats:
+        for i, s in enumerate(stats[:30], 1):
+            link = s.get("grupo_link", "?")
+            if len(link) > 30:
+                link = link[:30] + "..."
+            tasa = s.get("tasa_exito", 0)
+            emoji = "🟢" if tasa >= 80 else ("🟡" if tasa >= 50 else "🔴")
+            texto += (
+                f"{i}. {emoji} {link}\n"
+                f"   ✅{s.get('exitos', 0)} ❌{s.get('fallidos', 0)} "
+                f"📊{tasa}% | Último: {s.get('ultima_fecha', '?')}\n\n"
+            )
+    else:
+        texto += "(sin estadísticas aún)\n"
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
 
 
@@ -3618,6 +6494,94 @@ async def cmd_grupo_admin(msg: types.Message, command: CommandObject):
 # ╔══════════════════════════════════════╗
 # ║    MAIN                             ║
 # ╚══════════════════════════════════════╝
+# ─── API HTTP para autenticación TG desde el panel web (puerto 3002) ───
+web_auth_sessions = {}  # {token: {client, telefono, nombre, phone_code_hash, user_id}}
+
+async def handle_tg_send_code(request):
+    try:
+        data = await request.json()
+        user_id = str(data.get("u", ""))
+        nombre = data.get("nombre", "").strip()
+        telefono = data.get("telefono", "").strip()
+        if not user_id or not nombre or not telefono:
+            return aiohttp.web.json_response({"ok": False, "error": "falta u, nombre o telefono"})
+        path = get_session_path(int(user_id), nombre)
+        client = TelegramClient(path, API_ID, API_HASH)
+        await client.connect()
+        if await client.is_user_authorized():
+            await db.agregar_sesion(int(user_id), nombre, telefono)
+            await client.disconnect()
+            return aiohttp.web.json_response({"ok": True, "status": "already_authorized"})
+        result = await client.send_code_request(telefono)
+        token = f"{user_id}_{nombre}"
+        web_auth_sessions[token] = {
+            "client": client, "telefono": telefono, "nombre": nombre,
+            "phone_code_hash": result.phone_code_hash, "user_id": int(user_id)
+        }
+        return aiohttp.web.json_response({"ok": True, "status": "code_sent", "token": token})
+    except Exception as e:
+        return aiohttp.web.json_response({"ok": False, "error": str(e)})
+
+async def handle_tg_verify_code(request):
+    try:
+        data = await request.json()
+        token = data.get("token", "")
+        codigo = data.get("codigo", "").strip()
+        if not token or not codigo:
+            return aiohttp.web.json_response({"ok": False, "error": "falta token o codigo"})
+        session = web_auth_sessions.get(token)
+        if not session:
+            return aiohttp.web.json_response({"ok": False, "error": "sesion expirada"})
+        client = session["client"]
+        try:
+            await client.sign_in(session["telefono"], codigo, phone_code_hash=session["phone_code_hash"])
+            await db.agregar_sesion(session["user_id"], session["nombre"], session["telefono"])
+            del web_auth_sessions[token]
+            await client.disconnect()
+            return aiohttp.web.json_response({"ok": True, "status": "authorized"})
+        except SessionPasswordNeededError:
+            return aiohttp.web.json_response({"ok": True, "status": "need_2fa", "token": token})
+    except Exception as e:
+        if token in web_auth_sessions:
+            try: await web_auth_sessions[token]["client"].disconnect()
+            except: pass
+            del web_auth_sessions[token]
+        return aiohttp.web.json_response({"ok": False, "error": str(e)})
+
+async def handle_tg_verify_2fa(request):
+    try:
+        data = await request.json()
+        token = data.get("token", "")
+        password = data.get("password", "").strip()
+        if not token or not password:
+            return aiohttp.web.json_response({"ok": False, "error": "falta token o password"})
+        session = web_auth_sessions.get(token)
+        if not session:
+            return aiohttp.web.json_response({"ok": False, "error": "sesion expirada"})
+        client = session["client"]
+        await client.sign_in(password=password)
+        await db.agregar_sesion(session["user_id"], session["nombre"], session["telefono"])
+        del web_auth_sessions[token]
+        await client.disconnect()
+        return aiohttp.web.json_response({"ok": True, "status": "authorized"})
+    except Exception as e:
+        if token in web_auth_sessions:
+            try: await web_auth_sessions[token]["client"].disconnect()
+            except: pass
+            del web_auth_sessions[token]
+        return aiohttp.web.json_response({"ok": False, "error": str(e)})
+
+async def start_web_auth_server():
+    app = aiohttp.web.Application()
+    app.router.add_post("/api/tg-auth/send-code", handle_tg_send_code)
+    app.router.add_post("/api/tg-auth/verify-code", handle_tg_verify_code)
+    app.router.add_post("/api/tg-auth/verify-2fa", handle_tg_verify_2fa)
+    runner = aiohttp.web.AppRunner(app)
+    await runner.setup()
+    site = aiohttp.web.TCPSite(runner, "127.0.0.1", 3002)
+    await site.start()
+    logger.info("🔑 API auth TG corriendo en http://127.0.0.1:3002")
+
 async def main():
     await db.init_db()
     os.makedirs("sessions", exist_ok=True)
@@ -3631,7 +6595,101 @@ async def main():
             logger.info(f"Reset campaña {cid} (user {uid}) que quedó activa por crash.")
     except Exception:
         pass
+    await start_web_auth_server()
     logger.info("🚀 Bot de Spam J&D v2.0 iniciado correctamente.")
+
+    # Scheduler TG: envios programados cada minuto
+    async def tg_scheduler():
+        while True:
+            await asyncio.sleep(60)
+            try:
+                from datetime import datetime, timedelta, timezone
+                peru_tz = timezone(timedelta(hours=-5))
+                ahora = datetime.now(peru_tz)
+                hora = ahora.hour
+                minuto = ahora.minute
+                hoy = ahora.strftime("%Y-%m-%d")
+
+                programados = await db.tg_get_envios_programados_activos()
+                for prog in programados:
+                    if prog["hora"] != hora or prog["minuto"] != minuto:
+                        continue
+                    if prog.get("ultimo_envio") and prog["ultimo_envio"].startswith(hoy) and not prog.get("repetir"):
+                        continue
+
+                    logger.info(f"[TG Scheduler] Enviando programado #{prog['id']}: {prog.get('mensaje_nombre')}")
+                    await db.tg_actualizar_ultimo_envio(prog["id"])
+                    user_id = prog["user_id"]
+                    grupos = await db.get_grupos(user_id)
+                    sesiones_list = await db.get_sesiones(user_id)
+                    if not grupos or not sesiones_list:
+                        continue
+
+                    envio_id = await db.tg_crear_envio_unico(user_id, prog["mensaje_id"], len(grupos))
+                    ok_count = 0
+                    err_count = 0
+                    sesion = sesiones_list[0]
+                    try:
+                        from telethon import TelegramClient
+                        client = TelegramClient(f"sessions/{sesion['nombre']}", int(os.environ.get("API_ID", "0")), os.environ.get("API_HASH", ""))
+                        await client.connect()
+                        for g in grupos:
+                            try:
+                                entity = await client.get_entity(g["link"])
+                                await client.send_message(entity, prog["texto"])
+                                ok_count += 1
+                            except Exception:
+                                err_count += 1
+                            await asyncio.sleep(5 + __import__('random').random() * 10)
+                        await client.disconnect()
+                    except Exception:
+                        err_count = len(grupos)
+                    await db.tg_actualizar_envio_unico(envio_id, ok_count, err_count, "completado")
+
+                    if not prog.get("repetir"):
+                        await db.tg_toggle_envio_programado(prog["id"], False)
+            except Exception as e:
+                logger.error(f"[TG Scheduler] Error: {e}")
+
+    asyncio.create_task(tg_scheduler())
+
+    # --- Reporte diario automatico ---
+    async def reporte_diario_task():
+        import wsp_bridge as wsp
+        while True:
+            try:
+                ahora = __import__('datetime').datetime.now()
+                # Enviar reporte a las 23:00
+                if ahora.hour == 23 and ahora.minute == 0:
+                    r = await wsp.wsp_status()
+                    # Enviar a todos los usuarios activos
+                    from db import get_all_users
+                    try:
+                        users = await get_all_users()
+                        for u in users:
+                            try:
+                                rr = await wsp.wsp_get_envio_config(u["user_id"])
+                                # Solo si tiene reporte activado (por defecto si)
+                                reporte = await wsp._get("/api/reporte_diario", {"u": str(u["user_id"])})
+                                if reporte.get("ok"):
+                                    d = reporte
+                                    texto = (
+                                        f"📊 *REPORTE DIARIO*\n\n"
+                                        f"📨 Total envios: {d.get('totalEnvios', 0)}\n"
+                                        f"✅ Exitosos: {d.get('exitosos', 0)}\n"
+                                        f"❌ Fallidos: {d.get('fallidos', 0)}\n"
+                                        f"💬 Respuestas: {d.get('respuestas', 0)}\n"
+                                    )
+                                    await bot.send_message(u["user_id"], texto)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                await asyncio.sleep(60)
+            except Exception:
+                await asyncio.sleep(60)
+
+    asyncio.create_task(reporte_diario_task())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

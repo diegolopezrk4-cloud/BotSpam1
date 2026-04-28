@@ -3,9 +3,9 @@ const pino = require("pino");
 const QRCode = require("qrcode");
 const http = require("http");
 const fs = require("fs");
-const config = require("./config");
-const db = require("./db");
-const motor = require("./motor");
+const config = require("./config_wsp");
+const db = require("./db_wsp");
+const motor = require("./motor_wsp");
 
 const QR_PORT = process.env.QR_PORT || 3000;
 
@@ -36,25 +36,56 @@ function addAdminJid(jid) {
     console.log(`\u{1F451} Admin JID registrado: ${jid}`);
 }
 
+// --- Normalizar JID (LID y @s.whatsapp.net al mismo numero) ---
+function normalizeJid(jid) {
+    return jid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+}
+
 // --- Estado de usuarios (FSM) ---
-const userState = {}; // { jid: { screen, data, step } }
+const userState = {}; // { normalizedJid: { screen, data, step } }
 
 function getState(jid) {
-    return userState[jid] || { screen: null, data: {} };
+    return userState[normalizeJid(jid)] || { screen: null, data: {} };
 }
 
 function setState(jid, screen, data = {}) {
-    userState[jid] = { screen, data };
+    userState[normalizeJid(jid)] = { screen, data };
 }
 
 function clearState(jid) {
-    delete userState[jid];
+    delete userState[normalizeJid(jid)];
 }
 
 // --- Variables globales ---
 let botSock = null;
 let currentQR = null;
 let botStatus = "desconectado";
+
+// --- Envíos interactivos (espera respuesta) ---
+const promoConfigs = {}; // { "userId": { aceptar, rechazar, aceptados: [], rechazados: [] } }
+
+// --- Bot Telegram para notificaciones ---
+const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN || "8779002740:AAEGu8ML62y0uFAqpbpSwStm7FJBn3d-KMo";
+const TG_ADMIN_ID = process.env.TG_ADMIN_ID || "8001675901";
+
+async function notifyTelegram(chatId, text) {
+    try {
+        const https = require("https");
+        const data = JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" });
+        const options = {
+            hostname: "api.telegram.org",
+            path: `/bot${TG_BOT_TOKEN}/sendMessage`,
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) },
+        };
+        return new Promise((resolve) => {
+            const req = https.request(options, (res) => { res.on("data", () => {}); res.on("end", resolve); });
+            req.on("error", resolve);
+            req.write(data);
+            req.end();
+        });
+    } catch (e) { console.error("Error notificando Telegram:", e.message); }
+}
 
 // --- Control de mensajes enviados por el bot ---
 const botSentIds = new Set();
@@ -87,6 +118,7 @@ function isAdmin(jid) {
 
 // --- Enviar mensaje helper ---
 async function send(jid, text) {
+    if (!botSock) { console.log(`[NO-WSP] send(${jid}): ${text.substring(0, 80)}...`); return; }
     botIsSending = true;
     try {
         const result = await botSock.sendMessage(jid, { text });
@@ -97,6 +129,7 @@ async function send(jid, text) {
 }
 
 async function sendImage(jid, imagePath, caption = "") {
+    if (!botSock) { console.log(`[NO-WSP] sendImage(${jid})`); return; }
     botIsSending = true;
     try {
         if (fs.existsSync(imagePath)) {
@@ -389,6 +422,21 @@ poll();
                 return res.end(JSON.stringify({ ok: true, link_url: `/link?u=${encodeURIComponent(body.u)}&n=${encodeURIComponent(body.nombre)}` }));
             }
 
+            // POST /api/desvincular — Eliminar cuenta WSP
+            if (url.pathname === "/api/desvincular" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                try {
+                    motor.disconnectClient(body.u, body.nombre);
+                    db.eliminarSesion(body.u, body.nombre);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, msg: `Cuenta '${body.nombre}' eliminada` }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
             // GET /api/usuarios?u=USER_ID — Info de usuario WSP
             if (url.pathname === "/api/usuarios" && req.method === "GET") {
                 const wspId = url.searchParams.get("u");
@@ -409,7 +457,7 @@ poll();
             if (url.pathname === "/api/activar" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.wsp_id || !body.dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta wsp_id o dias" })); }
-                // Buscar usuario por número o ID
+                // Buscar usuario por número o ID (soporta LID con :device)
                 let user = db.getUsuario(body.wsp_id);
                 if (!user) {
                     user = db.findUserByNumber(body.wsp_id);
@@ -418,7 +466,8 @@ poll();
                     res.writeHead(404);
                     return res.end(JSON.stringify({ ok: false, error: "usuario no encontrado" }));
                 }
-                db.activarMembresia(user.wsp_id, parseInt(body.dias));
+                // Activar por numero para cubrir todos los formatos de JID
+                db.activarMembresiaByNumber(jidToNumber(user.wsp_id), parseInt(body.dias));
                 const plan = parseInt(body.dias) === 1 ? "diario" : parseInt(body.dias) === 7 ? "semanal" : "mensual";
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, plan, wsp_id: user.wsp_id, nombre: user.nombre }));
@@ -433,6 +482,29 @@ poll();
                 return res.end(JSON.stringify({ ok: true }));
             }
 
+            // POST /api/sesiones/del — Eliminar sesión/cuenta WSP { u, nombre }
+            if (url.pathname === "/api/sesiones/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                try {
+                    db.eliminarSesion(body.u, body.nombre);
+                    const key = `${body.u}_${body.nombre}`;
+                    if (motor.clientSessions[key]) {
+                        try { motor.clientSessions[key].end(); } catch (e) {}
+                        delete motor.clientSessions[key];
+                    }
+                    const sessDir = `${config.SESSIONS_DIR}/${body.u}_${body.nombre}`;
+                    if (fs.existsSync(sessDir)) {
+                        fs.rmSync(sessDir, { recursive: true, force: true });
+                    }
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
             // GET /api/activas — Campañas activas
             if (url.pathname === "/api/activas") {
                 const activas = motor.getCampanasActivas ? motor.getCampanasActivas() : [];
@@ -440,7 +512,7 @@ poll();
                 return res.end(JSON.stringify({ ok: true, activas }));
             }
 
-            // GET /api/detectar?u=USER_ID — Detectar grupos de WhatsApp (solo donde se puede comentar)
+            // GET /api/detectar?u=USER_ID — Detectar grupos de WhatsApp
             if (url.pathname === "/api/detectar" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
@@ -448,12 +520,8 @@ poll();
                 try {
                     const allGroups = await botSock.groupFetchAllParticipating();
                     const grupos = [];
-                    let filtrados = 0;
                     for (const [jid, meta] of Object.entries(allGroups)) {
-                        if (!motor.esGrupoReal(jid, meta)) {
-                            filtrados++;
-                            continue;
-                        }
+                        if (!jid.endsWith("@g.us")) continue;
                         grupos.push({
                             jid,
                             subject: meta.subject || "Sin nombre",
@@ -462,20 +530,275 @@ poll();
                         });
                     }
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, grupos, filtrados }));
+                    return res.end(JSON.stringify({ ok: true, grupos }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
                 }
             }
 
-            // GET /api/chats_personales?u=USER_ID — Listar chats personales
-            if (url.pathname === "/api/chats_personales" && req.method === "GET") {
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+            // GET /api/detectar_cliente?u=USER_ID&cuenta=NOMBRE — Detectar grupos via cuenta cliente
+            if (url.pathname === "/api/detectar_cliente" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const cuenta = url.searchParams.get("cuenta");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 try {
-                    const chats = await motor.listarChatsPersonales(botSock);
+                    const sesiones = db.getSesiones(userId);
+                    if (!sesiones.length) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "sin cuentas vinculadas" })); }
+                    const nombre = cuenta || sesiones[0].nombre;
+                    const sock = await motor.getOrConnectClient(userId, nombre);
+                    const allGroups = await sock.groupFetchAllParticipating();
+                    const grupos = [];
+                    for (const [jid, meta] of Object.entries(allGroups)) {
+                        if (!motor.esGrupoReal(jid, meta)) continue;
+                        let link = null;
+                        try { link = "https://chat.whatsapp.com/" + (await sock.groupInviteCode(jid)); } catch (e) {}
+                        grupos.push({
+                            jid,
+                            subject: meta.subject || "Sin nombre",
+                            size: meta.participants?.length || 0,
+                            link,
+                        });
+                    }
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, total: chats.length, chats }));
+                    return res.end(JSON.stringify({ ok: true, grupos, cuenta: nombre }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // GET /api/mensajes?u=USER_ID — Lista de mensajes guardados
+            if (url.pathname === "/api/mensajes" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const mensajes = db.getMensajes(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, mensajes }));
+            }
+
+            // POST /api/mensajes/crear — Crear mensaje { u, nombre, texto }
+            if (url.pathname === "/api/mensajes/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre || !body.texto) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, nombre o texto" })); }
+                const id = db.crearMensaje(body.u, body.nombre, body.texto, body.imagen_path || null);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id }));
+            }
+
+            // POST /api/mensajes/editar — Editar mensaje { id, texto }
+            if (url.pathname === "/api/mensajes/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id || !body.texto) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id o texto" })); }
+                db.editarMensaje(body.id, body.texto, body.imagen_path);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/mensajes/del — Eliminar mensaje { id }
+            if (url.pathname === "/api/mensajes/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.eliminarMensaje(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/enviar_unico — Enviar mensaje a todos los grupos una sola vez
+            if (url.pathname === "/api/enviar_unico" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.mensaje_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje_id" })); }
+                const msg = db.getMensajeById(body.mensaje_id);
+                if (!msg) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "mensaje no encontrado" })); }
+                let grupos;
+                if (body.grupos_seleccionados && Array.isArray(body.grupos_seleccionados)) {
+                    grupos = body.grupos_seleccionados.map(link => ({ link }));
+                } else {
+                    grupos = db.getGrupos(body.u);
+                }
+                if (!grupos.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "sin grupos" })); }
+                const sesiones = db.getSesiones(body.u);
+                if (!sesiones.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "sin cuentas vinculadas" })); }
+
+                const envioId = db.crearEnvioUnico(body.u, body.mensaje_id, grupos.length);
+                res.writeHead(200);
+                res.end(JSON.stringify({ ok: true, envio_id: envioId, grupos: grupos.length }));
+
+                // Enviar en background
+                (async () => {
+                    let ok = 0, errores = 0;
+                    const socks = [];
+                    for (const s of sesiones) {
+                        try {
+                            const sock = await motor.getOrConnectClient(body.u, s.nombre);
+                            socks.push(sock);
+                        } catch (e) {}
+                    }
+                    if (!socks.length) {
+                        db.actualizarEnvioUnico(envioId, 0, grupos.length, "error");
+                        return;
+                    }
+                    let sockIdx = 0;
+                    for (const g of grupos) {
+                        const sock = socks[sockIdx % socks.length];
+                        sockIdx++;
+                        try {
+                            const groupJid = await motor.resolveGroupJid ? await motor.resolveGroupJid(sock, g.link) : null;
+                            if (!groupJid) { errores++; continue; }
+                            const texto = motor.variarMensaje(msg.texto, body.u);
+                            const result = await motor.sendToGroup(sock, groupJid, texto, msg.imagen_path);
+                            if (result.sent) { ok++; } else { errores++; }
+                        } catch (e) { errores++; }
+                        // Espera entre envios (5-15s)
+                        await new Promise(r => setTimeout(r, 5000 + Math.random() * 10000));
+                    }
+                    db.actualizarEnvioUnico(envioId, ok, errores, "completado");
+                })();
+                return;
+            }
+
+            // GET /api/envios_unicos?u=USER_ID — Historial de envios unicos
+            if (url.pathname === "/api/envios_unicos" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const envios = db.getEnviosUnicos(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, envios }));
+            }
+
+            // POST /api/mensajes/duplicar — Duplicar mensaje { id }
+            if (url.pathname === "/api/mensajes/duplicar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                const newId = db.duplicarMensaje(body.id);
+                if (!newId) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "mensaje no encontrado" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id: newId }));
+            }
+
+            // GET /api/programados?u=USER_ID — Envios programados
+            if (url.pathname === "/api/programados" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const programados = db.getEnviosProgramados(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, programados }));
+            }
+
+            // POST /api/programados/crear — Programar envio { u, mensaje_id, hora, minuto, repetir }
+            if (url.pathname === "/api/programados/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.mensaje_id || body.hora === undefined || body.minuto === undefined) {
+                    res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, mensaje_id, hora o minuto" }));
+                }
+                const id = db.crearEnvioProgramado(body.u, body.mensaje_id, body.hora, body.minuto, body.repetir ? 1 : 0);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id }));
+            }
+
+            // POST /api/programados/toggle — Activar/desactivar { id, activo }
+            if (url.pathname === "/api/programados/toggle" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.toggleEnvioProgramado(body.id, body.activo);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/programados/del — Eliminar envio programado { id }
+            if (url.pathname === "/api/programados/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.eliminarEnvioProgramado(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/grupo_stats?u=USER_ID — Estadisticas por grupo
+            if (url.pathname === "/api/grupo_stats" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                try {
+                    const stats = db.getGrupoStatsResumen(userId);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, stats: stats || [] }));
+                } catch (e) {
+                    console.error("Error en grupo_stats:", e.message);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, stats: [] }));
+                }
+            }
+
+            // POST /api/autojoin — Auto-unirse a grupos por invite link { u, links: ["https://chat.whatsapp.com/xxx"], cuenta }
+            if (url.pathname === "/api/autojoin" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                const links = body.links || [];
+                const cuenta = body.cuenta;
+                if (!userId || !links.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o links" })); }
+                try {
+                    const sesiones = db.getSesiones(userId);
+                    if (!sesiones.length) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "sin cuentas vinculadas" })); }
+                    const nombre = cuenta || sesiones[0].nombre;
+                    const sock = await motor.getOrConnectClient(userId, nombre);
+                    const resultados = [];
+                    for (const link of links) {
+                        try {
+                            const code = link.replace("https://chat.whatsapp.com/", "").trim();
+                            if (!code) { resultados.push({ link, ok: false, error: "link inválido" }); continue; }
+                            const info = await sock.groupAcceptInvite(code);
+                            resultados.push({ link, ok: true, grupo_jid: info });
+                            // Agregar a la base de datos
+                            db.agregarGrupo(userId, link);
+                        } catch (e) {
+                            resultados.push({ link, ok: false, error: e.message || "no se pudo unir" });
+                        }
+                        await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+                    }
+                    const ok = resultados.filter(r => r.ok).length;
+                    const errores = resultados.filter(r => !r.ok).length;
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, resultados, unidos: ok, fallidos: errores, cuenta: nombre }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // GET /api/chats_personales?u=USER_ID&cuenta=NOMBRE — Listar chats personales
+            if (url.pathname === "/api/chats_personales" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const cuentaParam = url.searchParams.get("cuenta");
+                let sock = null;
+                let cuentaUsada = null;
+                if (cuentaParam && userId) {
+                    try { sock = await motor.getOrConnectClient(userId, cuentaParam); cuentaUsada = cuentaParam; } catch (e) {}
+                }
+                if (!sock) sock = botSock;
+                if (!sock && userId) {
+                    const sesiones = db.getSesiones(userId);
+                    for (const s of sesiones) {
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); cuentaUsada = s.nombre; break; } catch (e) {}
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
+                try {
+                    let chats = await motor.listarChatsPersonales(sock, userId);
+                    // Si obtuvo chats del live, guardar en DB para persistencia
+                    if (chats.length > 0 && cuentaUsada) {
+                        db.guardarChatsPersonales(userId, cuentaUsada, chats.map(c => ({ jid: c.jid, nombre: c.nombre })));
+                    }
+                    // Fallback a DB si live no tiene chats
+                    if (chats.length === 0 && userId) {
+                        const dbChats = db.getChatsPersonales(userId, cuentaUsada);
+                        chats = dbChats.map(c => ({
+                            jid: c.jid,
+                            nombre: c.nombre || c.jid.replace(/@s\.whatsapp\.net$/, ""),
+                            numero: c.jid.replace(/@s\.whatsapp\.net$/, ""),
+                        }));
+                    }
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, total: chats.length, chats, cuenta: cuentaUsada }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -484,27 +807,909 @@ poll();
 
             // POST /api/enviar_personal — Enviar mensaje a chats personales
             if (url.pathname === "/api/enviar_personal" && req.method === "POST") {
+                const body = await readBody();
                 const userId = body.u;
                 const mensaje = body.mensaje;
+                const cuentaParam = body.cuenta;
                 if (!userId || !mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje" })); }
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
-                try {
-                    const started = await motor.enviarAPersonales(userId, mensaje, null, botSock);
+                // Buscar sock: cuenta especifica, botSock, o primera cuenta
+                let sock = null;
+                if (cuentaParam && userId) {
+                    try { sock = await motor.getOrConnectClient(userId, cuentaParam); } catch (e) {}
+                }
+                if (!sock) sock = botSock;
+                if (!sock) {
+                    const sesiones = db.getSesiones(userId);
+                    for (const s of sesiones) {
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); break; } catch (e) {}
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
+                // Verificar si ya hay envio activo
+                if (motor.envioPersonalActivo[userId]) {
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
+                    return res.end(JSON.stringify({ ok: false, error: "ya hay un envio activo. Usa /wspcancelarpersonal para cancelarlo." }));
+                }
+                // Fire-and-forget: iniciar envio en background
+                motor.enviarAPersonales(userId, mensaje, null, sock).catch(e => {
+                    console.error(`Error en envio personal: ${e.message}`);
+                });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, message: "envio iniciado" }));
+            }
+
+            // POST /api/chat_personal_eliminar — Eliminar chat personal de la lista { u, cuenta, jid }
+            if (url.pathname === "/api/chat_personal_eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.jid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o jid" })); }
+                db.eliminarChatPersonal(body.u, body.cuenta || "", body.jid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/chat_personal_agregar — Agregar numero manualmente { u, cuenta, numero }
+            if (url.pathname === "/api/chat_personal_agregar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.numero) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o numero" })); }
+                const jid = db.agregarChatPersonalManual(body.u, body.cuenta || "", body.numero);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, jid }));
+            }
+
+            // POST /api/cancelar_envio_personal — Cancelar envio personal
+            if (url.pathname === "/api/cancelar_envio_personal" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const stopped = motor.detenerEnvioPersonal(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: stopped }));
+            }
+
+            // GET /api/miembros_grupo?u=USER_ID&grupo=GROUP_JID&cuenta=NOMBRE — Listar miembros de un grupo
+            if (url.pathname === "/api/miembros_grupo" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const grupoJid = url.searchParams.get("grupo");
+                const cuentaParam = url.searchParams.get("cuenta");
+                if (!userId || !grupoJid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
+                let sock = null;
+                if (cuentaParam) {
+                    try { sock = await motor.getOrConnectClient(userId, cuentaParam); } catch (e) {}
+                }
+                if (!sock) sock = botSock;
+                if (!sock) {
+                    const sesiones = db.getSesiones(userId);
+                    for (const s of sesiones) {
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); break; } catch (e) {}
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
+                try {
+                    const miembros = await motor.listarMiembrosGrupo(sock, grupoJid);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, total: miembros.length, miembros }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
                 }
             }
 
-            // POST /api/cancelar_envio_personal — Cancelar envio personal
-            if (url.pathname === "/api/cancelar_envio_personal" && req.method === "POST") {
+            // POST /api/enviar_miembros — Enviar DM a miembros de un grupo
+            if (url.pathname === "/api/enviar_miembros" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                const grupoJid = body.grupo;
+                const mensaje = body.mensaje;
+                if (!userId || !grupoJid || !mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, grupo o mensaje" })); }
+                let sock = botSock;
+                if (!sock) {
+                    const sesiones = db.getSesiones(userId);
+                    for (const s of sesiones) {
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); break; } catch (e) {}
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
+                // Verificar si ya hay envio activo
+                if (motor.envioPersonalActivo[userId]) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: false, error: "ya hay un envio activo. Usa /wspcancelarpersonal para cancelarlo." }));
+                }
+                // Fire-and-forget: iniciar envio en background
+                motor.enviarAMiembrosGrupo(userId, grupoJid, mensaje, null, sock).catch(e => {
+                    console.error(`Error en envio a miembros: ${e.message}`);
+                });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, message: "envio a miembros iniciado" }));
+            }
+
+            // GET /api/envio_config?u=USER_ID — Obtener config de envio
+            if (url.pathname === "/api/envio_config" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const cfg = db.getEnvioConfig(userId);
+                const horario = db.getHorarioEnvio(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, config: cfg, horario }));
+            }
+
+            // POST /api/envio_config — Actualizar config de envio
+            if (url.pathname === "/api/envio_config" && req.method === "POST") {
+                const body = await readBody();
                 const userId = body.u;
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
-                const stopped = motor.detenerEnvioPersonal(userId);
+                if (body.delay_seg !== undefined) {
+                    db.setEnvioConfig(userId, body.delay_seg || 10, body.lote_tamano || 0, body.lote_pausa_seg || 300);
+                }
+                if (body.hora_inicio !== undefined) {
+                    db.setHorarioEnvio(userId, body.hora_inicio || 0, body.hora_fin || 24);
+                }
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: stopped }));
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/lista_negra?u=USER_ID — Obtener lista negra
+            if (url.pathname === "/api/lista_negra" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const lista = db.getListaNegra(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, total: lista.length, numeros: lista }));
+            }
+
+            // POST /api/lista_negra — Agregar/eliminar de lista negra
+            if (url.pathname === "/api/lista_negra" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                const accion = body.accion; // "agregar", "eliminar", "limpiar"
+                if (!userId || !accion) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o accion" })); }
+                if (accion === "agregar") {
+                    const ok = db.agregarListaNegra(userId, body.numero, body.razon);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok, message: ok ? "agregado" : "ya existe" }));
+                } else if (accion === "eliminar") {
+                    const ok = db.eliminarListaNegra(userId, body.numero);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok }));
+                } else if (accion === "limpiar") {
+                    const count = db.limpiarListaNegra(userId);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, eliminados: count }));
+                }
+                res.writeHead(400);
+                return res.end(JSON.stringify({ ok: false, error: "accion invalida" }));
+            }
+
+            // GET /api/auto_respuestas?u=USER_ID — Listar auto respuestas
+            if (url.pathname === "/api/auto_respuestas" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const lista = db.getAutoRespuestas(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, total: lista.length, respuestas: lista }));
+            }
+
+            // POST /api/auto_respuestas — CRUD auto respuestas
+            if (url.pathname === "/api/auto_respuestas" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                const accion = body.accion;
+                if (!userId || !accion) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o accion" })); }
+                if (accion === "agregar") {
+                    const ok = db.agregarAutoRespuesta(userId, body.palabra_clave, body.respuesta);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok, message: ok ? "agregado" : "ya existe" }));
+                } else if (accion === "eliminar") {
+                    const ok = db.eliminarAutoRespuesta(userId, body.id);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok }));
+                } else if (accion === "limpiar") {
+                    const count = db.limpiarAutoRespuestas(userId);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, eliminados: count }));
+                }
+                res.writeHead(400);
+                return res.end(JSON.stringify({ ok: false, error: "accion invalida" }));
+            }
+
+            // POST /api/enviar_a_lista — Enviar a lista de numeros especificos
+            if (url.pathname === "/api/enviar_a_lista" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                const numeros = body.numeros; // array de numeros
+                const mensaje = body.mensaje;
+                if (!userId || !numeros || !mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, numeros o mensaje" })); }
+                let sock = botSock;
+                if (!sock) {
+                    const sesiones = db.getSesiones(userId);
+                    for (const s of sesiones) {
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); break; } catch (e) {}
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
+                if (motor.envioPersonalActivo[userId]) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: false, error: "ya hay un envio activo" }));
+                }
+                const jids = numeros.map(n => n.replace(/[^0-9]/g, "") + "@s.whatsapp.net");
+                motor.enviarASeleccionados(userId, jids, mensaje, body.media_path || null, sock).catch(e => {
+                    console.error(`Error en envio a lista: ${e.message}`);
+                });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, message: `envio iniciado a ${jids.length} numero(s)` }));
+            }
+
+            // GET /panel — Panel web completo (sirve panel.html)
+            if (url.pathname === "/panel" && req.method === "GET") {
+                try {
+                    const fs = require("fs");
+                    const path = require("path");
+                    const html = fs.readFileSync(path.join(__dirname, "panel.html"), "utf-8");
+                    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                    return res.end(html);
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end("Error cargando panel: " + e.message);
+                }
+            }
+
+            // (panel legacy - removed, now served from panel.html)
+            if (false) {
+                const userId = null;
+                const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bot de Spam J&D - Panel</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',sans-serif;background:#0f0f23;color:#e0e0e0;min-height:100vh}
+.header{background:linear-gradient(135deg,#1a1a2e,#16213e);padding:20px;text-align:center;border-bottom:2px solid #0f3460}
+.header h1{color:#e94560;font-size:24px}
+.container{max-width:1200px;margin:20px auto;padding:0 20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-top:20px}
+.card{background:#16213e;border-radius:12px;padding:20px;border:1px solid #0f3460;transition:transform 0.2s}
+.card:hover{transform:translateY(-2px)}
+.card h3{color:#e94560;margin-bottom:10px;font-size:16px}
+.stat{font-size:32px;font-weight:bold;color:#4ade80}
+.stat.warn{color:#fbbf24}
+.stat.danger{color:#ef4444}
+.input-group{margin:10px 0}
+.input-group label{display:block;margin-bottom:5px;color:#94a3b8}
+.input-group input,.input-group select{width:100%;padding:8px 12px;border:1px solid #0f3460;border-radius:6px;background:#1a1a2e;color:#e0e0e0}
+.btn{padding:10px 20px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;margin:5px}
+.btn-primary{background:#e94560;color:white}
+.btn-secondary{background:#0f3460;color:white}
+.btn:hover{opacity:0.8}
+.table{width:100%;border-collapse:collapse;margin-top:10px}
+.table th,.table td{padding:8px 12px;text-align:left;border-bottom:1px solid #0f3460}
+.table th{color:#e94560}
+.status-bar{display:flex;gap:20px;margin:15px 0;flex-wrap:wrap}
+.status-item{display:flex;align-items:center;gap:8px}
+.dot{width:10px;height:10px;border-radius:50%}
+.dot.green{background:#4ade80}
+.dot.red{background:#ef4444}
+.dot.yellow{background:#fbbf24}
+#userId{padding:10px;border:1px solid #0f3460;border-radius:6px;background:#1a1a2e;color:white;width:250px;margin:10px}
+.section{margin:30px 0}
+.section h2{color:#e94560;border-bottom:1px solid #0f3460;padding-bottom:10px;margin-bottom:15px}
+</style>
+</head>
+<body>
+<div class="header"><h1>🤖 Bot de Spam J&D v2.0 — Panel de Control</h1></div>
+<div class="container">
+<div style="text-align:center;margin:20px 0">
+<label style="color:#94a3b8">Tu User ID: </label>
+<input id="userId" placeholder="Ingresa tu User ID" value="${userId || ""}">
+<button class="btn btn-primary" onclick="loadAll()">Cargar</button>
+</div>
+<div class="grid">
+<div class="card"><h3>📊 Reporte del Dia</h3><div id="reporte">Cargando...</div></div>
+<div class="card"><h3>📈 Tasa de Entrega</h3><div id="tasa">Cargando...</div></div>
+<div class="card"><h3>⚙ Config de Envio</h3><div id="config">Cargando...</div></div>
+<div class="card"><h3>🚫 Lista Negra</h3><div id="listaNegra">Cargando...</div></div>
+<div class="card"><h3>🤖 Auto-Respuestas</h3><div id="autoResp">Cargando...</div></div>
+<div class="card"><h3>📱 Estado del Sistema</h3><div id="status">Cargando...</div></div>
+</div>
+</div>
+<script>
+const API='';
+function uid(){return document.getElementById('userId').value}
+async function api(path){
+  try{const r=await fetch(API+path);return await r.json()}catch(e){return{ok:false,error:e.message}}
+}
+async function loadAll(){
+  const u=uid();if(!u){alert('Ingresa tu User ID');return}
+  const m=await api('/api/check_membresia?u='+u);
+  if(!m.ok||!m.activa){document.body.innerHTML='<div style="text-align:center;padding:100px;font-family:sans-serif;background:#0f0f23;color:#e94560;min-height:100vh"><h1>⛔ Membresía expirada</h1><p style="color:#e0e0e0;margin-top:20px">Tu membresía ha expirado o no está activa.<br>Contacta al administrador para renovar.</p></div>';return}
+  loadReporte(u);loadTasa(u);loadConfig(u);loadListaNegra(u);loadAutoResp(u);loadStatus();
+}
+async function loadReporte(u){
+  const r=await api('/api/reporte_diario?u='+u);
+  document.getElementById('reporte').innerHTML=r.ok?
+    '<div class="stat">'+r.totalEnvios+'</div>Total envios<br>✅ '+r.exitosos+' exitosos | ❌ '+r.fallidos+' fallidos<br>💬 '+r.respuestas+' respuestas':'Sin datos';
+}
+async function loadTasa(u){
+  const r=await api('/api/tasa_entrega?u='+u);
+  document.getElementById('tasa').innerHTML=r.ok?
+    '<div class="stat">'+r.tasa_entrega+'%</div>Tasa entrega<br>📨 '+r.total+' enviados | ✅ '+r.entregados+' entregados<br>👁 '+r.leidos+' leidos ('+r.tasa_lectura+'%)':'Sin datos';
+}
+async function loadConfig(u){
+  const r=await api('/api/envio_config?u='+u);
+  if(!r.ok){document.getElementById('config').innerHTML='Error';return}
+  const c=r.config||{},h=r.horario||{};
+  document.getElementById('config').innerHTML=
+    '⏱ Delay: <b>'+c.delay_seg+'s</b><br>'+
+    '📦 Lotes: <b>'+(c.lote_tamano>0?c.lote_tamano+' envios, pausa '+c.lote_pausa_seg+'s':'Desactivado')+'</b><br>'+
+    '🕐 Horario: <b>'+(h.hora_inicio===0&&h.hora_fin===24?'24h':h.hora_inicio+':00-'+h.hora_fin+':00')+'</b>';
+}
+async function loadListaNegra(u){
+  const r=await api('/api/lista_negra?u='+u);
+  document.getElementById('listaNegra').innerHTML=r.ok?
+    '<div class="stat'+(r.total>0?' warn':'')+'">'+ r.total+'</div>numeros bloqueados':'Sin datos';
+}
+async function loadAutoResp(u){
+  const r=await api('/api/auto_respuestas?u='+u);
+  document.getElementById('autoResp').innerHTML=r.ok?
+    '<div class="stat">'+r.total+'</div>reglas activas':'Sin datos';
+}
+async function loadStatus(){
+  const r=await api('/api/status');
+  const s=r.ok?r:{};
+  document.getElementById('status').innerHTML=
+    '<div class="status-bar">'+
+    '<div class="status-item"><div class="dot '+(s.botOnline?'green':'red')+'"></div>Bot '+(s.botOnline?'Online':'Offline')+'</div>'+
+    '</div>Cuentas: '+(s.sesiones||0);
+}
+if(uid())loadAll();
+</script>
+</body></html>`;
+                res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                return res.end(html);
+            }
+
+            // GET /api/tasa_entrega?u=USER_ID — Tasa de entrega/lectura
+            if (url.pathname === "/api/tasa_entrega" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const tasa = db.getTasaEntrega(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...tasa }));
+            }
+
+            // GET /api/reporte_diario?u=USER_ID — Reporte del dia
+            if (url.pathname === "/api/reporte_diario" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const reporte = db.getReporteDiario(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...reporte }));
+            }
+
+            // POST /api/agregar_miembros — Agregar miembros de un grupo a otro
+            if (url.pathname === "/api/agregar_miembros" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                const grupoOrigen = body.origen;
+                const grupoDestino = body.destino;
+                if (!userId || !grupoOrigen || !grupoDestino) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, origen o destino" })); }
+                let sock = botSock;
+                if (!sock) {
+                    const sesiones = db.getSesiones(userId);
+                    for (const s of sesiones) {
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); break; } catch (e) {}
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
+                try {
+                    const result = await motor.agregarMiembrosAGrupo(sock, grupoOrigen, grupoDestino, userId);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify(result));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // GET /api/check_membresia?u=TELEGRAM_ID — Verificar membresía
+            if (url.pathname === "/api/check_membresia" && req.method === "GET") {
+                const telegramId = url.searchParams.get("u");
+                if (!telegramId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const membresia = db.checkMembresiPanel(telegramId);
+                const user = db.getPanelUser(telegramId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, activa: membresia.activo, membresia, es_admin: user?.es_admin ? true : false }));
+            }
+
+            // POST /api/panel_registro — Registrar usuario del panel (con demo 1 dia)
+            if (url.pathname === "/api/panel_registro" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id || !body.password || !body.username) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id, password o username" })); }
+                const existing = db.getPanelUser(body.telegram_id);
+                if (existing) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: "ya_registrado" })); }
+                const crypto = require("crypto");
+                const hash = crypto.createHash("sha256").update(body.password).digest("hex");
+                db.registrarPanelUserCompleto(body.telegram_id, hash, body.username);
+                db.registrarActividad(body.telegram_id, 'registro', 'Usuario registrado: ' + body.username);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Registro exitoso. Demo de 1 dia activado." }));
+            }
+
+            // POST /api/panel_login — Login del panel
+            if (url.pathname === "/api/panel_login" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                const user = db.getPanelUser(body.telegram_id);
+                if (!user) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "no_registrado" })); }
+                const crypto = require("crypto");
+                const hash = crypto.createHash("sha256").update(body.password).digest("hex");
+                if (user.password !== hash) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "password_incorrecta" })); }
+                const token = crypto.randomBytes(32).toString("hex");
+                const membresia = db.checkMembresiPanel(body.telegram_id);
+                db.registrarActividad(body.telegram_id, 'login', 'Inicio de sesion');
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, token, telegram_id: body.telegram_id, es_admin: user.es_admin ? true : false, membresia }));
+            }
+
+            // POST /api/panel_cambiar_password — Cambiar contraseña
+            if (url.pathname === "/api/panel_cambiar_password" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id || !body.old_password || !body.new_password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                const user = db.getPanelUser(body.telegram_id);
+                if (!user) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "no_registrado" })); }
+                const crypto = require("crypto");
+                const oldHash = crypto.createHash("sha256").update(body.old_password).digest("hex");
+                if (user.password !== oldHash) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "password_incorrecta" })); }
+                const newHash = crypto.createHash("sha256").update(body.new_password).digest("hex");
+                db.registrarPanelUser(body.telegram_id, newHash);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Password actualizada" }));
+            }
+
+            // POST /api/panel_generar_recovery — Generar código de recuperación
+            if (url.pathname === "/api/panel_generar_recovery" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                const user = db.getPanelUser(body.telegram_id);
+                if (!user) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "no_registrado" })); }
+                const code = db.crearRecoveryCode(body.telegram_id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, code }));
+            }
+
+            // POST /api/panel_reset_password — Resetear password con código de recuperación
+            if (url.pathname === "/api/panel_reset_password" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.code || !body.new_password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta code o new_password" })); }
+                const crypto = require("crypto");
+                const newHash = crypto.createHash("sha256").update(body.new_password).digest("hex");
+                const ok = db.resetPasswordConCodigo(body.code, newHash);
+                if (!ok) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "codigo_invalido" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Password reseteada exitosamente" }));
+            }
+
+            // GET /api/admin/usuarios?u=ADMIN_ID — Listar usuarios del panel (solo admin)
+            if (url.pathname === "/api/admin/usuarios" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!adminId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const admin = db.getPanelUser(adminId);
+                if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
+                const usuarios = db.getAllPanelUsers();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, usuarios }));
+            }
+
+            // POST /api/admin/membresia — Activar/cambiar membresía { admin_id, telegram_id, plan, dias }
+            if (url.pathname === "/api/admin/membresia" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.admin_id || !body.telegram_id || !body.plan || !body.dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                const admin = db.getPanelUser(body.admin_id);
+                if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
+                db.activarMembresiPanel(body.telegram_id, body.plan, parseInt(body.dias));
+                db.registrarActividad(body.admin_id, 'admin_membresia', 'Activar ' + body.plan + ' para ' + body.telegram_id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Membresia actualizada" }));
+            }
+
+            // POST /api/admin/set_admin — Hacer/quitar admin { admin_id, telegram_id, es_admin }
+            if (url.pathname === "/api/admin/set_admin" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.admin_id || !body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                const admin = db.getPanelUser(body.admin_id);
+                if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
+                db.setAdminPanel(body.telegram_id, body.es_admin ? true : false);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/admin/tipo_membresia — Cambiar tipo de membresia (wsp, telegram, wsp+tg)
+            if (url.pathname === "/api/admin/tipo_membresia" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.admin_id || !body.telegram_id || !body.tipo) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                const admin = db.getPanelUser(body.admin_id);
+                if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
+                db.setTipoMembresia(body.telegram_id, body.tipo);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Tipo de membresia actualizado a " + body.tipo }));
+            }
+
+            // GET /api/sesiones_tg?u=ID — List TG sessions
+            if (url.pathname === "/api/sesiones_tg" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const sesiones = db.getSesionesTg(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, sesiones }));
+            }
+
+            // POST /api/sesiones_tg/agregar — Add TG session
+            if (url.pathname === "/api/sesiones_tg/agregar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                db.agregarSesionTg(body.u, body.nombre, body.telefono || '');
+                db.registrarActividad(body.u, 'tg_cuenta_agregada', 'Cuenta TG: ' + body.nombre + (body.telefono ? ' (' + body.telefono + ')' : ''));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Cuenta TG registrada" }));
+            }
+
+            // POST /api/sesiones_tg/eliminar — Delete TG session
+            if (url.pathname === "/api/sesiones_tg/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                db.eliminarSesionTg(body.u, body.nombre);
+                db.registrarActividad(body.u, 'tg_cuenta_eliminada', 'Cuenta TG: ' + body.nombre);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // === TG BOT DATA ENDPOINTS (read from titan.db) ===
+
+            // GET /api/tg/grupos?u=ID — TG groups
+            if (url.pathname === "/api/tg/grupos" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const grupos = db.getTgGrupos(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, grupos }));
+            }
+
+            // GET /api/tg/mensajes?u=ID — TG messages
+            if (url.pathname === "/api/tg/mensajes" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const mensajes = db.getTgMensajes(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, mensajes }));
+            }
+
+            // GET /api/tg/campanas?u=ID — TG campaigns
+            if (url.pathname === "/api/tg/campanas" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const campanas = db.getTgCampanas(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, campanas }));
+            }
+
+            // GET /api/tg/historial?u=ID — TG send history
+            if (url.pathname === "/api/tg/historial" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const limite = parseInt(url.searchParams.get("limite")) || 50;
+                const historial = db.getTgHistorialEnvios(uid, limite);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, historial }));
+            }
+
+            // GET /api/tg/programados?u=ID — TG scheduled sends
+            if (url.pathname === "/api/tg/programados" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const programados = db.getTgProgramados(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, programados }));
+            }
+
+            // GET /api/tg/autoresponder?u=ID — TG auto responder config
+            if (url.pathname === "/api/tg/autoresponder" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const data = db.getTgAutoResponder(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...data }));
+            }
+
+            // GET /api/tg/stats?u=ID — TG statistics
+            if (url.pathname === "/api/tg/stats" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const stats = db.getTgStats(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, stats }));
+            }
+
+            // === TG WRITE ENDPOINTS ===
+
+            // POST /api/tg/grupos/add — add TG group
+            if (url.pathname === "/api/tg/grupos/add" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.link) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o link" })); }
+                const ok = db.addTgGrupo(body.u, body.link);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/grupos/del — delete TG group
+            if (url.pathname === "/api/tg/grupos/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.link) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o link" })); }
+                const ok = db.delTgGrupo(body.u, body.link);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/grupos/delall — delete all TG groups
+            if (url.pathname === "/api/tg/grupos/delall" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const ok = db.delAllTgGrupos(body.u);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // POST /api/tg/mensajes/crear
+            if (url.pathname === "/api/tg/mensajes/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre || !body.texto) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, nombre o texto" })); }
+                const id = db.crearTgMensaje(body.u, body.nombre, body.texto, body.foto);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: !!id, id }));
+            }
+            // POST /api/tg/mensajes/editar
+            if (url.pathname === "/api/tg/mensajes/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.editarTgMensaje(body.u, body.id, body.nombre, body.texto);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/mensajes/del
+            if (url.pathname === "/api/tg/mensajes/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.eliminarTgMensaje(body.u, body.id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/mensajes/duplicar
+            if (url.pathname === "/api/tg/mensajes/duplicar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.duplicarTgMensaje(body.u, body.id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // POST /api/tg/campanas/crear
+            if (url.pathname === "/api/tg/campanas/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                const id = db.crearTgCampana(body.u, body.nombre, body.mensaje_id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: !!id, id }));
+            }
+            // POST /api/tg/campanas/del
+            if (url.pathname === "/api/tg/campanas/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.eliminarTgCampana(body.u, body.id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // POST /api/tg/programados/crear
+            if (url.pathname === "/api/tg/programados/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.mensaje_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje_id" })); }
+                const id = db.crearTgProgramado(body.u, body.mensaje_id, body.hora || 0, body.minuto || 0, body.repetir);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: !!id, id }));
+            }
+            // POST /api/tg/programados/toggle
+            if (url.pathname === "/api/tg/programados/toggle" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.toggleTgProgramado(body.u, body.id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/programados/del
+            if (url.pathname === "/api/tg/programados/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.eliminarTgProgramado(body.u, body.id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // POST /api/tg/autoresponder/toggle
+            if (url.pathname === "/api/tg/autoresponder/toggle" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const ok = db.setTgAutoResponder(body.u, body.activo);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/autoresponder/keyword/add
+            if (url.pathname === "/api/tg/autoresponder/keyword/add" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.keyword || !body.respuesta) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta datos" })); }
+                const ok = db.addTgKeyword(body.u, body.keyword, body.respuesta);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/autoresponder/keyword/del
+            if (url.pathname === "/api/tg/autoresponder/keyword/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const ok = db.delTgKeyword(body.u, body.id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/autoresponder/keyword/delall
+            if (url.pathname === "/api/tg/autoresponder/keyword/delall" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const ok = db.delAllTgKeywords(body.u);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // GET /api/tg/listanegra?u=ID
+            if (url.pathname === "/api/tg/listanegra" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const lista = db.getTgListaNegra(uid);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true, lista }));
+            }
+            // POST /api/tg/listanegra/add
+            if (url.pathname === "/api/tg/listanegra/add" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.grupo) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
+                const ok = db.addTgListaNegra(body.u, body.grupo);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/listanegra/del
+            if (url.pathname === "/api/tg/listanegra/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.grupo) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
+                const ok = db.delTgListaNegra(body.u, body.grupo);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+            // POST /api/tg/listanegra/limpiar
+            if (url.pathname === "/api/tg/listanegra/limpiar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const ok = db.limpiarTgListaNegra(body.u);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // GET /api/tg/config?u=ID
+            if (url.pathname === "/api/tg/config" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const config = db.getTgConfigEnvio(uid);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true, config }));
+            }
+            // POST /api/tg/config
+            if (url.pathname === "/api/tg/config" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const ok = db.setTgConfigEnvio(body.u, body.delay_seg, body.lote_tamano, body.lote_pausa_seg);
+                res.writeHead(200); return res.end(JSON.stringify({ ok }));
+            }
+
+            // GET /api/actividad?u=ID&limite=50 — Activity logs
+            if (url.pathname === "/api/actividad" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const limite = parseInt(url.searchParams.get("limite")) || 50;
+                const logs = db.getActividadUsuario(uid, limite);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs }));
+            }
+
+            // GET /api/actividad_admin?u=ADMIN_ID — All activity logs (admin only)
+            if (url.pathname === "/api/actividad_admin" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!adminId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const admin = db.getPanelUser(adminId);
+                if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
+                const logs = db.getActividadTodos(parseInt(url.searchParams.get("limite")) || 100);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs }));
+            }
+
+            // GET /api/plantillas?u=ID — Get message templates
+            if (url.pathname === "/api/plantillas" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const plantillas = db.getPlantillas(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, plantillas }));
+            }
+
+            // POST /api/plantillas/crear — Create a template
+            if (url.pathname === "/api/plantillas/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                db.crearPlantilla(body.u, body.nombre, body.mensaje);
+                db.registrarActividad(body.u, 'plantilla_creada', 'Plantilla: ' + body.nombre);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/plantillas/del — Delete a template
+            if (url.pathname === "/api/plantillas/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                db.eliminarPlantilla(body.u, body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/historial_panel?u=ID — Send history with filters
+            if (url.pathname === "/api/historial_panel" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const filtros = {
+                    tipo: url.searchParams.get("tipo") || null,
+                    resultado: url.searchParams.get("resultado") || null,
+                    desde: url.searchParams.get("desde") || null,
+                    hasta: url.searchParams.get("hasta") || null,
+                    limite: parseInt(url.searchParams.get("limite")) || 100
+                };
+                const historial = db.getHistorialEnviosPanel(uid, filtros);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, historial }));
+            }
+
+            // GET /api/limites?u=ID — Membership limits
+            if (url.pathname === "/api/limites" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const limites = db.getLimitesMembresia(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, limites }));
+            }
+
+            // GET /api/envios_chart?u=ID&dias=7 — Chart data for dashboard
+            if (url.pathname === "/api/envios_chart" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const dias = parseInt(url.searchParams.get("dias")) || 7;
+                const data = db.getEnviosPorDia(uid, dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
+            }
+
+            // POST /api/promo/registrar — Registrar envio interactivo { u, palabra_aceptar, palabra_rechazar }
+            if (url.pathname === "/api/promo/registrar" && req.method === "POST") {
+                const body2 = await readBody();
+                if (!body2.u || !body2.palabra_aceptar) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o palabra_aceptar" })); }
+                promoConfigs[body2.u] = {
+                    aceptar: body2.palabra_aceptar.toLowerCase(),
+                    rechazar: (body2.palabra_rechazar || "no").toLowerCase(),
+                    aceptados: [],
+                    rechazados: [],
+                };
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/promo/respuestas?u=USER_ID — Ver respuestas del envio interactivo
+            if (url.pathname === "/api/promo/respuestas" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const config = promoConfigs[userId];
+                if (!config) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, aceptados: [], rechazados: [], activo: false }));
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, aceptados: config.aceptados, rechazados: config.rechazados, activo: true }));
+            }
+
+            // POST /api/promo/detener — Detener envio interactivo { u }
+            if (url.pathname === "/api/promo/detener" && req.method === "POST") {
+                const body2 = await readBody();
+                if (!body2.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const config = promoConfigs[body2.u];
+                delete promoConfigs[body2.u];
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, aceptados: config?.aceptados || [], rechazados: config?.rechazados || [] }));
             }
 
             // Endpoint no encontrado
@@ -580,12 +1785,6 @@ server.listen(QR_PORT, "0.0.0.0", () => {
 
 // --- INICIO DEL BOT ---
 async function startBot() {
-    db.init();
-    db.setAdminJids(adminJids);
-    fs.mkdirSync("sessions", { recursive: true });
-    fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
-    fs.mkdirSync("media", { recursive: true });
-
     const { state, saveCreds } = await useMultiFileAuthState("sessions");
 
     let version;
@@ -709,6 +1908,26 @@ async function startBot() {
             const pushName = msg.pushName || jidToNumber(jid);
             console.log(`\u{1F4E9} Mensaje: fromMe=${msg.key.fromMe}, jid=${jid}, texto="${text.substring(0,50)}", isAdmin=${isAdmin(jid)}`);
 
+            // --- Detectar respuestas a envios interactivos (promo) ---
+            if (!msg.key.fromMe && text.trim() && !jid.endsWith("@g.us")) {
+                const respLower = text.trim().toLowerCase();
+                for (const [promoUid, promoConfig] of Object.entries(promoConfigs)) {
+                    const nombre = pushName || jidToNumber(jid);
+                    const numero = jidToNumber(jid);
+                    if (respLower === promoConfig.aceptar || respLower.includes(promoConfig.aceptar)) {
+                        promoConfig.aceptados.push({ nombre, numero, fecha: new Date().toISOString() });
+                        console.log(`\u2705 Promo aceptada por ${nombre} (${numero}) para user ${promoUid}`);
+                        // Notificar al Telegram del usuario
+                        const tgNotif = `\u2705 <b>ACEPTADO (WSP)</b>\n\n\u{1F464} ${nombre}\n\u{1F4F1} ${numero}\n\u23F0 ${new Date().toLocaleString("es-PE", { timeZone: "America/Lima" })}`;
+                        notifyTelegram(promoUid, tgNotif).catch(() => {});
+                        notifyTelegram(TG_ADMIN_ID, tgNotif).catch(() => {});
+                    } else if (respLower === promoConfig.rechazar || respLower.includes(promoConfig.rechazar)) {
+                        promoConfig.rechazados.push({ nombre, numero, fecha: new Date().toISOString() });
+                        console.log(`\u274C Promo rechazada por ${nombre} (${numero})`);
+                    }
+                }
+            }
+
             if (msg.key.fromMe) {
                 if (!isAdmin(jid)) continue;
                 const trimCheck = text.trim();
@@ -770,17 +1989,17 @@ async function handleMessage(jid, msg) {
     const cleanText = trimmed.replace(/^\*+|\*+$/g, "").trim();
     const cleanLower = cleanText.toLowerCase();
 
-    // Volver al menu
-    if (lower === "0" || lower === "menu" || lower === "volver") {
-        clearState(jid);
-        return await sendMainMenu(jid, pushName);
-    }
-
     // Cancelar envio personal
     if (lower === "cancelar envio" || lower === "cancelarenvio") {
         const stopped = motor.detenerEnvioPersonal(jid);
         if (stopped) return await send(jid, "\u{1F6D1} Envio personal cancelado.");
         return await send(jid, "\u274C No hay envio personal activo.");
+    }
+
+    // Volver al menu
+    if (lower === "0" || lower === "menu" || lower === "volver") {
+        clearState(jid);
+        return await sendMainMenu(jid, pushName);
     }
 
     // Comando /soyadmin
@@ -904,7 +2123,6 @@ async function handleMessage(jid, msg) {
             case "20": return await showExportar(jid);
             case "21": return await showLimiteDiario(jid);
             case "22": return await showReporteDiario(jid);
-            case "23": return await showEnvioPersonal(jid);
             default:
                 return;
         }
@@ -1022,8 +2240,6 @@ async function showCmds(jid) {
         texto += `/exportar \u2014 Exportar/Importar datos\n`;
         texto += `/limitediario \u2014 Limite envios por dia\n`;
         texto += `/reporte \u2014 Reporte diario\n`;
-        texto += `/personal \u2014 Envio a chats personales\n`;
-        texto += `/cancelarenvio \u2014 Cancelar envio personal\n`;
         texto += `\n\u2501\u2501 *ADMIN (Grupo)* \u2501\u2501\n`;
         texto += `/activar [codigo] [dias] \u2014 Activar membresia\n`;
         texto += `/desactivar [codigo] \u2014 Desactivar\n`;
@@ -1225,6 +2441,47 @@ async function showCuentas(jid) {
 // ====================================
 // GESTION DE GRUPOS
 // ====================================
+// ====================================
+// ENVIO PERSONAL
+// ====================================
+async function showEnvioPersonal(jid) {
+    if (!await checkMembership(jid)) return;
+    await send(jid, "\u{1F50D} Buscando chats personales...");
+    try {
+        // Usar botSock o cuenta cliente
+        let sock = botSock;
+        if (!sock) {
+            const sesiones = db.getSesiones(jid);
+            for (const s of sesiones) {
+                try { sock = await motor.getOrConnectClient(jid, s.nombre); break; } catch (e) {}
+            }
+        }
+        if (!sock) {
+            return await send(jid, "\u274C No hay cuenta WSP conectada.\nVincula una cuenta primero desde Telegram.\n\n*0.* Volver");
+        }
+        const chats = await motor.listarChatsPersonales(sock, jid);
+        if (!chats.length) {
+            return await send(jid,
+                `\u274C No se encontraron chats personales.\n\nLa cuenta necesita unos minutos para sincronizar el historial de chats despues de conectarse.\n\n*0.* Volver`
+            );
+        }
+        let texto = `\u{1F4E8} *ENVIO PERSONAL*\n\n`;
+        texto += `\u{1F464} *${chats.length} chat(s) personales encontrados:*\n\n`;
+        for (let i = 0; i < Math.min(chats.length, 50); i++) {
+            texto += `  ${i + 1}. ${chats[i].nombre} (${chats[i].numero})\n`;
+        }
+        if (chats.length > 50) texto += `  ... y ${chats.length - 50} mas\n`;
+        texto += `\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n`;
+        texto += `*1.* \u{1F4E8} Enviar a TODOS\n`;
+        texto += `*2.* \u{1F4CB} Seleccionar contactos\n`;
+        texto += `*0.* \u{1F519} Volver al menu`;
+        setState(jid, "envio_personal", { chats });
+        await send(jid, texto);
+    } catch (e) {
+        await send(jid, `\u274C Error al listar chats: ${e.message}`);
+    }
+}
+
 async function showGrupos(jid) {
     if (!await checkMembership(jid)) return;
     const grupos = db.getGrupos(jid);
@@ -1247,7 +2504,6 @@ async function showGrupos(jid) {
         texto += "*3.* \u{1F5D1} Eliminar grupo\n";
         texto += "*4.* \u270F Editar grupo\n";
         texto += "*5.* \u{1F5D1} Eliminar todos\n";
-        texto += "*6.* \u{1F517} Unirse a grupos (por link)\n";
     }
     texto += "*0.* \u{1F519} Volver al men\u00FA";
     setState(jid, "grupos");
@@ -1425,44 +2681,6 @@ async function adminUsuarios(jid) {
 }
 
 // ====================================
-// ENVIO PERSONAL (Chats individuales)
-// ====================================
-async function showEnvioPersonal(jid) {
-    if (!await checkMembership(jid)) return;
-    await send(jid, "\u{1F50D} Buscando chats personales...");
-
-    try {
-        const chats = await motor.listarChatsPersonales(botSock);
-        if (!chats.length) {
-            return await send(jid,
-                `\u274C No se encontraron chats personales.\n\n` +
-                `\u{1F4A1} Asegurate de que el bot tenga conversaciones abiertas con tus clientes.\n\n` +
-                `*0.* \u{1F519} Volver`
-            );
-        }
-
-        let texto = `\u{1F4E8} *ENVIO PERSONAL*\n\n`;
-        texto += `\u{1F464} *${chats.length} chat(s) personales encontrados:*\n\n`;
-        for (let i = 0; i < Math.min(chats.length, 50); i++) {
-            texto += `  ${i + 1}. ${chats[i].nombre} (${chats[i].numero})\n`;
-        }
-        if (chats.length > 50) {
-            texto += `  ... y ${chats.length - 50} mas\n`;
-        }
-        texto += `\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n`;
-        texto += `*1.* \u{1F4E8} Enviar a TODOS (${chats.length})\n`;
-        texto += `*2.* \u{1F4CB} Seleccionar contactos\n`;
-        texto += `*0.* \u{1F519} Volver al menu\n\n`;
-        texto += `\u23F1 Delay: 10 seg entre cada envio (anti-ban)`;
-
-        setState(jid, "envio_personal", { chats });
-        await send(jid, texto);
-    } catch (e) {
-        await send(jid, `\u274C Error al listar chats: ${e.message}\n\n*0.* Volver`);
-    }
-}
-
-// ====================================
 // FSM (Finite State Machine)
 // ====================================
 async function handleFSM(jid, msg, text, trimmed, state) {
@@ -1589,7 +2807,7 @@ async function handleFSM(jid, msg, text, trimmed, state) {
                 // ============================================================
                 // CAMBIO: Detectar solo GRUPOS reales (no canales/newsletters)
                 // ============================================================
-                await send(jid, "\u{1F50D} Buscando grupos en el WhatsApp del bot...\n\u26A0 Solo se mostraran *grupos donde se puede comentar* (no canales, ni solo lectura).");
+                await send(jid, "\u{1F50D} Buscando grupos en el WhatsApp del bot...\n\u26A0 Solo se mostraran *grupos reales* (no canales).");
                 try {
                     const allGroups = await botSock.groupFetchAllParticipating();
                     const groupIds = Object.keys(allGroups);
@@ -1604,12 +2822,11 @@ async function handleFSM(jid, msg, text, trimmed, state) {
                     }
 
                     if (!realGroups.length) {
-                        return await send(jid, "\u274C No se encontraron grupos donde se pueda comentar.\n\nSolo se encontraron canales, grupos de solo lectura o newsletters.\n\nEscribe *0* para volver.");
+                        return await send(jid, "\u274C El bot no esta en ningun grupo real (solo canales/newsletters encontrados).\n\nEscribe *0* para volver.");
                     }
 
-                    const filtrados = groupIds.length - realGroups.length;
                     let texto = `\u{1F50D} *${realGroups.length} GRUPOS ENCONTRADOS*\n`;
-                    texto += `(${filtrados} canales/solo lectura/newsletters filtrados)\n\n`;
+                    texto += `(${groupIds.length - realGroups.length} canales/newsletters filtrados)\n\n`;
                     for (let i = 0; i < realGroups.length; i++) {
                         texto += `*${i + 1}.* ${realGroups[i].name} (${realGroups[i].members})\n`;
                     }
@@ -1654,23 +2871,6 @@ async function handleFSM(jid, msg, text, trimmed, state) {
             if (trimmed === "5") {
                 setState(jid, "grupos_delall_confirm");
                 return await send(jid, "\u26A0 \u00BFEliminar TODOS los grupos?\n\n*1.* S\u00ED, eliminar todos\n*0.* No, cancelar");
-            }
-            if (trimmed === "6") {
-                const grupos = db.getGrupos(jid);
-                const gruposConLink = grupos.filter(g => g.link.includes("chat.whatsapp.com/"));
-                if (!gruposConLink.length) {
-                    return await send(jid, "\u274C No hay grupos con links de invitacion.\n\nSolo se puede unirse a grupos con links chat.whatsapp.com\n\n*0.* Volver");
-                }
-                await send(jid,
-                    `\u{1F517} *UNIRSE A GRUPOS*\n\n` +
-                    `Se intentara unirse a ${gruposConLink.length} grupo(s) con link de invitacion.\n\n` +
-                    `\u26A0 Esto puede tardar unos minutos.\n` +
-                    `Se dejara 5 seg entre cada grupo para evitar ban.\n\n` +
-                    `*1.* \u2705 Si, unirse a todos\n` +
-                    `*0.* Cancelar`
-                );
-                setState(jid, "grupos_join_confirm", { gruposConLink });
-                return;
             }
             return await sendMainMenu(jid, pushName);
         }
@@ -1720,9 +2920,7 @@ async function handleFSM(jid, msg, text, trimmed, state) {
             const maxG = db.getMaxGrupos(jid);
             const current = db.getGrupos(jid);
             let added = 0, errors = 0, skipped = 0, dupes = 0;
-
             await send(jid, `\u23F3 Procesando ${lines.length} link(s)...`);
-
             for (const link of lines) {
                 if (current.length + added >= maxG) {
                     skipped++;
@@ -1737,7 +2935,6 @@ async function handleFSM(jid, msg, text, trimmed, state) {
                 }
             }
             clearState(jid);
-
             let resp = `\u{1F4CB} *RESULTADO DE AGREGAR GRUPOS*\n\n`;
             resp += `\u{1F4E5} Total links recibidos: ${lines.length}\n`;
             if (added) resp += `\u2705 Agregados: ${added}\n`;
@@ -1746,58 +2943,89 @@ async function handleFSM(jid, msg, text, trimmed, state) {
             if (skipped) resp += `\u{1F6AB} Limite alcanzado (${maxG}): ${skipped} omitidos\n`;
             if (!added && !dupes && !errors && !skipped) resp += `\u274C No se agrego ningun grupo.\n`;
             resp += `\n\u{1F310} Total grupos ahora: ${current.length + added}/${maxG}`;
-
             await send(jid, resp);
             return await showGrupos(jid);
         }
 
-        case "grupos_join_confirm": {
-            if (trimmed !== "1") {
-                clearState(jid);
-                return await showGrupos(jid);
+        case "envio_personal": {
+            if (trimmed === "1") {
+                setState(jid, "envio_personal_msg", { modo: "todos", chats: data.chats });
+                return await send(jid,
+                    `\u{1F4DD} *Escribe el mensaje* que quieres enviar a los ${data.chats.length} chat(s) personales.\n\n` +
+                    `\u26A0 Se enviara con 10 seg de delay entre cada envio.\n\n*0.* Cancelar`
+                );
             }
-            const { gruposConLink } = data;
+            if (trimmed === "2") {
+                let texto = `\u{1F4CB} *SELECCIONAR CONTACTOS*\n\n`;
+                for (let i = 0; i < Math.min(data.chats.length, 50); i++) {
+                    texto += `*${i + 1}.* ${data.chats[i].nombre}\n`;
+                }
+                texto += `\n\u{1F4A1} Escribe los numeros separados por coma:\n`;
+                texto += `Ej: *1,3,5* o *T* para todos\n\n*0.* Cancelar`;
+                setState(jid, "envio_personal_select", { chats: data.chats });
+                return await send(jid, texto);
+            }
             clearState(jid);
-            await send(jid, `\u23F3 *Intentando unirse a ${gruposConLink.length} grupo(s)...*\nTe notificare cuando termine.`);
+            return await sendMainMenu(jid, pushName);
+        }
 
-            let joined = 0, failed = 0, alreadyIn = 0;
-            const errores = [];
-            for (const g of gruposConLink) {
-                try {
-                    const inviteCode = g.link.split("chat.whatsapp.com/")[1];
-                    if (!inviteCode) {
-                        failed++;
-                        errores.push(`${g.link.substring(0, 30)}... - link invalido`);
-                        continue;
-                    }
-                    await botSock.groupAcceptInvite(inviteCode);
-                    joined++;
-                } catch (e) {
-                    if (e.message && e.message.includes("already")) {
-                        alreadyIn++;
-                    } else {
-                        failed++;
-                        errores.push(`${g.link.substring(0, 30)}... - ${e.message || "error"}`);
+        case "envio_personal_select": {
+            let selectedJids = [];
+            if (lower === "t" || lower === "todos") {
+                selectedJids = data.chats.map(c => c.jid);
+            } else {
+                const indices = trimmed.split(/[,\s\n]+/).map(n => parseInt(n) - 1);
+                for (const idx of indices) {
+                    if (!isNaN(idx) && idx >= 0 && idx < data.chats.length) {
+                        selectedJids.push(data.chats[idx].jid);
                     }
                 }
-                // Esperar 5 seg entre cada grupo para evitar ban
-                await new Promise(r => setTimeout(r, 5000));
             }
+            if (!selectedJids.length) {
+                return await send(jid, "\u274C No se selecciono ningun contacto valido. Intenta de nuevo.");
+            }
+            setState(jid, "envio_personal_msg", { modo: "seleccionados", jids: selectedJids, chats: data.chats });
+            return await send(jid,
+                `\u2705 ${selectedJids.length} contacto(s) seleccionados.\n\n\u{1F4DD} Escribe el mensaje a enviar:\n\n*0.* Cancelar`
+            );
+        }
 
-            let resultado = `\u{1F4CB} *RESULTADO DE UNIRSE A GRUPOS*\n\n`;
-            resultado += `\u{1F4E5} Total: ${gruposConLink.length}\n`;
-            if (joined) resultado += `\u2705 Unidos: ${joined}\n`;
-            if (alreadyIn) resultado += `\u2139 Ya estaba dentro: ${alreadyIn}\n`;
-            if (failed) resultado += `\u274C Fallidos: ${failed}\n`;
-            if (errores.length) {
-                resultado += `\n\u26A0 *Errores:*\n`;
-                for (const err of errores.slice(0, 10)) {
-                    resultado += `  \u2022 ${err}\n`;
-                }
-                if (errores.length > 10) resultado += `  ... y ${errores.length - 10} mas\n`;
+        case "envio_personal_msg": {
+            if (!trimmed) {
+                return await send(jid, "\u274C Escribe un mensaje. No puede estar vacio.");
             }
-            await send(jid, resultado);
-            return await showGrupos(jid);
+            const mensaje = trimmed;
+            clearState(jid);
+            // Usar botSock o cuenta cliente
+            let personalSock = botSock;
+            if (!personalSock) {
+                const sesiones = db.getSesiones(jid);
+                for (const s of sesiones) {
+                    try { personalSock = await motor.getOrConnectClient(jid, s.nombre); break; } catch (e) {}
+                }
+            }
+            if (!personalSock) {
+                return await send(jid, "\u274C No hay cuenta WSP conectada. Vincula una cuenta primero.");
+            }
+            if (data.modo === "todos") {
+                const allJids = data.chats.map(c => c.jid);
+                motor.enviarASeleccionados(jid, allJids, mensaje, null, personalSock);
+                return await send(jid,
+                    `\u{1F4E8} *Envio personal iniciado!*\n\n` +
+                    `\u{1F464} Contactos: ${allJids.length}\n` +
+                    `\u23F1 Delay: 10 seg entre cada envio\n` +
+                    `\u{1F4CA} Recibiras progreso cada 10 envios.\n\n` +
+                    `Escribe *cancelar envio* para detener.`
+                );
+            } else {
+                motor.enviarASeleccionados(jid, data.jids, mensaje, null, personalSock);
+                return await send(jid,
+                    `\u{1F4E8} *Envio personal iniciado!*\n\n` +
+                    `\u{1F464} Contactos: ${data.jids.length}\n` +
+                    `\u23F1 Delay: 10 seg entre cada envio\n\n` +
+                    `Escribe *cancelar envio* para detener.`
+                );
+            }
         }
 
         case "grupos_del": {
@@ -2599,94 +3827,6 @@ async function handleFSM(jid, msg, text, trimmed, state) {
             return await showExportar(jid);
         }
 
-        // ==========================================
-        // ENVIO PERSONAL (Chats individuales)
-        // ==========================================
-        case "envio_personal": {
-            if (trimmed === "1") {
-                // Enviar a todos los chats personales
-                setState(jid, "envio_personal_msg", { modo: "todos", chats: data.chats });
-                return await send(jid,
-                    `\u{1F4E8} *ENVIAR A TODOS (${data.chats.length} contactos)*\n\n` +
-                    `Escribe el *mensaje* que quieres enviar:\n\n` +
-                    `\u{1F4A1} Se enviara con 10 seg de delay entre cada uno.\n\n` +
-                    `*0.* Cancelar`
-                );
-            }
-            if (trimmed === "2") {
-                // Seleccionar contactos
-                let texto = `\u{1F4CB} *SELECCIONAR CONTACTOS*\n\n`;
-                for (let i = 0; i < Math.min(data.chats.length, 50); i++) {
-                    texto += `*${i + 1}.* ${data.chats[i].nombre} (${data.chats[i].numero})\n`;
-                }
-                texto += `\n\u{1F4A1} Escribe los numeros separados por coma:\n`;
-                texto += `Ej: *1,3,5,7* o *T* para todos\n\n`;
-                texto += `*0.* Cancelar`;
-                setState(jid, "envio_personal_select", { chats: data.chats });
-                return await send(jid, texto);
-            }
-            return await sendMainMenu(jid, pushName);
-        }
-
-        case "envio_personal_select": {
-            const { chats } = data;
-            let selectedJids = [];
-
-            if (lower === "t" || lower === "todos") {
-                selectedJids = chats.map(c => c.jid);
-            } else {
-                const indices = trimmed.split(/[,\s\n]+/).map(n => parseInt(n) - 1);
-                for (const idx of indices) {
-                    if (!isNaN(idx) && idx >= 0 && idx < chats.length) {
-                        selectedJids.push(chats[idx].jid);
-                    }
-                }
-            }
-
-            if (!selectedJids.length) {
-                return await send(jid, "\u274C Seleccion invalida. Intenta de nuevo o escribe *0* para cancelar.");
-            }
-
-            setState(jid, "envio_personal_msg", { modo: "seleccionados", jids: selectedJids, total: selectedJids.length });
-            return await send(jid,
-                `\u2705 ${selectedJids.length} contacto(s) seleccionados.\n\n` +
-                `Ahora escribe el *mensaje* que quieres enviar:\n\n` +
-                `*0.* Cancelar`
-            );
-        }
-
-        case "envio_personal_msg": {
-            if (!trimmed) {
-                return await send(jid, "\u274C Escribe un mensaje. No puede estar vacio.");
-            }
-            const mensaje = trimmed;
-
-            clearState(jid);
-
-            if (data.modo === "todos") {
-                const allJids = data.chats.map(c => c.jid);
-                motor.enviarASeleccionados(jid, allJids, mensaje, null, botSock);
-                return await send(jid,
-                    `\u{1F680} *Envio personal iniciado!*\n\n` +
-                    `\u{1F464} ${allJids.length} contacto(s)\n` +
-                    `\u23F1 Delay: 10 seg entre cada envio\n` +
-                    `\u23F3 Tiempo estimado: ~${Math.round(allJids.length * 10 / 60)} min\n\n` +
-                    `Recibiras progreso cada 10 envios.\n` +
-                    `Escribe */cancelarenvio* para detener.`
-                );
-            } else {
-                motor.enviarASeleccionados(jid, data.jids, mensaje, null, botSock);
-                return await send(jid,
-                    `\u{1F680} *Envio personal iniciado!*\n\n` +
-                    `\u{1F464} ${data.total} contacto(s)\n` +
-                    `\u23F1 Delay: 10 seg entre cada envio\n` +
-                    `\u23F3 Tiempo estimado: ~${Math.round(data.total * 10 / 60)} min\n\n` +
-                    `Recibiras progreso cada 10 envios.\n` +
-                    `Escribe */cancelarenvio* para detener.`
-                );
-            }
-        }
-
         default:
             clearState(jid);
             return await sendMainMenu(jid, pushName);
@@ -2878,4 +4018,73 @@ async function showReporteDiario(jid) {
 }
 
 // --- INICIAR ---
-startBot();
+const NO_WSP_BOT = process.env.NO_WSP_BOT === "1" || process.env.NO_WSP_BOT === "true";
+
+// Inicializar DB y directorios siempre (necesario para API)
+db.init();
+db.setAdminJids(adminJids);
+fs.mkdirSync("sessions", { recursive: true });
+fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
+fs.mkdirSync("media", { recursive: true });
+
+if (NO_WSP_BOT) {
+    botStatus = "solo_api";
+    console.log("\n\u{1F4E1} Modo SOLO API (sin cuenta de bot WSP).");
+    console.log("   Notificaciones y comandos solo por Telegram.");
+    console.log(`   API disponible en http://0.0.0.0:${QR_PORT}\n`);
+} else {
+    startBot();
+}
+
+// --- SCHEDULER: Envios programados (cada minuto) ---
+setInterval(async () => {
+    try {
+        const ahora = new Date();
+        const hora = parseInt(ahora.toLocaleString("en-US", { timeZone: config.TIMEZONE, hour: "numeric", hour12: false }));
+        const minuto = ahora.getMinutes();
+        const hoy = ahora.toISOString().split("T")[0];
+
+        const programados = db.getEnviosProgramadosActivos();
+        for (const prog of programados) {
+            if (prog.hora !== hora || prog.minuto !== minuto) continue;
+            if (prog.ultimo_envio && prog.ultimo_envio.startsWith(hoy) && !prog.repetir) continue;
+
+            console.log(`[Scheduler] Ejecutando envio programado #${prog.id}: ${prog.mensaje_nombre}`);
+            db.actualizarUltimoEnvio(prog.id);
+
+            const grupos = db.getGrupos(prog.user_id);
+            if (!grupos.length) continue;
+            const sesiones = db.getSesiones(prog.user_id);
+            if (!sesiones.length) continue;
+
+            const envioId = db.crearEnvioUnico(prog.user_id, prog.mensaje_id, grupos.length);
+            let ok = 0, errores = 0;
+            const socks = [];
+            for (const s of sesiones) {
+                try { socks.push(await motor.getOrConnectClient(prog.user_id, s.nombre)); } catch (e) {}
+            }
+            if (!socks.length) { db.actualizarEnvioUnico(envioId, 0, grupos.length, "error"); continue; }
+
+            let sockIdx = 0;
+            for (const g of grupos) {
+                const sock = socks[sockIdx % socks.length];
+                sockIdx++;
+                try {
+                    const groupJid = await motor.resolveGroupJid(sock, g.link);
+                    if (!groupJid) { errores++; continue; }
+                    const texto = motor.variarMensaje(prog.texto, prog.user_id);
+                    const result = await motor.sendToGroup(sock, groupJid, texto, prog.imagen_path);
+                    if (result.sent) { ok++; } else { errores++; }
+                } catch (e) { errores++; }
+                await new Promise(r => setTimeout(r, 5000 + Math.random() * 10000));
+            }
+            db.actualizarEnvioUnico(envioId, ok, errores, "completado");
+
+            if (!prog.repetir) {
+                db.toggleEnvioProgramado(prog.id, false);
+            }
+        }
+    } catch (e) {
+        console.error(`[Scheduler] Error: ${e.message}`);
+    }
+}, 60000);
