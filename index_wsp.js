@@ -3,9 +3,9 @@ const pino = require("pino");
 const QRCode = require("qrcode");
 const http = require("http");
 const fs = require("fs");
-const config = require("./config");
-const db = require("./db");
-const motor = require("./motor");
+const config = require("./config_wsp");
+const db = require("./db_wsp");
+const motor = require("./motor_wsp");
 
 const QR_PORT = process.env.QR_PORT || 3000;
 
