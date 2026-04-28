@@ -22,77 +22,97 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
 
-/* LOGIN */
-.login-container {
+/* AUTH SCREENS */
+.auth-container {
   display: flex; align-items: center; justify-content: center; min-height: 100vh;
   background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0a0a1a 100%);
 }
-.login-card {
+.auth-card {
   background: var(--bg2); border: 1px solid var(--border); border-radius: 20px;
-  padding: 50px 40px; text-align: center; max-width: 420px; width: 90%;
+  padding: 50px 40px; text-align: center; max-width: 440px; width: 90%;
   box-shadow: 0 20px 60px rgba(108,92,231,0.15);
 }
-.login-card .logo { font-size: 64px; margin-bottom: 10px; }
-.login-card h1 { font-size: 28px; color: var(--accent2); margin-bottom: 5px; }
-.login-card p { color: var(--text2); margin-bottom: 30px; font-size: 14px; }
-.login-card input {
+.auth-card .logo { font-size: 64px; margin-bottom: 10px; }
+.auth-card h1 { font-size: 26px; color: var(--accent2); margin-bottom: 5px; }
+.auth-card .subtitle { color: var(--text2); margin-bottom: 25px; font-size: 14px; }
+.auth-card input {
   width: 100%; padding: 14px 18px; border: 2px solid var(--border); border-radius: 10px;
-  background: var(--bg); color: var(--text); font-size: 16px; margin-bottom: 15px;
+  background: var(--bg); color: var(--text); font-size: 16px; margin-bottom: 12px;
   outline: none; transition: border-color 0.3s;
 }
-.login-card input:focus { border-color: var(--accent); }
-.login-card button {
+.auth-card input:focus { border-color: var(--accent); }
+.auth-card input::placeholder { color: #555; }
+.auth-card .btn-main {
   width: 100%; padding: 14px; border: none; border-radius: 10px;
   background: linear-gradient(135deg, var(--accent), #5a4bd1); color: white;
   font-size: 16px; font-weight: 700; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;
+  margin-bottom: 12px;
 }
-.login-card button:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(108,92,231,0.4); }
-.login-error { color: var(--danger); margin-top: 10px; font-size: 14px; display: none; }
+.auth-card .btn-main:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(108,92,231,0.4); }
+.auth-card .btn-main:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.auth-card .link-btn { background: none; border: none; color: var(--accent2); cursor: pointer; font-size: 14px; text-decoration: underline; }
+.auth-card .link-btn:hover { color: white; }
+.auth-error { color: var(--danger); margin-top: 8px; font-size: 14px; display: none; }
+.auth-success { color: var(--success); margin-top: 8px; font-size: 14px; display: none; }
+.auth-card .divider { border-top: 1px solid var(--border); margin: 20px 0; }
+.password-rules { text-align: left; font-size: 12px; color: var(--text2); margin-bottom: 15px; padding: 10px; background: var(--bg); border-radius: 8px; }
+.password-rules li { margin-bottom: 3px; }
 
 /* LAYOUT */
 .app { display: none; }
 .sidebar {
-  position: fixed; left: 0; top: 0; bottom: 0; width: 240px;
+  position: fixed; left: 0; top: 0; bottom: 0; width: 250px;
   background: var(--bg2); border-right: 1px solid var(--border); padding: 20px 0;
-  overflow-y: auto; z-index: 100;
+  overflow-y: auto; z-index: 100; transition: width 0.3s;
 }
-.sidebar .brand { padding: 0 20px 20px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
-.sidebar .brand h2 { color: var(--accent2); font-size: 18px; }
+.sidebar .brand { padding: 0 20px 15px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.sidebar .brand h2 { color: var(--accent2); font-size: 18px; display: flex; align-items: center; gap: 8px; }
 .sidebar .brand small { color: var(--text2); font-size: 11px; }
-.sidebar .user-info { padding: 10px 20px; font-size: 12px; color: var(--text2); border-bottom: 1px solid var(--border); margin-bottom: 10px; }
-.sidebar .user-info .uid { color: var(--accent2); font-weight: 600; }
+.sidebar .user-info {
+  padding: 12px 20px; border-bottom: 1px solid var(--border); margin-bottom: 10px;
+  background: rgba(108,92,231,0.05);
+}
+.sidebar .user-info .uid { color: var(--accent2); font-weight: 700; font-size: 14px; }
+.sidebar .user-info .label { color: var(--text2); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+.sidebar nav { padding: 5px 0; }
+.sidebar nav .nav-group { padding: 5px 20px 5px; font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 10px; }
 .sidebar nav a {
-  display: flex; align-items: center; gap: 10px; padding: 12px 20px;
+  display: flex; align-items: center; gap: 10px; padding: 11px 20px;
   color: var(--text2); text-decoration: none; font-size: 14px; transition: all 0.2s;
   border-left: 3px solid transparent;
 }
 .sidebar nav a:hover { background: var(--bg3); color: var(--text); }
 .sidebar nav a.active { background: var(--bg3); color: var(--accent2); border-left-color: var(--accent); font-weight: 600; }
-.sidebar nav a .icon { font-size: 18px; width: 24px; text-align: center; }
-.sidebar .logout-btn {
-  position: absolute; bottom: 20px; left: 20px; right: 20px;
-  padding: 10px; border: 1px solid var(--danger); border-radius: 8px;
-  background: transparent; color: var(--danger); cursor: pointer; font-size: 13px;
-  transition: all 0.2s;
+.sidebar nav a .icon { font-size: 17px; width: 22px; text-align: center; }
+.sidebar .bottom-actions {
+  position: absolute; bottom: 0; left: 0; right: 0; padding: 15px;
+  border-top: 1px solid var(--border); background: var(--bg2);
 }
-.sidebar .logout-btn:hover { background: var(--danger); color: white; }
-.main { margin-left: 240px; padding: 30px; min-height: 100vh; }
+.sidebar .bottom-actions button {
+  width: 100%; padding: 9px; border: 1px solid var(--border); border-radius: 8px;
+  background: transparent; color: var(--text2); cursor: pointer; font-size: 13px;
+  transition: all 0.2s; margin-bottom: 6px;
+}
+.sidebar .bottom-actions button:hover { border-color: var(--accent); color: var(--accent2); }
+.sidebar .bottom-actions .logout-btn { border-color: var(--danger); color: var(--danger); }
+.sidebar .bottom-actions .logout-btn:hover { background: var(--danger); color: white; }
+.main { margin-left: 250px; padding: 30px; min-height: 100vh; }
 
 /* SECTIONS */
-.section { display: none; }
+.section { display: none; animation: fadeIn 0.3s; }
 .section.active { display: block; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .section h2 { font-size: 24px; color: var(--accent2); margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
-.section h2 .icon { font-size: 28px; }
 
 /* CARDS */
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; margin-bottom: 30px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 25px; }
 .card {
   background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 24px; transition: transform 0.2s, box-shadow 0.2s;
+  padding: 22px; transition: transform 0.2s, box-shadow 0.2s;
 }
-.card:hover { transform: translateY(-3px); box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
-.card .card-title { font-size: 13px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
-.card .card-value { font-size: 36px; font-weight: 700; }
+.card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
+.card .card-title { font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+.card .card-value { font-size: 32px; font-weight: 700; }
 .card .card-value.success { color: var(--success); }
 .card .card-value.warn { color: var(--warn); }
 .card .card-value.danger { color: var(--danger); }
@@ -101,11 +121,11 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 
 /* TABLE */
 .table-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 20px; }
-.table-wrap .table-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-.table-wrap .table-header h3 { font-size: 16px; color: var(--accent2); }
+.table-wrap .table-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+.table-wrap .table-header h3 { font-size: 15px; color: var(--accent2); }
 table { width: 100%; border-collapse: collapse; }
-table th { padding: 12px 20px; text-align: left; font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); background: var(--bg3); }
-table td { padding: 12px 20px; border-bottom: 1px solid var(--border); font-size: 14px; }
+table th { padding: 10px 16px; text-align: left; font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); background: var(--bg3); }
+table td { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
 table tr:hover { background: rgba(108,92,231,0.05); }
 
 /* BUTTONS */
@@ -124,8 +144,8 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 
 /* FORMS */
-.form-group { margin-bottom: 16px; }
-.form-group label { display: block; font-size: 13px; color: var(--text2); margin-bottom: 6px; font-weight: 600; }
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-size: 13px; color: var(--text2); margin-bottom: 5px; font-weight: 600; }
 .form-group input, .form-group textarea, .form-group select {
   width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--bg); color: var(--text); font-size: 14px; outline: none; transition: border-color 0.3s;
@@ -134,7 +154,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 .form-group textarea { resize: vertical; min-height: 80px; font-family: inherit; }
 
 /* BADGES */
-.badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+.badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; display: inline-block; }
 .badge-success { background: rgba(0,184,148,0.15); color: var(--success); }
 .badge-danger { background: rgba(233,69,96,0.15); color: var(--danger); }
 .badge-warn { background: rgba(253,203,110,0.15); color: var(--warn); }
@@ -142,49 +162,46 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 
 /* MODAL */
 .modal-overlay {
-  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
   z-index: 1000; align-items: center; justify-content: center;
 }
 .modal-overlay.show { display: flex; }
 .modal {
   background: var(--bg2); border: 1px solid var(--border); border-radius: 16px;
-  padding: 30px; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;
+  padding: 28px; max-width: 520px; width: 92%; max-height: 85vh; overflow-y: auto;
 }
-.modal h3 { color: var(--accent2); margin-bottom: 20px; font-size: 20px; }
-.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+.modal h3 { color: var(--accent2); margin-bottom: 18px; font-size: 18px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
 
 /* TOAST */
+.toast-container { position: fixed; bottom: 25px; right: 25px; z-index: 2000; }
 .toast {
-  position: fixed; bottom: 30px; right: 30px; background: var(--bg3); border: 1px solid var(--border);
-  padding: 14px 24px; border-radius: 10px; font-size: 14px; z-index: 2000;
-  transform: translateY(100px); opacity: 0; transition: all 0.3s;
+  background: var(--bg3); border: 1px solid var(--border);
+  padding: 12px 20px; border-radius: 10px; font-size: 13px;
+  margin-top: 8px; transform: translateX(120%); opacity: 0; transition: all 0.3s;
 }
-.toast.show { transform: translateY(0); opacity: 1; }
+.toast.show { transform: translateX(0); opacity: 1; }
 .toast.success { border-color: var(--success); }
 .toast.error { border-color: var(--danger); }
 
 /* RESPONSIVE */
 @media (max-width: 768px) {
   .sidebar { width: 60px; }
-  .sidebar .brand h2, .sidebar .brand small, .sidebar .user-info, .sidebar nav a span, .sidebar .logout-btn span { display: none; }
-  .sidebar nav a { justify-content: center; padding: 14px; }
-  .sidebar nav a .icon { font-size: 20px; }
-  .sidebar .logout-btn { font-size: 16px; text-align: center; }
+  .sidebar .brand h2 span, .sidebar .brand small, .sidebar .user-info, .sidebar nav a span:not(.icon), .sidebar nav .nav-group, .sidebar .bottom-actions span { display: none; }
+  .sidebar nav a { justify-content: center; padding: 13px; border-left: none; }
+  .sidebar nav a .icon { font-size: 19px; }
+  .sidebar .bottom-actions button { font-size: 15px; padding: 10px; }
   .main { margin-left: 60px; padding: 15px; }
   .grid { grid-template-columns: 1fr; }
 }
 
-/* LOADING */
-.spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+/* LOADING / EMPTY */
+.spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.loading-overlay { display: flex; align-items: center; justify-content: center; padding: 40px; color: var(--text2); gap: 10px; }
-
-/* EMPTY STATE */
-.empty-state { text-align: center; padding: 40px; color: var(--text2); }
-.empty-state .icon { font-size: 48px; margin-bottom: 10px; }
-.empty-state p { font-size: 14px; }
-
-/* STATUS DOT */
+.loading-overlay { display: flex; align-items: center; justify-content: center; padding: 35px; color: var(--text2); gap: 10px; font-size: 14px; }
+.empty-state { text-align: center; padding: 35px; color: var(--text2); }
+.empty-state .icon { font-size: 42px; margin-bottom: 8px; }
+.empty-state p { font-size: 14px; line-height: 1.5; }
 .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .status-dot.online { background: var(--success); box-shadow: 0 0 8px var(--success); }
 .status-dot.offline { background: var(--danger); }
@@ -192,51 +209,80 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 </head>
 <body>
 
-<!-- LOGIN -->
-<div class="login-container" id="loginScreen">
-  <div class="login-card">
+<!-- AUTH: LOGIN -->
+<div class="auth-container" id="authLogin">
+  <div class="auth-card">
     <div class="logo">🤖</div>
     <h1>Bot de Spam J&D</h1>
-    <p>Panel de Control v2.0</p>
+    <p class="subtitle">Panel de Control</p>
     <input type="text" id="loginId" placeholder="Tu ID de Telegram" autocomplete="off">
-    <button onclick="doLogin()">Iniciar Sesion</button>
-    <div class="login-error" id="loginError"></div>
+    <input type="password" id="loginPass" placeholder="Contrasena">
+    <button class="btn-main" onclick="doLogin()" id="btnLogin">Iniciar Sesion</button>
+    <div class="divider"></div>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:8px">Primera vez?</p>
+    <button class="link-btn" onclick="showRegister()">Crear cuenta</button>
+    <div class="auth-error" id="loginError"></div>
+  </div>
+</div>
+
+<!-- AUTH: REGISTER -->
+<div class="auth-container" id="authRegister" style="display:none">
+  <div class="auth-card">
+    <div class="logo">📝</div>
+    <h1>Crear Cuenta</h1>
+    <p class="subtitle">Registrate para acceder al panel</p>
+    <input type="text" id="regId" placeholder="Tu ID de Telegram" autocomplete="off">
+    <input type="password" id="regPass" placeholder="Crear contrasena">
+    <input type="password" id="regPass2" placeholder="Confirmar contrasena">
+    <ul class="password-rules">
+      <li>Minimo 4 caracteres</li>
+      <li>Necesitas membresia activa para registrarte</li>
+    </ul>
+    <button class="btn-main" onclick="doRegister()" id="btnRegister">Registrarse</button>
+    <div class="divider"></div>
+    <button class="link-btn" onclick="showLogin()">Ya tengo cuenta — Iniciar Sesion</button>
+    <div class="auth-error" id="regError"></div>
+    <div class="auth-success" id="regSuccess"></div>
   </div>
 </div>
 
 <!-- APP -->
 <div class="app" id="app">
-  <!-- SIDEBAR -->
   <div class="sidebar">
     <div class="brand">
-      <h2>🤖 J&D Bot</h2>
-      <small>Panel de Control</small>
+      <h2>🤖 <span>J&D Bot</span></h2>
+      <small>Panel de Control v2.0</small>
     </div>
     <div class="user-info">
-      ID: <span class="uid" id="sideUserId"></span>
+      <div class="label">Telegram ID</div>
+      <div class="uid" id="sideUserId"></div>
     </div>
     <nav>
+      <div class="nav-group">Principal</div>
       <a href="#" class="active" data-section="dashboard"><span class="icon">📊</span><span>Dashboard</span></a>
       <a href="#" data-section="cuentas"><span class="icon">👤</span><span>Cuentas WSP</span></a>
       <a href="#" data-section="grupos"><span class="icon">🌐</span><span>Grupos</span></a>
+      <div class="nav-group">Mensajeria</div>
       <a href="#" data-section="mensajes"><span class="icon">✉</span><span>Mensajes</span></a>
-      <a href="#" data-section="envios"><span class="icon">📤</span><span>Envios</span></a>
+      <a href="#" data-section="envios"><span class="icon">📤</span><span>Envio Unico</span></a>
       <a href="#" data-section="programados"><span class="icon">⏰</span><span>Programados</span></a>
       <a href="#" data-section="campanas"><span class="icon">📋</span><span>Campanas</span></a>
-      <a href="#" data-section="config"><span class="icon">⚙</span><span>Config</span></a>
+      <div class="nav-group">Configuracion</div>
+      <a href="#" data-section="config"><span class="icon">⚙</span><span>Config Envio</span></a>
       <a href="#" data-section="listanegra"><span class="icon">🚫</span><span>Lista Negra</span></a>
       <a href="#" data-section="autoresp"><span class="icon">🤖</span><span>Auto-Responder</span></a>
       <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas</span></a>
     </nav>
-    <button class="logout-btn" onclick="doLogout()">🚪 <span>Cerrar Sesion</span></button>
+    <div class="bottom-actions">
+      <button onclick="showCambiarPass()">🔑 <span>Cambiar Contrasena</span></button>
+      <button class="logout-btn" onclick="doLogout()">🚪 <span>Cerrar Sesion</span></button>
+    </div>
   </div>
 
-  <!-- MAIN -->
   <div class="main">
-
     <!-- DASHBOARD -->
     <div class="section active" id="sec-dashboard">
-      <h2><span class="icon">📊</span> Dashboard</h2>
+      <h2>📊 Dashboard</h2>
       <div class="grid" id="dashCards"></div>
       <div class="grid">
         <div class="table-wrap">
@@ -252,14 +298,14 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 
     <!-- CUENTAS -->
     <div class="section" id="sec-cuentas">
-      <h2><span class="icon">👤</span> Cuentas WhatsApp</h2>
+      <h2>👤 Cuentas WhatsApp</h2>
       <div id="cuentasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- GRUPOS -->
     <div class="section" id="sec-grupos">
-      <h2><span class="icon">🌐</span> Grupos WhatsApp</h2>
-      <div style="margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+      <h2>🌐 Grupos WhatsApp</h2>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="detectarGrupos()">🔍 Detectar Grupos</button>
         <button class="btn btn-outline" onclick="loadGrupos()">🔄 Refrescar</button>
       </div>
@@ -268,17 +314,15 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 
     <!-- MENSAJES -->
     <div class="section" id="sec-mensajes">
-      <h2><span class="icon">✉</span> Mensajes</h2>
-      <div style="margin-bottom: 15px;">
-        <button class="btn btn-primary" onclick="showCrearMensaje()">➕ Crear Mensaje</button>
-      </div>
+      <h2>✉ Mensajes</h2>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearMensaje()">➕ Crear Mensaje</button></div>
       <div id="mensajesContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- ENVIOS -->
     <div class="section" id="sec-envios">
-      <h2><span class="icon">📤</span> Envio Unico</h2>
-      <p style="color:var(--text2); margin-bottom: 20px;">Selecciona un mensaje y envíalo a tus grupos una sola vez.</p>
+      <h2>📤 Envio Unico</h2>
+      <p style="color:var(--text2);margin-bottom:20px;font-size:14px">Selecciona un mensaje y envialo a tus grupos una sola vez.</p>
       <div id="enviosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
       <div class="table-wrap" style="margin-top:20px">
         <div class="table-header"><h3>📊 Historial de Envios</h3></div>
@@ -288,612 +332,345 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 
     <!-- PROGRAMADOS -->
     <div class="section" id="sec-programados">
-      <h2><span class="icon">⏰</span> Envios Programados</h2>
-      <div style="margin-bottom: 15px;">
-        <button class="btn btn-primary" onclick="showCrearProgramado()">➕ Programar Envio</button>
-      </div>
+      <h2>⏰ Envios Programados</h2>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearProgramado()">➕ Programar Envio</button></div>
       <div id="programadosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- CAMPANAS -->
     <div class="section" id="sec-campanas">
-      <h2><span class="icon">📋</span> Campanas</h2>
-      <div style="margin-bottom: 15px; display: flex; gap: 10px;">
-        <button class="btn btn-primary" onclick="showCrearCampana()">➕ Crear Campana</button>
-      </div>
+      <h2>📋 Campanas</h2>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearCampana()">➕ Crear Campana</button></div>
       <div id="campanasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- CONFIG -->
     <div class="section" id="sec-config">
-      <h2><span class="icon">⚙</span> Configuracion de Envio</h2>
+      <h2>⚙ Configuracion de Envio</h2>
       <div id="configContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- LISTA NEGRA -->
     <div class="section" id="sec-listanegra">
-      <h2><span class="icon">🚫</span> Lista Negra</h2>
-      <div style="margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
-        <input type="text" id="inputBlacklist" placeholder="Numero a bloquear (ej: 51999888777)" style="padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 14px; flex: 1; min-width: 200px;">
+      <h2>🚫 Lista Negra</h2>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+        <input type="text" id="inputBlacklist" placeholder="Numero (ej: 51999888777)" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;flex:1;min-width:200px">
         <button class="btn btn-danger" onclick="agregarBlacklist()">🚫 Bloquear</button>
-        <button class="btn btn-outline" onclick="limpiarBlacklist()">🗑 Limpiar todo</button>
+        <button class="btn btn-outline" onclick="limpiarBlacklist()">🗑 Limpiar</button>
       </div>
       <div id="listaNegraContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- AUTO RESPONDER -->
     <div class="section" id="sec-autoresp">
-      <h2><span class="icon">🤖</span> Auto-Responder</h2>
-      <div style="margin-bottom: 15px;">
+      <h2>🤖 Auto-Responder</h2>
+      <div style="margin-bottom:15px;display:flex;gap:10px">
         <button class="btn btn-primary" onclick="showCrearAutoResp()">➕ Agregar Regla</button>
-        <button class="btn btn-outline" onclick="limpiarAutoResp()">🗑 Limpiar todo</button>
+        <button class="btn btn-outline" onclick="limpiarAutoResp()">🗑 Limpiar</button>
       </div>
       <div id="autoRespContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- STATS -->
     <div class="section" id="sec-stats">
-      <h2><span class="icon">📈</span> Estadisticas por Grupo</h2>
+      <h2>📈 Estadisticas por Grupo</h2>
       <div id="statsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
-
   </div>
 </div>
 
 <!-- MODAL -->
-<div class="modal-overlay" id="modal">
-  <div class="modal" id="modalContent"></div>
-</div>
+<div class="modal-overlay" id="modal"><div class="modal" id="modalContent"></div></div>
 
 <!-- TOAST -->
-<div class="toast" id="toast"></div>
+<div class="toast-container" id="toastContainer"></div>
 
 <script>
-const API = '';
-let userId = null;
+const API='';
+let userId=null;
 
-// --- UTILS ---
-async function api(path, opts) {
-  try {
-    const r = opts ? await fetch(API + path, opts) : await fetch(API + path);
-    return await r.json();
-  } catch (e) { return { ok: false, error: e.message }; }
+function $(id){return document.getElementById(id)}
+async function api(path,opts){
+  try{const r=opts?await fetch(API+path,opts):await fetch(API+path);return await r.json()}
+  catch(e){return{ok:false,error:e.message}}
 }
-function $(id) { return document.getElementById(id); }
-function toast(msg, type = 'success') {
-  const t = $('toast');
-  t.textContent = msg;
-  t.className = 'toast show ' + type;
-  setTimeout(() => t.className = 'toast', 3000);
+function toast(msg,type='success'){
+  const t=document.createElement('div');t.className='toast show '+type;t.textContent=msg;
+  $('toastContainer').appendChild(t);
+  setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),400)},3500);
 }
-function showModal(html) { $('modalContent').innerHTML = html; $('modal').classList.add('show'); }
-function closeModal() { $('modal').classList.remove('show'); }
-$('modal').addEventListener('click', e => { if (e.target === $('modal')) closeModal(); });
+function showModal(html){$('modalContent').innerHTML=html;$('modal').classList.add('show')}
+function closeModal(){$('modal').classList.remove('show')}
+$('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
 
-// --- LOGIN ---
-async function doLogin() {
-  const id = $('loginId').value.trim();
-  if (!id) { $('loginError').style.display = 'block'; $('loginError').textContent = 'Ingresa tu ID de Telegram'; return; }
-  $('loginError').style.display = 'none';
-  const r = await api('/api/check_membresia?u=' + id);
-  if (!r.ok || !r.activa) {
-    $('loginError').style.display = 'block';
-    $('loginError').textContent = 'Membresia no activa. Contacta al administrador para activar tu cuenta.';
-    return;
+// --- AUTH ---
+function showLogin(){$('authLogin').style.display='flex';$('authRegister').style.display='none'}
+function showRegister(){$('authLogin').style.display='none';$('authRegister').style.display='flex'}
+
+async function doLogin(){
+  const id=$('loginId').value.trim(),pass=$('loginPass').value;
+  if(!id||!pass){showErr('loginError','Ingresa ID y contrasena');return}
+  $('btnLogin').disabled=true;$('btnLogin').textContent='Verificando...';
+  const r=await api('/api/panel_login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id,password:pass})});
+  $('btnLogin').disabled=false;$('btnLogin').textContent='Iniciar Sesion';
+  if(!r.ok){
+    const msgs={'no_membresia':'Membresia no activa. Contacta al admin para renovar.','no_registrado':'No tienes cuenta. Registrate primero.','password_incorrecta':'Contrasena incorrecta.'};
+    showErr('loginError',msgs[r.error]||r.error||'Error');return;
   }
-  userId = id;
-  localStorage.setItem('bot_uid', id);
+  userId=id;
+  localStorage.setItem('panel_uid',id);localStorage.setItem('panel_token',r.token);
   showApp();
 }
-function doLogout() { localStorage.removeItem('bot_uid'); location.reload(); }
-function showApp() {
-  $('loginScreen').style.display = 'none';
-  $('app').style.display = 'block';
-  $('sideUserId').textContent = userId;
+
+async function doRegister(){
+  const id=$('regId').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
+  hideMsg('regError');hideMsg('regSuccess');
+  if(!id||!pass){showErr('regError','Completa todos los campos');return}
+  if(pass.length<4){showErr('regError','La contrasena debe tener minimo 4 caracteres');return}
+  if(pass!==pass2){showErr('regError','Las contrasenas no coinciden');return}
+  $('btnRegister').disabled=true;$('btnRegister').textContent='Registrando...';
+  const r=await api('/api/panel_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id,password:pass})});
+  $('btnRegister').disabled=false;$('btnRegister').textContent='Registrarse';
+  if(!r.ok){
+    const msgs={'no_membresia':'Membresia no activa. Necesitas membresia para registrarte.','ya_registrado':'Ya tienes cuenta. Inicia sesion.'};
+    showErr('regError',msgs[r.error]||r.error||'Error');return;
+  }
+  showMsg('regSuccess','Registro exitoso! Ahora inicia sesion.');
+  setTimeout(()=>{showLogin();$('loginId').value=id},2000);
+}
+
+function doLogout(){localStorage.removeItem('panel_uid');localStorage.removeItem('panel_token');location.reload()}
+
+function showErr(id,msg){const el=$(id);el.style.display='block';el.textContent=msg;el.className='auth-error';el.style.display='block'}
+function showMsg(id,msg){const el=$(id);el.style.display='block';el.textContent=msg}
+function hideMsg(id){$(id).style.display='none'}
+
+function showApp(){
+  $('authLogin').style.display='none';$('authRegister').style.display='none';
+  $('app').style.display='block';
+  $('sideUserId').textContent=userId;
   loadDashboard();
 }
 
+function showCambiarPass(){
+  showModal(`<h3>🔑 Cambiar Contrasena</h3>
+    <div class="form-group"><label>Contrasena actual</label><input type="password" id="cpOld"></div>
+    <div class="form-group"><label>Nueva contrasena</label><input type="password" id="cpNew"></div>
+    <div class="form-group"><label>Confirmar nueva</label><input type="password" id="cpNew2"></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="cambiarPass()">Guardar</button></div>`);
+}
+async function cambiarPass(){
+  const old_password=$('cpOld').value,new_password=$('cpNew').value,confirm=$('cpNew2').value;
+  if(!old_password||!new_password){toast('Completa los campos','error');return}
+  if(new_password.length<4){toast('Minimo 4 caracteres','error');return}
+  if(new_password!==confirm){toast('No coinciden','error');return}
+  closeModal();
+  const r=await api('/api/panel_cambiar_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId,old_password,new_password})});
+  toast(r.ok?'Contrasena actualizada':'Error: '+(r.error||''),r.ok?'success':'error');
+}
+
 // --- NAV ---
-document.querySelectorAll('.sidebar nav a').forEach(a => {
-  a.addEventListener('click', e => {
+document.querySelectorAll('.sidebar nav a').forEach(a=>{
+  a.addEventListener('click',e=>{
     e.preventDefault();
-    document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.sidebar nav a').forEach(x=>x.classList.remove('active'));
     a.classList.add('active');
-    const sec = a.dataset.section;
-    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    $('sec-' + sec).classList.add('active');
-    const loaders = {
-      dashboard: loadDashboard, cuentas: loadCuentas, grupos: loadGrupos,
-      mensajes: loadMensajes, envios: loadEnvios, programados: loadProgramados,
-      campanas: loadCampanas, config: loadConfig, listanegra: loadListaNegra,
-      autoresp: loadAutoResp, stats: loadStats
-    };
-    if (loaders[sec]) loaders[sec]();
+    const sec=a.dataset.section;
+    document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+    $('sec-'+sec).classList.add('active');
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats};
+    if(loaders[sec])loaders[sec]();
   });
 });
 
 // --- DASHBOARD ---
-async function loadDashboard() {
-  const [rep, tasa, dash, status] = await Promise.all([
-    api('/api/reporte_diario?u=' + userId),
-    api('/api/tasa_entrega?u=' + userId),
-    api('/api/dashboard?u=' + userId),
-    api('/api/status')
-  ]);
-  let cards = '';
-  const st = status.ok ? (status.status === 'conectado' || status.status === 'solo_api' ? 'online' : 'offline') : 'offline';
-  const stLabel = status.ok ? (status.status === 'solo_api' ? 'API Activa' : status.status === 'conectado' ? 'Conectado' : 'Desconectado') : 'Sin conexion';
-  cards += `<div class="card"><div class="card-title">Estado WSP</div><div class="card-value accent"><span class="status-dot ${st}"></span> ${stLabel}</div></div>`;
-  if (rep.ok) {
-    cards += `<div class="card"><div class="card-title">Envios Hoy</div><div class="card-value success">${rep.totalEnvios || 0}</div><div class="card-sub">✅ ${rep.exitosos || 0} exitosos | ❌ ${rep.fallidos || 0} fallidos</div></div>`;
-    cards += `<div class="card"><div class="card-title">Respuestas Hoy</div><div class="card-value accent">${rep.respuestas || 0}</div></div>`;
+async function loadDashboard(){
+  const [rep,tasa,dash,status]=await Promise.all([api('/api/reporte_diario?u='+userId),api('/api/tasa_entrega?u='+userId),api('/api/dashboard?u='+userId),api('/api/status')]);
+  let cards='';
+  const st=status.ok?(status.status==='conectado'||status.status==='solo_api'?'online':'offline'):'offline';
+  const stLabel=status.ok?(status.status==='solo_api'?'API Activa':status.status==='conectado'?'Conectado':'Desconectado'):'Sin conexion';
+  cards+=`<div class="card"><div class="card-title">Estado WSP</div><div class="card-value accent"><span class="status-dot ${st}"></span> ${stLabel}</div></div>`;
+  if(rep.ok){
+    cards+=`<div class="card"><div class="card-title">Envios Hoy</div><div class="card-value success">${rep.totalEnvios||0}</div><div class="card-sub">✅ ${rep.exitosos||0} exitosos · ❌ ${rep.fallidos||0} fallidos</div></div>`;
+    cards+=`<div class="card"><div class="card-title">Respuestas Hoy</div><div class="card-value accent">${rep.respuestas||0}</div></div>`;
   }
-  if (tasa.ok) {
-    const tasaVal = tasa.tasa_entrega || 0;
-    const tasaClass = tasaVal >= 80 ? 'success' : tasaVal >= 50 ? 'warn' : 'danger';
-    cards += `<div class="card"><div class="card-title">Tasa de Entrega</div><div class="card-value ${tasaClass}">${tasaVal}%</div><div class="card-sub">📨 ${tasa.total || 0} enviados | ✅ ${tasa.entregados || 0} entregados</div></div>`;
+  if(tasa.ok){
+    const v=tasa.tasa_entrega||0,c=v>=80?'success':v>=50?'warn':'danger';
+    cards+=`<div class="card"><div class="card-title">Tasa de Entrega</div><div class="card-value ${c}">${v}%</div><div class="card-sub">📨 ${tasa.total||0} enviados · ✅ ${tasa.entregados||0} entregados</div></div>`;
   }
-  if (dash.ok) {
-    cards += `<div class="card"><div class="card-title">Grupos Registrados</div><div class="card-value accent">${dash.grupos || 0}</div></div>`;
-    cards += `<div class="card"><div class="card-title">Campanas</div><div class="card-value accent">${dash.campanas || 0}</div><div class="card-sub">${dash.activas || 0} activas</div></div>`;
+  if(dash.ok){
+    cards+=`<div class="card"><div class="card-title">Grupos</div><div class="card-value accent">${dash.grupos||0}</div></div>`;
+    cards+=`<div class="card"><div class="card-title">Campanas</div><div class="card-value accent">${dash.campanas||0}</div><div class="card-sub">${dash.activas||0} activas</div></div>`;
   }
-  $('dashCards').innerHTML = cards;
-  $('dashReporte').innerHTML = rep.ok ?
-    `<div style="padding:20px"><div style="font-size:32px;font-weight:700;color:var(--success)">${rep.totalEnvios || 0}</div><p style="color:var(--text2)">Total envios hoy</p><p style="margin-top:10px">✅ ${rep.exitosos || 0} exitosos<br>❌ ${rep.fallidos || 0} fallidos<br>💬 ${rep.respuestas || 0} respuestas</p></div>` :
-    '<div class="empty-state"><p>Sin datos</p></div>';
-  $('dashTasa').innerHTML = tasa.ok ?
-    `<div style="padding:20px"><div style="font-size:32px;font-weight:700;color:var(--success)">${tasa.tasa_entrega || 0}%</div><p style="color:var(--text2)">Tasa de entrega</p><p style="margin-top:10px">📨 ${tasa.total || 0} enviados<br>✅ ${tasa.entregados || 0} entregados<br>👁 ${tasa.leidos || 0} leidos (${tasa.tasa_lectura || 0}%)</p></div>` :
-    '<div class="empty-state"><p>Sin datos</p></div>';
+  $('dashCards').innerHTML=cards;
+  $('dashReporte').innerHTML=rep.ok?`<div style="padding:20px"><div style="font-size:30px;font-weight:700;color:var(--success)">${rep.totalEnvios||0}</div><p style="color:var(--text2)">Total envios hoy</p><p style="margin-top:10px">✅ ${rep.exitosos||0} exitosos<br>❌ ${rep.fallidos||0} fallidos<br>💬 ${rep.respuestas||0} respuestas</p></div>`:'<div class="empty-state"><p>Sin datos</p></div>';
+  $('dashTasa').innerHTML=tasa.ok?`<div style="padding:20px"><div style="font-size:30px;font-weight:700;color:var(--success)">${tasa.tasa_entrega||0}%</div><p style="color:var(--text2)">Tasa de entrega</p><p style="margin-top:10px">📨 ${tasa.total||0} enviados<br>✅ ${tasa.entregados||0} entregados<br>👁 ${tasa.leidos||0} leidos (${tasa.tasa_lectura||0}%)</p></div>`:'<div class="empty-state"><p>Sin datos</p></div>';
 }
 
 // --- CUENTAS ---
-async function loadCuentas() {
-  const r = await api('/api/sesiones?u=' + userId);
-  if (!r.ok) { $('cuentasContent').innerHTML = '<div class="empty-state"><p>Error: ' + (r.error || '') + '</p></div>'; return; }
-  const sesiones = r.sesiones || [];
-  const baneadas = (r.baneadas || []).map(b => b.nombre);
-  if (!sesiones.length) {
-    $('cuentasContent').innerHTML = '<div class="empty-state"><div class="icon">👤</div><p>No hay cuentas vinculadas.<br>Usa <b>/vincularwsp nombre</b> en Telegram para vincular.</p></div>';
-    return;
-  }
-  let html = '<div class="table-wrap"><div class="table-header"><h3>Cuentas Vinculadas (' + sesiones.length + ')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Telefono</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
-  sesiones.forEach((s, i) => {
-    const ban = baneadas.includes(s.nombre);
-    html += `<tr><td>${i + 1}</td><td><b>${s.nombre || '?'}</b></td><td>${s.telefono || '?'}</td>`;
-    html += `<td><span class="badge ${ban ? 'badge-danger' : 'badge-success'}">${ban ? 'BANEADA' : 'Activa'}</span></td>`;
-    html += `<td><button class="btn btn-danger btn-sm" onclick="eliminarCuenta('${s.nombre}')">🗑 Eliminar</button></td></tr>`;
+async function loadCuentas(){
+  const r=await api('/api/sesiones?u='+userId);
+  if(!r.ok){$('cuentasContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const s=r.sesiones||[],ban=(r.baneadas||[]).map(b=>b.nombre);
+  if(!s.length){$('cuentasContent').innerHTML='<div class="empty-state"><div class="icon">👤</div><p>No hay cuentas vinculadas.<br>Usa <b>/vincularwsp nombre</b> en Telegram.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Cuentas ('+s.length+')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Telefono</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
+  s.forEach((x,i)=>{
+    const b=ban.includes(x.nombre);
+    h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td>${x.telefono||'?'}</td><td><span class="badge ${b?'badge-danger':'badge-success'}">${b?'BANEADA':'Activa'}</span></td><td><button class="btn btn-danger btn-sm" onclick="eliminarCuenta('${x.nombre}')">🗑 Eliminar</button></td></tr>`;
   });
-  html += '</tbody></table></div>';
-  $('cuentasContent').innerHTML = html;
+  h+='</tbody></table></div>';$('cuentasContent').innerHTML=h;
 }
-async function eliminarCuenta(nombre) {
-  showModal(`<h3>⚠ Eliminar Cuenta</h3><p>¿Seguro que quieres eliminar la cuenta <b>'${nombre}'</b>?<br>Se desconectara y eliminara del sistema.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarEliminarCuenta('${nombre}')">Eliminar</button></div>`);
-}
-async function confirmarEliminarCuenta(nombre) {
-  closeModal();
-  const r = await api('/api/desvincular', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, nombre }) });
-  toast(r.ok ? 'Cuenta eliminada' : 'Error: ' + (r.error || ''), r.ok ? 'success' : 'error');
-  loadCuentas();
-}
+function eliminarCuenta(n){showModal(`<h3>⚠ Eliminar Cuenta</h3><p>Eliminar <b>'${n}'</b>?<br>Se desconectara y borrara.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarElimCuenta('${n}')">Eliminar</button></div>`)}
+async function confirmarElimCuenta(n){closeModal();const r=await api('/api/desvincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n})});toast(r.ok?'Cuenta eliminada':'Error','success');loadCuentas()}
 
 // --- GRUPOS ---
-async function loadGrupos() {
-  const r = await api('/api/grupos?u=' + userId);
-  if (!r.ok) { $('gruposContent').innerHTML = '<div class="empty-state"><p>Error</p></div>'; return; }
-  const grupos = r.grupos || [];
-  if (!grupos.length) {
-    $('gruposContent').innerHTML = '<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos registrados.<br>Usa "Detectar Grupos" para buscar.</p></div>';
-    return;
-  }
-  let html = '<div class="table-wrap"><div class="table-header"><h3>Grupos Registrados (' + grupos.length + ')</h3></div><table><thead><tr><th>#</th><th>Link/JID</th><th>Acciones</th></tr></thead><tbody>';
-  grupos.forEach((g, i) => {
-    const link = g.link || g.jid || '?';
-    const short = link.length > 50 ? link.slice(0, 50) + '...' : link;
-    html += `<tr><td>${i + 1}</td><td style="font-size:12px">${short}</td>`;
-    html += `<td><button class="btn btn-danger btn-sm" onclick="eliminarGrupo('${encodeURIComponent(g.link || g.jid)}')">🗑</button></td></tr>`;
-  });
-  html += '</tbody></table></div>';
-  $('gruposContent').innerHTML = html;
+async function loadGrupos(){
+  const r=await api('/api/grupos?u='+userId);
+  if(!r.ok){$('gruposContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const g=r.grupos||[];
+  if(!g.length){$('gruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos.<br>Usa "Detectar" para buscar.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+')</h3></div><table><thead><tr><th>#</th><th>Link/JID</th><th>Acciones</th></tr></thead><tbody>';
+  g.forEach((x,i)=>{const l=x.link||x.jid||'?';h+=`<tr><td>${i+1}</td><td style="font-size:12px">${l.length>50?l.slice(0,50)+'...':l}</td><td><button class="btn btn-danger btn-sm" onclick="eliminarGrupo('${encodeURIComponent(l)}')">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('gruposContent').innerHTML=h;
 }
-async function eliminarGrupo(link) {
-  const r = await api('/api/grupos/del', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, link: decodeURIComponent(link) }) });
-  toast(r.ok ? 'Grupo eliminado' : 'Error', r.ok ? 'success' : 'error');
-  loadGrupos();
+async function eliminarGrupo(l){const r=await api('/api/grupos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:decodeURIComponent(l)})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadGrupos()}
+async function detectarGrupos(){
+  $('gruposContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Detectando...</div>';
+  const r=await api('/api/detectar_cliente?u='+userId);
+  if(!r.ok){toast('Error: '+(r.error||''),'error');loadGrupos();return}
+  const g=r.grupos||[];if(!g.length){toast('No se detectaron grupos','error');loadGrupos();return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Detectados ('+g.length+')</h3><button class="btn btn-success btn-sm" onclick="agregarTodos()">✅ Agregar Todos</button></div><table><thead><tr><th>✓</th><th>#</th><th>Nombre</th><th>Miembros</th></tr></thead><tbody>';
+  g.forEach((x,i)=>{h+=`<tr><td><input type="checkbox" class="dch" value="${i}" checked></td><td>${i+1}</td><td>${x.subject||'?'}</td><td>${x.size||'?'}</td></tr>`});
+  h+='</tbody></table></div>';window._dg=g;$('gruposContent').innerHTML=h;
 }
-async function detectarGrupos() {
-  $('gruposContent').innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Detectando grupos...</div>';
-  const r = await api('/api/detectar_cliente?u=' + userId);
-  if (!r.ok) { toast('Error: ' + (r.error || ''), 'error'); loadGrupos(); return; }
-  const grupos = r.grupos || [];
-  if (!grupos.length) { toast('No se detectaron grupos', 'error'); loadGrupos(); return; }
-  let html = '<div class="table-wrap"><div class="table-header"><h3>Grupos Detectados (' + grupos.length + ')</h3><button class="btn btn-success btn-sm" onclick="agregarTodosGrupos()">✅ Agregar Todos</button></div><table><thead><tr><th>✓</th><th>#</th><th>Nombre</th><th>Miembros</th></tr></thead><tbody>';
-  grupos.forEach((g, i) => {
-    html += `<tr><td><input type="checkbox" class="det-check" value="${i}" checked></td><td>${i + 1}</td><td>${g.subject || '?'}</td><td>${g.size || '?'}</td></tr>`;
-  });
-  html += '</tbody></table></div>';
-  window._detectedGrupos = grupos;
-  $('gruposContent').innerHTML = html;
-}
-async function agregarTodosGrupos() {
-  const checks = document.querySelectorAll('.det-check:checked');
-  const grupos = window._detectedGrupos || [];
-  let added = 0;
-  for (const ch of checks) {
-    const g = grupos[parseInt(ch.value)];
-    if (g && g.id) {
-      await api('/api/grupos/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, link: g.id }) });
-      added++;
-    }
-  }
-  toast(added + ' grupos agregados', 'success');
-  loadGrupos();
-}
+async function agregarTodos(){const ch=document.querySelectorAll('.dch:checked'),g=window._dg||[];let n=0;for(const c of ch){const x=g[parseInt(c.value)];if(x&&x.id){await api('/api/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:x.id})});n++}}toast(n+' grupos agregados','success');loadGrupos()}
 
 // --- MENSAJES ---
-async function loadMensajes() {
-  const r = await api('/api/mensajes?u=' + userId);
-  if (!r.ok) { $('mensajesContent').innerHTML = '<div class="empty-state"><p>Error</p></div>'; return; }
-  const msgs = r.mensajes || [];
-  if (!msgs.length) {
-    $('mensajesContent').innerHTML = '<div class="empty-state"><div class="icon">✉</div><p>No hay mensajes.<br>Crea uno para empezar.</p></div>';
-    return;
-  }
-  let html = '<div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre</th><th>Texto</th><th>Acciones</th></tr></thead><tbody>';
-  msgs.forEach((m, i) => {
-    const preview = (m.texto || '').length > 60 ? m.texto.slice(0, 60) + '...' : (m.texto || '');
-    html += `<tr><td>${i + 1}</td><td><b>${m.nombre || '?'}</b></td><td style="font-size:12px;color:var(--text2)">${preview}</td>`;
-    html += `<td style="white-space:nowrap">
-      <button class="btn btn-outline btn-sm" onclick="editarMensaje(${m.id})">✏</button>
-      <button class="btn btn-outline btn-sm" onclick="duplicarMensaje(${m.id})">📋</button>
-      <button class="btn btn-danger btn-sm" onclick="eliminarMensaje(${m.id})">🗑</button>
-    </td></tr>`;
-  });
-  html += '</tbody></table></div>';
-  $('mensajesContent').innerHTML = html;
+async function loadMensajes(){
+  const r=await api('/api/mensajes?u='+userId);
+  if(!r.ok){$('mensajesContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const m=r.mensajes||[];
+  if(!m.length){$('mensajesContent').innerHTML='<div class="empty-state"><div class="icon">✉</div><p>No hay mensajes. Crea uno.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre</th><th>Texto</th><th>Acciones</th></tr></thead><tbody>';
+  m.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${(x.texto||'').slice(0,60)}</td><td style="white-space:nowrap"><button class="btn btn-outline btn-sm" onclick="editarMensaje(${x.id})">✏</button> <button class="btn btn-outline btn-sm" onclick="duplicarMensaje(${x.id})">📋</button> <button class="btn btn-danger btn-sm" onclick="eliminarMensaje(${x.id})">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('mensajesContent').innerHTML=h;
 }
-function showCrearMensaje() {
-  showModal(`<h3>➕ Crear Mensaje</h3>
-    <div class="form-group"><label>Nombre</label><input id="msgNombre" placeholder="Ej: Promo Enero"></div>
-    <div class="form-group"><label>Texto del mensaje</label><textarea id="msgTexto" rows="5" placeholder="Escribe tu mensaje aqui...&#10;&#10;Variables: {nombre} {numero}"></textarea></div>
-    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearMensaje()">Crear</button></div>`);
-}
-async function crearMensaje() {
-  const nombre = $('msgNombre').value.trim();
-  const texto = $('msgTexto').value.trim();
-  if (!nombre || !texto) { toast('Completa todos los campos', 'error'); return; }
-  closeModal();
-  const r = await api('/api/mensajes/crear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, nombre, texto }) });
-  toast(r.ok ? 'Mensaje creado' : 'Error', r.ok ? 'success' : 'error');
-  loadMensajes();
-}
-async function editarMensaje(id) {
-  const r = await api('/api/mensajes?u=' + userId);
-  const msg = (r.mensajes || []).find(m => m.id === id);
-  if (!msg) return;
-  showModal(`<h3>✏ Editar Mensaje</h3>
-    <div class="form-group"><label>Nombre</label><input id="editMsgNombre" value="${msg.nombre || ''}"></div>
-    <div class="form-group"><label>Texto</label><textarea id="editMsgTexto" rows="5">${msg.texto || ''}</textarea></div>
-    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="guardarMensaje(${id})">Guardar</button></div>`);
-}
-async function guardarMensaje(id) {
-  const nombre = $('editMsgNombre').value.trim();
-  const texto = $('editMsgTexto').value.trim();
-  closeModal();
-  const r = await api('/api/mensajes/editar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, id, nombre, texto }) });
-  toast(r.ok ? 'Mensaje editado' : 'Error', r.ok ? 'success' : 'error');
-  loadMensajes();
-}
-async function duplicarMensaje(id) {
-  const r = await api('/api/mensajes/duplicar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, id }) });
-  toast(r.ok ? 'Mensaje duplicado' : 'Error', r.ok ? 'success' : 'error');
-  loadMensajes();
-}
-async function eliminarMensaje(id) {
-  showModal(`<h3>🗑 Eliminar Mensaje</h3><p>¿Seguro?</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarEliminarMsg(${id})">Eliminar</button></div>`);
-}
-async function confirmarEliminarMsg(id) {
-  closeModal();
-  const r = await api('/api/mensajes/del', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, id }) });
-  toast(r.ok ? 'Eliminado' : 'Error', r.ok ? 'success' : 'error');
-  loadMensajes();
-}
+function showCrearMensaje(){showModal(`<h3>➕ Crear Mensaje</h3><div class="form-group"><label>Nombre</label><input id="msgN" placeholder="Ej: Promo Enero"></div><div class="form-group"><label>Texto</label><textarea id="msgT" rows="5" placeholder="Tu mensaje...&#10;Variables: {nombre} {numero}"></textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearMensaje()">Crear</button></div>`)}
+async function crearMensaje(){const n=$('msgN').value.trim(),t=$('msgT').value.trim();if(!n||!t){toast('Completa campos','error');return}closeModal();const r=await api('/api/mensajes/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,texto:t})});toast(r.ok?'Creado':'Error',r.ok?'success':'error');loadMensajes()}
+async function editarMensaje(id){const r=await api('/api/mensajes?u='+userId);const m=(r.mensajes||[]).find(x=>x.id===id);if(!m)return;showModal(`<h3>✏ Editar</h3><div class="form-group"><label>Nombre</label><input id="eN" value="${m.nombre||''}"></div><div class="form-group"><label>Texto</label><textarea id="eT" rows="5">${m.texto||''}</textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="guardarMsg(${id})">Guardar</button></div>`)}
+async function guardarMsg(id){closeModal();const r=await api('/api/mensajes/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id,nombre:$('eN').value.trim(),texto:$('eT').value.trim()})});toast(r.ok?'Editado':'Error',r.ok?'success':'error');loadMensajes()}
+async function duplicarMensaje(id){const r=await api('/api/mensajes/duplicar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Duplicado':'Error',r.ok?'success':'error');loadMensajes()}
+function eliminarMensaje(id){showModal(`<h3>🗑 Eliminar?</h3><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confElimMsg(${id})">Eliminar</button></div>`)}
+async function confElimMsg(id){closeModal();await api('/api/mensajes/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminado','success');loadMensajes()}
 
 // --- ENVIOS ---
-async function loadEnvios() {
-  const [msgs, hist] = await Promise.all([api('/api/mensajes?u=' + userId), api('/api/envios_unicos?u=' + userId)]);
-  const mensajes = (msgs.ok ? msgs.mensajes : []) || [];
-  if (!mensajes.length) {
-    $('enviosContent').innerHTML = '<div class="empty-state"><p>Crea un mensaje primero</p></div>';
-  } else {
-    let html = '<div class="grid">';
-    mensajes.forEach(m => {
-      const preview = (m.texto || '').slice(0, 80);
-      html += `<div class="card" style="cursor:pointer" onclick="enviarUnico(${m.id}, '${(m.nombre||'').replace(/'/g,"\\'")}')"><div class="card-title">${m.nombre || '?'}</div><p style="font-size:13px;color:var(--text2)">${preview}</p><button class="btn btn-primary btn-sm" style="margin-top:10px">📤 Enviar</button></div>`;
-    });
-    html += '</div>';
-    $('enviosContent').innerHTML = html;
-  }
-  const envios = (hist.ok ? hist.envios : []) || [];
-  if (!envios.length) {
-    $('enviosHistorial').innerHTML = '<div class="empty-state"><p>Sin envios aun</p></div>';
-  } else {
-    let ht = '<table><thead><tr><th>Fecha</th><th>Mensaje</th><th>Grupos</th><th>Exitosos</th><th>Fallidos</th></tr></thead><tbody>';
-    envios.slice(0, 20).forEach(e => {
-      ht += `<tr><td style="font-size:12px">${e.fecha || '?'}</td><td>${e.nombre || e.mensaje_id || '?'}</td><td>${e.total_grupos || '?'}</td><td style="color:var(--success)">${e.exitosos || 0}</td><td style="color:var(--danger)">${e.fallidos || 0}</td></tr>`;
-    });
-    ht += '</tbody></table>';
-    $('enviosHistorial').innerHTML = ht;
-  }
+async function loadEnvios(){
+  const [ms,hi]=await Promise.all([api('/api/mensajes?u='+userId),api('/api/envios_unicos?u='+userId)]);
+  const m=(ms.ok?ms.mensajes:[])||[];
+  if(!m.length){$('enviosContent').innerHTML='<div class="empty-state"><p>Crea un mensaje primero</p></div>'}
+  else{let h='<div class="grid">';m.forEach(x=>{h+=`<div class="card" style="cursor:pointer" onclick="enviarUnico(${x.id},'${(x.nombre||'').replace(/'/g,"\\'")}')"><div class="card-title">${x.nombre||'?'}</div><p style="font-size:12px;color:var(--text2)">${(x.texto||'').slice(0,80)}</p><button class="btn btn-primary btn-sm" style="margin-top:10px">📤 Enviar</button></div>`});h+='</div>';$('enviosContent').innerHTML=h}
+  const e=(hi.ok?hi.envios:[])||[];
+  if(!e.length){$('enviosHistorial').innerHTML='<div class="empty-state"><p>Sin envios</p></div>'}
+  else{let h='<table><thead><tr><th>Fecha</th><th>Mensaje</th><th>Grupos</th><th>OK</th><th>Error</th></tr></thead><tbody>';e.slice(0,20).forEach(x=>{h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.nombre||x.mensaje_id||'?'}</td><td>${x.total_grupos||'?'}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td></tr>`});h+='</tbody></table>';$('enviosHistorial').innerHTML=h}
 }
-async function enviarUnico(msgId, nombre) {
-  showModal(`<h3>📤 Enviar Mensaje</h3><p>Enviar <b>"${nombre}"</b> a todos tus grupos?</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="confirmarEnvio(${msgId})">Enviar</button></div>`);
-}
-async function confirmarEnvio(msgId) {
-  closeModal();
-  toast('Enviando...', 'success');
-  const r = await api('/api/enviar_unico', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, mensaje_id: msgId }) });
-  if (r.ok) {
-    toast('Envio completado: ' + (r.exitosos || 0) + ' exitosos, ' + (r.fallidos || 0) + ' fallidos', 'success');
-  } else {
-    toast('Error: ' + (r.error || ''), 'error');
-  }
-  loadEnvios();
-}
+function enviarUnico(id,n){showModal(`<h3>📤 Enviar</h3><p>Enviar <b>"${n}"</b> a todos tus grupos?</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="confEnvio(${id})">Enviar</button></div>`)}
+async function confEnvio(id){closeModal();toast('Enviando...','success');const r=await api('/api/enviar_unico',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje_id:id})});toast(r.ok?'Envio: '+(r.exitosos||0)+' ok, '+(r.fallidos||0)+' error':'Error: '+(r.error||''),r.ok?'success':'error');loadEnvios()}
 
 // --- PROGRAMADOS ---
-async function loadProgramados() {
-  const r = await api('/api/programados?u=' + userId);
-  if (!r.ok) { $('programadosContent').innerHTML = '<div class="empty-state"><p>Error</p></div>'; return; }
-  const progs = r.programados || [];
-  if (!progs.length) {
-    $('programadosContent').innerHTML = '<div class="empty-state"><div class="icon">⏰</div><p>No hay envios programados.<br>Programa uno para automatizar.</p></div>';
-    return;
-  }
-  let html = '<div class="table-wrap"><table><thead><tr><th>#</th><th>Mensaje</th><th>Hora</th><th>Repetir</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
-  progs.forEach((p, i) => {
-    html += `<tr><td>${i + 1}</td><td>${p.nombre || p.mensaje_id}</td><td><b>${p.hora || '?'}</b></td><td>${p.repetir ? 'Diario' : 'Una vez'}</td>`;
-    html += `<td><span class="badge ${p.activo ? 'badge-success' : 'badge-warn'}">${p.activo ? 'Activo' : 'Pausado'}</span></td>`;
-    html += `<td><button class="btn btn-outline btn-sm" onclick="toggleProgramado(${p.id})">${p.activo ? '⏸' : '▶'}</button> <button class="btn btn-danger btn-sm" onclick="eliminarProgramado(${p.id})">🗑</button></td></tr>`;
-  });
-  html += '</tbody></table></div>';
-  $('programadosContent').innerHTML = html;
+async function loadProgramados(){
+  const r=await api('/api/programados?u='+userId);
+  if(!r.ok){$('programadosContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const p=r.programados||[];
+  if(!p.length){$('programadosContent').innerHTML='<div class="empty-state"><div class="icon">⏰</div><p>No hay envios programados.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Mensaje</th><th>Hora</th><th>Repetir</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
+  p.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td>${x.nombre||x.mensaje_id}</td><td><b>${x.hora||'?'}</b></td><td>${x.repetir?'Diario':'Una vez'}</td><td><span class="badge ${x.activo?'badge-success':'badge-warn'}">${x.activo?'Activo':'Pausado'}</span></td><td><button class="btn btn-outline btn-sm" onclick="toggleProg(${x.id})">${x.activo?'⏸':'▶'}</button> <button class="btn btn-danger btn-sm" onclick="elimProg(${x.id})">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('programadosContent').innerHTML=h;
 }
-function showCrearProgramado() {
-  showModal(`<h3>➕ Programar Envio</h3>
-    <div class="form-group"><label>ID del Mensaje</label><input id="progMsgId" type="number" placeholder="ID del mensaje"></div>
-    <div class="form-group"><label>Hora (HH:MM formato 24h)</label><input id="progHora" placeholder="Ej: 09:30"></div>
-    <div class="form-group"><label><input type="checkbox" id="progRepetir"> Repetir diariamente</label></div>
-    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearProgramado()">Programar</button></div>`);
-}
-async function crearProgramado() {
-  const mensaje_id = parseInt($('progMsgId').value);
-  const hora = $('progHora').value.trim();
-  const repetir = $('progRepetir').checked;
-  if (!mensaje_id || !hora) { toast('Completa los campos', 'error'); return; }
-  closeModal();
-  const r = await api('/api/programados/crear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, mensaje_id, hora, repetir }) });
-  toast(r.ok ? 'Programado' : 'Error: ' + (r.error || ''), r.ok ? 'success' : 'error');
-  loadProgramados();
-}
-async function toggleProgramado(id) {
-  await api('/api/programados/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, id }) });
-  loadProgramados();
-}
-async function eliminarProgramado(id) {
-  await api('/api/programados/del', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, id }) });
-  toast('Eliminado', 'success');
-  loadProgramados();
-}
+function showCrearProgramado(){showModal(`<h3>➕ Programar</h3><div class="form-group"><label>ID Mensaje</label><input id="pI" type="number" placeholder="ID"></div><div class="form-group"><label>Hora (HH:MM)</label><input id="pH" placeholder="09:30"></div><div class="form-group"><label><input type="checkbox" id="pR"> Repetir diario</label></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearProg()">Programar</button></div>`)}
+async function crearProg(){const mid=parseInt($('pI').value),h=$('pH').value.trim(),rep=$('pR').checked;if(!mid||!h){toast('Completa','error');return}closeModal();const r=await api('/api/programados/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje_id:mid,hora:h,repetir:rep})});toast(r.ok?'Programado':'Error',r.ok?'success':'error');loadProgramados()}
+async function toggleProg(id){await api('/api/programados/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});loadProgramados()}
+async function elimProg(id){await api('/api/programados/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminado','success');loadProgramados()}
 
 // --- CAMPANAS ---
-async function loadCampanas() {
-  const r = await api('/api/campanas?u=' + userId);
-  if (!r.ok) { $('campanasContent').innerHTML = '<div class="empty-state"><p>Error</p></div>'; return; }
-  const camps = r.campanas || [];
-  if (!camps.length) {
-    $('campanasContent').innerHTML = '<div class="empty-state"><div class="icon">📋</div><p>No hay campanas.<br>Crea una para empezar.</p></div>';
-    return;
-  }
-  let html = '<div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre</th><th>Estado</th><th>Enviados</th><th>Acciones</th></tr></thead><tbody>';
-  camps.forEach((c, i) => {
-    html += `<tr><td>${i + 1}</td><td><b>${c.nombre || '?'}</b></td>`;
-    html += `<td><span class="badge ${c.activa ? 'badge-success' : 'badge-warn'}">${c.activa ? 'Activa' : 'Inactiva'}</span></td>`;
-    html += `<td>${c.enviados || 0}</td>`;
-    html += `<td>
-      <button class="btn btn-success btn-sm" onclick="iniciarCampana(${c.id})">▶</button>
-      <button class="btn btn-outline btn-sm" onclick="detenerCampana(${c.id})">⏸</button>
-      <button class="btn btn-danger btn-sm" onclick="eliminarCampana(${c.id})">🗑</button>
-    </td></tr>`;
-  });
-  html += '</tbody></table></div>';
-  $('campanasContent').innerHTML = html;
+async function loadCampanas(){
+  const r=await api('/api/campanas?u='+userId);
+  if(!r.ok){$('campanasContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const c=r.campanas||[];
+  if(!c.length){$('campanasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay campanas.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre</th><th>Estado</th><th>Enviados</th><th>Acciones</th></tr></thead><tbody>';
+  c.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td><span class="badge ${x.activa?'badge-success':'badge-warn'}">${x.activa?'Activa':'Inactiva'}</span></td><td>${x.enviados||0}</td><td><button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})">▶</button> <button class="btn btn-outline btn-sm" onclick="detenerCamp(${x.id})">⏸</button> <button class="btn btn-danger btn-sm" onclick="elimCamp(${x.id})">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('campanasContent').innerHTML=h;
 }
-function showCrearCampana() {
-  showModal(`<h3>➕ Crear Campana</h3>
-    <div class="form-group"><label>Nombre</label><input id="campNombre" placeholder="Nombre de la campana"></div>
-    <div class="form-group"><label>Mensaje</label><textarea id="campMensaje" rows="4" placeholder="Texto del mensaje"></textarea></div>
-    <div class="form-group"><label>Intervalo (segundos)</label><input id="campIntervalo" type="number" value="60" min="10"></div>
-    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearCampana()">Crear</button></div>`);
-}
-async function crearCampana() {
-  const nombre = $('campNombre').value.trim();
-  const mensaje = $('campMensaje').value.trim();
-  const intervalo = parseInt($('campIntervalo').value) || 60;
-  if (!nombre || !mensaje) { toast('Completa los campos', 'error'); return; }
-  closeModal();
-  const r = await api('/api/campanas/crear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, nombre, mensaje, intervalo }) });
-  toast(r.ok ? 'Campana creada' : 'Error', r.ok ? 'success' : 'error');
-  loadCampanas();
-}
-async function iniciarCampana(id) {
-  const r = await api('/api/iniciar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, campana_id: id }) });
-  toast(r.ok ? 'Campana iniciada' : 'Error: ' + (r.error || ''), r.ok ? 'success' : 'error');
-  loadCampanas();
-}
-async function detenerCampana(id) {
-  await api('/api/detener', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, campana_id: id }) });
-  toast('Campana detenida', 'success');
-  loadCampanas();
-}
-async function eliminarCampana(id) {
-  await api('/api/campanas/del', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, id }) });
-  toast('Campana eliminada', 'success');
-  loadCampanas();
-}
+function showCrearCampana(){showModal(`<h3>➕ Crear Campana</h3><div class="form-group"><label>Nombre</label><input id="cN" placeholder="Nombre"></div><div class="form-group"><label>Mensaje</label><textarea id="cM" rows="4" placeholder="Texto"></textarea></div><div class="form-group"><label>Intervalo (seg)</label><input id="cI" type="number" value="60" min="10"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearCamp()">Crear</button></div>`)}
+async function crearCamp(){const n=$('cN').value.trim(),m=$('cM').value.trim(),iv=parseInt($('cI').value)||60;if(!n||!m){toast('Completa','error');return}closeModal();const r=await api('/api/campanas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,mensaje:m,intervalo:iv})});toast(r.ok?'Creada':'Error',r.ok?'success':'error');loadCampanas()}
+async function iniciarCamp(id){const r=await api('/api/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast(r.ok?'Iniciada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas()}
+async function detenerCamp(id){await api('/api/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast('Detenida','success');loadCampanas()}
+async function elimCamp(id){await api('/api/campanas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminada','success');loadCampanas()}
 
 // --- CONFIG ---
-async function loadConfig() {
-  const [conf, hor] = await Promise.all([api('/api/envio_config?u=' + userId), api('/api/envio_config?u=' + userId)]);
-  if (!conf.ok) { $('configContent').innerHTML = '<div class="empty-state"><p>Error</p></div>'; return; }
-  const c = conf.config || {};
-  const h = conf.horario || {};
-  let html = `<div class="grid">
-    <div class="card">
-      <div class="card-title">⏱ Delay entre envios</div>
-      <div class="form-group" style="margin-top:10px"><input id="cfgDelay" type="number" value="${c.delay_seg || 10}" min="5" max="120"> <small style="color:var(--text2)">segundos</small></div>
-    </div>
-    <div class="card">
-      <div class="card-title">📦 Tamano de lote</div>
-      <div class="form-group" style="margin-top:10px"><input id="cfgLote" type="number" value="${c.lote_tamano || 0}" min="0"> <small style="color:var(--text2)">mensajes (0 = sin lotes)</small></div>
-      <div class="form-group"><label>Pausa entre lotes (seg)</label><input id="cfgLotePausa" type="number" value="${c.lote_pausa_seg || 30}" min="0"></div>
-    </div>
-    <div class="card">
-      <div class="card-title">🕐 Horario de envio</div>
-      <div class="form-group" style="margin-top:10px"><label>Hora inicio</label><input id="cfgHoraInicio" type="number" value="${h.hora_inicio || 0}" min="0" max="23"></div>
-      <div class="form-group"><label>Hora fin</label><input id="cfgHoraFin" type="number" value="${h.hora_fin || 24}" min="1" max="24"></div>
-    </div>
-  </div>
-  <button class="btn btn-primary" onclick="guardarConfig()">💾 Guardar Configuracion</button>`;
-  $('configContent').innerHTML = html;
+async function loadConfig(){
+  const r=await api('/api/envio_config?u='+userId);
+  if(!r.ok){$('configContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const c=r.config||{},hr=r.horario||{};
+  $('configContent').innerHTML=`<div class="grid">
+    <div class="card"><div class="card-title">⏱ Delay</div><div class="form-group" style="margin-top:10px"><input id="cd" type="number" value="${c.delay_seg||10}" min="5" max="120"><small style="color:var(--text2)"> segundos</small></div></div>
+    <div class="card"><div class="card-title">📦 Lote</div><div class="form-group" style="margin-top:10px"><input id="cl" type="number" value="${c.lote_tamano||0}" min="0"><small style="color:var(--text2)"> msgs (0=sin lotes)</small></div><div class="form-group"><label>Pausa lotes (seg)</label><input id="cp" type="number" value="${c.lote_pausa_seg||30}" min="0"></div></div>
+    <div class="card"><div class="card-title">🕐 Horario</div><div class="form-group" style="margin-top:10px"><label>Inicio</label><input id="chi" type="number" value="${hr.hora_inicio||0}" min="0" max="23"></div><div class="form-group"><label>Fin</label><input id="chf" type="number" value="${hr.hora_fin||24}" min="1" max="24"></div></div>
+  </div><button class="btn btn-primary" onclick="guardarConfig()">💾 Guardar</button>`;
 }
-async function guardarConfig() {
-  const delay_seg = parseInt($('cfgDelay').value) || 10;
-  const lote_tamano = parseInt($('cfgLote').value) || 0;
-  const lote_pausa_seg = parseInt($('cfgLotePausa').value) || 30;
-  const hora_inicio = parseInt($('cfgHoraInicio').value) || 0;
-  const hora_fin = parseInt($('cfgHoraFin').value) || 24;
-  const r = await api('/api/envio_config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, delay_seg, lote_tamano, lote_pausa_seg, hora_inicio, hora_fin }) });
-  toast(r.ok ? 'Config guardada' : 'Error', r.ok ? 'success' : 'error');
+async function guardarConfig(){
+  const r=await api('/api/envio_config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,delay_seg:parseInt($('cd').value)||10,lote_tamano:parseInt($('cl').value)||0,lote_pausa_seg:parseInt($('cp').value)||30,hora_inicio:parseInt($('chi').value)||0,hora_fin:parseInt($('chf').value)||24})});
+  toast(r.ok?'Guardado':'Error',r.ok?'success':'error');
 }
 
 // --- LISTA NEGRA ---
-async function loadListaNegra() {
-  const r = await api('/api/lista_negra?u=' + userId);
-  if (!r.ok) { $('listaNegraContent').innerHTML = '<div class="empty-state"><p>Error</p></div>'; return; }
-  const lista = r.lista || [];
-  if (!lista.length) {
-    $('listaNegraContent').innerHTML = '<div class="empty-state"><div class="icon">🚫</div><p>Lista negra vacia</p></div>';
-    return;
-  }
-  let html = '<div class="table-wrap"><table><thead><tr><th>#</th><th>Numero</th><th>Acciones</th></tr></thead><tbody>';
-  lista.forEach((n, i) => {
-    const num = n.numero || n;
-    html += `<tr><td>${i + 1}</td><td>${num}</td><td><button class="btn btn-outline btn-sm" onclick="quitarBlacklist('${num}')">Quitar</button></td></tr>`;
-  });
-  html += '</tbody></table></div>';
-  $('listaNegraContent').innerHTML = html;
+async function loadListaNegra(){
+  const r=await api('/api/lista_negra?u='+userId);
+  if(!r.ok){$('listaNegraContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const l=r.lista||[];
+  if(!l.length){$('listaNegraContent').innerHTML='<div class="empty-state"><div class="icon">🚫</div><p>Lista vacia</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Numero</th><th></th></tr></thead><tbody>';
+  l.forEach((x,i)=>{const n=x.numero||x;h+=`<tr><td>${i+1}</td><td>${n}</td><td><button class="btn btn-outline btn-sm" onclick="quitarBL('${n}')">Quitar</button></td></tr>`});
+  h+='</tbody></table></div>';$('listaNegraContent').innerHTML=h;
 }
-async function agregarBlacklist() {
-  const num = $('inputBlacklist').value.trim();
-  if (!num) return;
-  const r = await api('/api/lista_negra', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, accion: 'agregar', numero: num }) });
-  toast(r.ok ? 'Bloqueado' : 'Error', r.ok ? 'success' : 'error');
-  $('inputBlacklist').value = '';
-  loadListaNegra();
-}
-async function quitarBlacklist(num) {
-  await api('/api/lista_negra', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, accion: 'eliminar', numero: num }) });
-  toast('Desbloqueado', 'success');
-  loadListaNegra();
-}
-async function limpiarBlacklist() {
-  showModal(`<h3>🗑 Limpiar Lista Negra</h3><p>¿Eliminar todos los numeros bloqueados?</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarLimpiarBL()">Limpiar</button></div>`);
-}
-async function confirmarLimpiarBL() {
-  closeModal();
-  await api('/api/lista_negra', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, accion: 'limpiar' }) });
-  toast('Lista limpiada', 'success');
-  loadListaNegra();
-}
+async function agregarBlacklist(){const n=$('inputBlacklist').value.trim();if(!n)return;const r=await api('/api/lista_negra',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'agregar',numero:n})});toast(r.ok?'Bloqueado':'Error',r.ok?'success':'error');$('inputBlacklist').value='';loadListaNegra()}
+async function quitarBL(n){await api('/api/lista_negra',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'eliminar',numero:n})});toast('Desbloqueado','success');loadListaNegra()}
+function limpiarBlacklist(){showModal(`<h3>🗑 Limpiar?</h3><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confLimpBL()">Limpiar</button></div>`)}
+async function confLimpBL(){closeModal();await api('/api/lista_negra',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'limpiar'})});toast('Limpiada','success');loadListaNegra()}
 
 // --- AUTO RESPONDER ---
-async function loadAutoResp() {
-  const r = await api('/api/auto_respuestas?u=' + userId);
-  if (!r.ok) { $('autoRespContent').innerHTML = '<div class="empty-state"><p>Error</p></div>'; return; }
-  const reglas = r.reglas || [];
-  if (!reglas.length) {
-    $('autoRespContent').innerHTML = '<div class="empty-state"><div class="icon">🤖</div><p>No hay reglas de auto-respuesta.<br>Agrega una para responder automaticamente.</p></div>';
-    return;
-  }
-  let html = '<div class="table-wrap"><table><thead><tr><th>#</th><th>Palabra Clave</th><th>Respuesta</th><th>Acciones</th></tr></thead><tbody>';
-  reglas.forEach((r, i) => {
-    html += `<tr><td>${i + 1}</td><td><b>${r.palabra || r.keyword || '?'}</b></td><td style="font-size:12px;color:var(--text2)">${(r.respuesta || r.response || '').slice(0, 80)}</td>`;
-    html += `<td><button class="btn btn-danger btn-sm" onclick="eliminarAutoResp(${r.id})">🗑</button></td></tr>`;
-  });
-  html += '</tbody></table></div>';
-  $('autoRespContent').innerHTML = html;
+async function loadAutoResp(){
+  const r=await api('/api/auto_respuestas?u='+userId);
+  if(!r.ok){$('autoRespContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const reg=r.reglas||[];
+  if(!reg.length){$('autoRespContent').innerHTML='<div class="empty-state"><div class="icon">🤖</div><p>Sin reglas</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Palabra</th><th>Respuesta</th><th></th></tr></thead><tbody>';
+  reg.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${x.palabra||x.keyword||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${(x.respuesta||x.response||'').slice(0,80)}</td><td><button class="btn btn-danger btn-sm" onclick="elimAR(${x.id})">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('autoRespContent').innerHTML=h;
 }
-function showCrearAutoResp() {
-  showModal(`<h3>➕ Agregar Auto-Respuesta</h3>
-    <div class="form-group"><label>Palabra clave</label><input id="arPalabra" placeholder="Ej: precio"></div>
-    <div class="form-group"><label>Respuesta</label><textarea id="arRespuesta" rows="3" placeholder="Ej: Nuestros precios son..."></textarea></div>
-    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearAutoResp()">Agregar</button></div>`);
-}
-async function crearAutoResp() {
-  const palabra = $('arPalabra').value.trim();
-  const respuesta = $('arRespuesta').value.trim();
-  if (!palabra || !respuesta) { toast('Completa los campos', 'error'); return; }
-  closeModal();
-  const r = await api('/api/auto_respuestas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, accion: 'agregar', palabra, respuesta }) });
-  toast(r.ok ? 'Regla agregada' : 'Error', r.ok ? 'success' : 'error');
-  loadAutoResp();
-}
-async function eliminarAutoResp(id) {
-  await api('/api/auto_respuestas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, accion: 'eliminar', id }) });
-  toast('Regla eliminada', 'success');
-  loadAutoResp();
-}
-async function limpiarAutoResp() {
-  showModal(`<h3>🗑 Limpiar Auto-Respuestas</h3><p>¿Eliminar todas las reglas?</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarLimpiarAR()">Limpiar</button></div>`);
-}
-async function confirmarLimpiarAR() {
-  closeModal();
-  await api('/api/auto_respuestas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: userId, accion: 'limpiar' }) });
-  toast('Reglas limpiadas', 'success');
-  loadAutoResp();
-}
+function showCrearAutoResp(){showModal(`<h3>➕ Auto-Respuesta</h3><div class="form-group"><label>Palabra clave</label><input id="arP" placeholder="Ej: precio"></div><div class="form-group"><label>Respuesta</label><textarea id="arR" rows="3" placeholder="Respuesta..."></textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearAR()">Agregar</button></div>`)}
+async function crearAR(){const p=$('arP').value.trim(),r=$('arR').value.trim();if(!p||!r){toast('Completa','error');return}closeModal();const res=await api('/api/auto_respuestas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'agregar',palabra:p,respuesta:r})});toast(res.ok?'Agregada':'Error',res.ok?'success':'error');loadAutoResp()}
+async function elimAR(id){await api('/api/auto_respuestas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'eliminar',id})});toast('Eliminada','success');loadAutoResp()}
+function limpiarAutoResp(){showModal(`<h3>🗑 Limpiar?</h3><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confLimpAR()">Limpiar</button></div>`)}
+async function confLimpAR(){closeModal();await api('/api/auto_respuestas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'limpiar'})});toast('Limpiadas','success');loadAutoResp()}
 
 // --- STATS ---
-async function loadStats() {
-  const r = await api('/api/grupo_stats?u=' + userId);
-  if (!r.ok) { $('statsContent').innerHTML = '<div class="empty-state"><p>Error</p></div>'; return; }
-  const stats = r.stats || [];
-  if (!stats.length) {
-    $('statsContent').innerHTML = '<div class="empty-state"><div class="icon">📈</div><p>Sin estadisticas por grupo aun.<br>Envia mensajes para generar datos.</p></div>';
-    return;
-  }
-  let html = '<div class="table-wrap"><table><thead><tr><th>Grupo</th><th>Enviados</th><th>Exitosos</th><th>Fallidos</th><th>Tasa</th></tr></thead><tbody>';
-  stats.forEach(s => {
-    const tasa = s.total ? Math.round((s.exitosos / s.total) * 100) : 0;
-    const tasaClass = tasa >= 80 ? 'badge-success' : tasa >= 50 ? 'badge-warn' : 'badge-danger';
-    html += `<tr><td style="font-size:12px">${(s.grupo || s.link || '?').slice(0, 40)}</td><td>${s.total || 0}</td><td style="color:var(--success)">${s.exitosos || 0}</td><td style="color:var(--danger)">${s.fallidos || 0}</td><td><span class="badge ${tasaClass}">${tasa}%</span></td></tr>`;
-  });
-  html += '</tbody></table></div>';
-  $('statsContent').innerHTML = html;
+async function loadStats(){
+  const r=await api('/api/grupo_stats?u='+userId);
+  if(!r.ok){$('statsContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const s=r.stats||[];
+  if(!s.length){$('statsContent').innerHTML='<div class="empty-state"><div class="icon">📈</div><p>Sin stats. Envia mensajes para generar datos.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>Grupo</th><th>Enviados</th><th>OK</th><th>Error</th><th>Tasa</th></tr></thead><tbody>';
+  s.forEach(x=>{const t=x.total?Math.round((x.exitosos/x.total)*100):0,c=t>=80?'badge-success':t>=50?'badge-warn':'badge-danger';h+=`<tr><td style="font-size:11px">${(x.grupo||x.link||'?').slice(0,40)}</td><td>${x.total||0}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td><td><span class="badge ${c}">${t}%</span></td></tr>`});
+  h+='</tbody></table></div>';$('statsContent').innerHTML=h;
 }
 
 // --- INIT ---
-window.addEventListener('load', () => {
-  const saved = localStorage.getItem('bot_uid');
-  const urlParams = new URLSearchParams(window.location.search);
-  const urlId = urlParams.get('u');
-  if (urlId) {
-    $('loginId').value = urlId;
-    doLogin();
-  } else if (saved) {
-    $('loginId').value = saved;
-    doLogin();
-  }
+window.addEventListener('load',()=>{
+  const uid=localStorage.getItem('panel_uid'),token=localStorage.getItem('panel_token');
+  const urlP=new URLSearchParams(window.location.search),urlId=urlP.get('u');
+  if(uid&&token){userId=uid;showApp()}
+  else if(urlId){$('loginId').value=urlId}
 });
 </script>
 </body>

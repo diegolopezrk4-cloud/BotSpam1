@@ -243,6 +243,11 @@ function init() {
             hora_fin INTEGER DEFAULT 24,
             FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
         );
+        CREATE TABLE IF NOT EXISTS panel_users (
+            telegram_id TEXT PRIMARY KEY,
+            password TEXT NOT NULL,
+            fecha_registro TEXT DEFAULT (datetime('now'))
+        );
     `);
 
     // Migraciones
@@ -1130,6 +1135,14 @@ function setHorarioEnvio(userId, hora_inicio, hora_fin) {
     `).run(userId, hora_inicio, hora_fin, hora_inicio, hora_fin);
 }
 
+// --- PANEL USERS ---
+function getPanelUser(telegramId) {
+    return db.prepare("SELECT * FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+}
+function registrarPanelUser(telegramId, password) {
+    db.prepare("INSERT OR REPLACE INTO panel_users (telegram_id, password) VALUES (?, ?)").run(String(telegramId), password);
+}
+
 function checkMembresiaTg(telegramId) {
     try {
         const Database = require("better-sqlite3");
@@ -1194,4 +1207,6 @@ module.exports = {
     registrarMsgEnviado, actualizarEstadoMsg, getTasaEntrega,
     // Membresia TG
     checkMembresiaTg,
+    // Panel users
+    getPanelUser, registrarPanelUser,
 };

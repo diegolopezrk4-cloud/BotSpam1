@@ -1134,6 +1134,52 @@ if(uid())loadAll();
                 return res.end(JSON.stringify({ ok: true, activa }));
             }
 
+            // POST /api/panel_registro — Registrar usuario del panel
+            if (url.pathname === "/api/panel_registro" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                const activa = db.checkMembresiaTg(body.telegram_id);
+                if (!activa) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_membresia" })); }
+                const existing = db.getPanelUser(body.telegram_id);
+                if (existing) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: "ya_registrado" })); }
+                const crypto = require("crypto");
+                const hash = crypto.createHash("sha256").update(body.password).digest("hex");
+                db.registrarPanelUser(body.telegram_id, hash);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Registro exitoso" }));
+            }
+
+            // POST /api/panel_login — Login del panel
+            if (url.pathname === "/api/panel_login" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                const activa = db.checkMembresiaTg(body.telegram_id);
+                if (!activa) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_membresia" })); }
+                const user = db.getPanelUser(body.telegram_id);
+                if (!user) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "no_registrado" })); }
+                const crypto = require("crypto");
+                const hash = crypto.createHash("sha256").update(body.password).digest("hex");
+                if (user.password !== hash) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "password_incorrecta" })); }
+                const token = crypto.randomBytes(32).toString("hex");
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, token, telegram_id: body.telegram_id }));
+            }
+
+            // POST /api/panel_cambiar_password — Cambiar contraseña
+            if (url.pathname === "/api/panel_cambiar_password" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id || !body.old_password || !body.new_password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                const user = db.getPanelUser(body.telegram_id);
+                if (!user) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "no_registrado" })); }
+                const crypto = require("crypto");
+                const oldHash = crypto.createHash("sha256").update(body.old_password).digest("hex");
+                if (user.password !== oldHash) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "password_incorrecta" })); }
+                const newHash = crypto.createHash("sha256").update(body.new_password).digest("hex");
+                db.registrarPanelUser(body.telegram_id, newHash);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Password actualizada" }));
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
