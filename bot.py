@@ -4190,16 +4190,19 @@ async def cb_wsp_intervalo(call: types.CallbackQuery):
     for c in campanas:
         r2 = await wsp.wsp_get_config(c.get("id"))
         conf = r2.get("config", {}) if r2.get("ok") else {}
-        min_v = conf.get("intervalo_min", 30)
-        max_v = conf.get("intervalo_max", 60)
-        texto += f"  • {c.get('nombre', '?')}: {min_v}-{max_v}s\n"
+        min_v = conf.get("intervalo_min", 10)
+        max_v = conf.get("intervalo_max", 15)
+        ec = conf.get("espera_cuenta", 300)
+        eciclo = conf.get("espera_ciclo", 900)
+        texto += (
+            f"📋 {c.get('nombre', '?')}:\n"
+            f"  ⏱ Entre grupos: {min_v}-{max_v}s\n"
+            f"  👤 Entre cuentas: {ec}s ({ec//60} min)\n"
+            f"  🔄 Entre ciclos: {eciclo}s ({eciclo//60} min)\n\n"
+        )
     texto += (
-        "\n━━━━━━━━━━━━━━━━━━\n"
-        "Selecciona campaña para cambiar:\n\n"
-        "Recomendado:\n"
-        "  1 cuenta: 30-60s\n"
-        "  2 cuentas: 15-30s\n"
-        "  3+ cuentas: 10-20s"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "Selecciona campaña para configurar:"
     )
     botones = [
         [InlineKeyboardButton(text=f"⏱ {c.get('nombre', '?')}", callback_data=f"wspintv_{c.get('id', 0)}")]
@@ -4212,19 +4215,93 @@ async def cb_wsp_intervalo(call: types.CallbackQuery):
 
 
 @dp.callback_query(F.data.startswith("wspintv_"))
-async def cb_wsp_intervalo_camp(call: types.CallbackQuery, state: FSMContext):
+async def cb_wsp_intervalo_camp(call: types.CallbackQuery):
     camp_id = int(call.data.replace("wspintv_", ""))
     import wsp_bridge as wsp
     r = await wsp.wsp_get_config(camp_id)
     conf = r.get("config", {}) if r.get("ok") else {}
-    min_v = conf.get("intervalo_min", 30)
-    max_v = conf.get("intervalo_max", 60)
-    await state.update_data(wsp_intv_camp_id=camp_id)
+    min_v = conf.get("intervalo_min", 10)
+    max_v = conf.get("intervalo_max", 15)
+    ec = conf.get("espera_cuenta", 300)
+    eciclo = conf.get("espera_ciclo", 900)
+    texto = (
+        f"⏱ CONFIGURAR INTERVALO WSP\n\n"
+        f"Actual:\n"
+        f"  ⏱ Entre grupos: {min_v}-{max_v}s\n"
+        f"  👤 Entre cuentas: {ec}s ({ec//60} min)\n"
+        f"  🔄 Entre ciclos: {eciclo}s ({eciclo//60} min)\n\n"
+        f"¿Qué quieres cambiar?"
+    )
+    botones = [
+        [InlineKeyboardButton(text="⏱ Delay entre grupos", callback_data=f"wspintvg_{camp_id}")],
+        [InlineKeyboardButton(text="👤 Espera entre cuentas", callback_data=f"wspintvc_{camp_id}")],
+        [InlineKeyboardButton(text="🔄 Espera entre ciclos", callback_data=f"wspintvr_{camp_id}")],
+        [InlineKeyboardButton(text="⚡ Config rápida (10s/5min/15min)", callback_data=f"wspintvq_{camp_id}")],
+        [InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_intervalo")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wspintvq_"))
+async def cb_wsp_intv_quick(call: types.CallbackQuery):
+    camp_id = int(call.data.replace("wspintvq_", ""))
+    import wsp_bridge as wsp
+    r = await wsp.wsp_set_config(camp_id, 8, 15, 300, 900)
+    if r.get("ok"):
+        await call.answer("Config rápida aplicada: 8-15s entre grupos, 5min entre cuentas, 15min entre ciclos", show_alert=True)
+    else:
+        await call.answer(f"Error: {r.get('error', '?')}", show_alert=True)
+    call.data = f"wspintv_{camp_id}"
+    await cb_wsp_intervalo_camp(call)
+
+
+@dp.callback_query(F.data.startswith("wspintvg_"))
+async def cb_wsp_intv_grupos(call: types.CallbackQuery, state: FSMContext):
+    camp_id = int(call.data.replace("wspintvg_", ""))
+    await state.update_data(wsp_intv_camp_id=camp_id, wsp_intv_tipo="grupos")
     await call.message.answer(
-        f"⏱ Actual: {min_v}-{max_v}s\n\n"
-        f"Envía nuevo intervalo:\nminimo maximo\n\n"
-        f"Ej: 10 30\n\n"
-        f"Envía /cancelar para cancelar."
+        "⏱ DELAY ENTRE GRUPOS\n\n"
+        "Envía: minimo maximo (en segundos)\n"
+        "Ej: 8 15\n\n"
+        "Esto es cuánto espera entre enviar a un grupo y otro.\n"
+        "Recomendado: 8-15 segundos\n\n"
+        "Envía /cancelar para cancelar."
+    )
+    await state.set_state(WspIntervaloState.esperando_intervalo)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wspintvc_"))
+async def cb_wsp_intv_cuentas(call: types.CallbackQuery, state: FSMContext):
+    camp_id = int(call.data.replace("wspintvc_", ""))
+    await state.update_data(wsp_intv_camp_id=camp_id, wsp_intv_tipo="cuentas")
+    await call.message.answer(
+        "👤 ESPERA ENTRE CUENTAS\n\n"
+        "Envía el tiempo en MINUTOS\n"
+        "Ej: 5\n\n"
+        "Cuando termina de enviar con una cuenta,\n"
+        "espera este tiempo antes de usar la siguiente.\n"
+        "Recomendado: 5-10 minutos\n\n"
+        "Envía /cancelar para cancelar."
+    )
+    await state.set_state(WspIntervaloState.esperando_intervalo)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wspintvr_"))
+async def cb_wsp_intv_ciclos(call: types.CallbackQuery, state: FSMContext):
+    camp_id = int(call.data.replace("wspintvr_", ""))
+    await state.update_data(wsp_intv_camp_id=camp_id, wsp_intv_tipo="ciclos")
+    await call.message.answer(
+        "🔄 ESPERA ENTRE CICLOS\n\n"
+        "Envía el tiempo en MINUTOS\n"
+        "Ej: 15\n\n"
+        "Cuando termina de enviar a TODOS los grupos,\n"
+        "espera este tiempo y vuelve a empezar.\n"
+        "Recomendado: 10-30 minutos\n\n"
+        "Envía /cancelar para cancelar."
     )
     await state.set_state(WspIntervaloState.esperando_intervalo)
     await call.answer()
@@ -4235,31 +4312,73 @@ async def recibir_wsp_intervalo(msg: types.Message, state: FSMContext):
     if msg.text and msg.text.startswith("/"):
         await state.clear()
         return await msg.answer("❌ Cancelado.", reply_markup=kb_menu_principal(msg.from_user.id))
-    partes = msg.text.strip().split() if msg.text else []
-    if len(partes) != 2:
-        return await msg.answer("❌ Formato: minimo maximo\nEj: 10 30")
-    try:
-        min_val = int(partes[0])
-        max_val = int(partes[1])
-    except ValueError:
-        return await msg.answer("❌ Deben ser números.\nEj: 10 30")
-    if min_val < 3:
-        return await msg.answer("❌ Mínimo 3 segundos.")
-    if max_val < min_val:
-        max_val = min_val
-    if max_val > 3600:
-        return await msg.answer("❌ Máximo 3600 segundos.")
     data = await state.get_data()
+    tipo = data.get("wsp_intv_tipo", "grupos")
+    camp_id = data["wsp_intv_camp_id"]
     import wsp_bridge as wsp
-    r = await wsp.wsp_set_config(data["wsp_intv_camp_id"], min_val, max_val)
-    await state.clear()
-    if r.get("ok"):
-        await msg.answer(
-            f"✅ Intervalo WSP actualizado: {min_val}-{max_val}s",
-            reply_markup=kb_menu_principal(msg.from_user.id)
+
+    if tipo == "grupos":
+        partes = msg.text.strip().split() if msg.text else []
+        if len(partes) != 2:
+            return await msg.answer("❌ Formato: minimo maximo\nEj: 8 15")
+        try:
+            min_val = int(partes[0])
+            max_val = int(partes[1])
+        except ValueError:
+            return await msg.answer("❌ Deben ser números.\nEj: 8 15")
+        if min_val < 3:
+            return await msg.answer("❌ Mínimo 3 segundos.")
+        if max_val < min_val:
+            max_val = min_val
+        if max_val > 300:
+            return await msg.answer("❌ Máximo 300 segundos (5 min).")
+        r = await wsp.wsp_set_config(camp_id, min_val, max_val)
+        await state.clear()
+        if r.get("ok"):
+            await msg.answer(f"✅ Delay entre grupos: {min_val}-{max_val}s", reply_markup=kb_menu_principal(msg.from_user.id))
+        else:
+            await msg.answer(f"❌ Error: {r.get('error', '?')}", reply_markup=kb_menu_principal(msg.from_user.id))
+
+    elif tipo == "cuentas":
+        try:
+            minutos = int(msg.text.strip())
+        except ValueError:
+            return await msg.answer("❌ Envía un número en minutos. Ej: 5")
+        if minutos < 1:
+            return await msg.answer("❌ Mínimo 1 minuto.")
+        if minutos > 60:
+            return await msg.answer("❌ Máximo 60 minutos.")
+        segundos = minutos * 60
+        r_conf = await wsp.wsp_get_config(camp_id)
+        conf = r_conf.get("config", {}) if r_conf.get("ok") else {}
+        r = await wsp.wsp_set_config(camp_id, conf.get("intervalo_min", 10), conf.get("intervalo_max", 15), segundos)
+        await state.clear()
+        if r.get("ok"):
+            await msg.answer(f"✅ Espera entre cuentas: {minutos} min ({segundos}s)", reply_markup=kb_menu_principal(msg.from_user.id))
+        else:
+            await msg.answer(f"❌ Error: {r.get('error', '?')}", reply_markup=kb_menu_principal(msg.from_user.id))
+
+    elif tipo == "ciclos":
+        try:
+            minutos = int(msg.text.strip())
+        except ValueError:
+            return await msg.answer("❌ Envía un número en minutos. Ej: 15")
+        if minutos < 1:
+            return await msg.answer("❌ Mínimo 1 minuto.")
+        if minutos > 120:
+            return await msg.answer("❌ Máximo 120 minutos (2 horas).")
+        segundos = minutos * 60
+        r_conf = await wsp.wsp_get_config(camp_id)
+        conf = r_conf.get("config", {}) if r_conf.get("ok") else {}
+        r = await wsp.wsp_set_config(
+            camp_id, conf.get("intervalo_min", 10), conf.get("intervalo_max", 15),
+            conf.get("espera_cuenta", 300), segundos
         )
-    else:
-        await msg.answer(f"❌ Error: {r.get('error', '?')}", reply_markup=kb_menu_principal(msg.from_user.id))
+        await state.clear()
+        if r.get("ok"):
+            await msg.answer(f"✅ Espera entre ciclos: {minutos} min ({segundos}s)", reply_markup=kb_menu_principal(msg.from_user.id))
+        else:
+            await msg.answer(f"❌ Error: {r.get('error', '?')}", reply_markup=kb_menu_principal(msg.from_user.id))
 
 
 # --- RESPONDER WSP ---

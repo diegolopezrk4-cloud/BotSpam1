@@ -486,11 +486,11 @@ function iniciarCampana(campanaId, userId, botSock) {
             const PAUSA_RATE_LIMIT = 300;
 
             try {
-                let tiempoMsg = "";
-                if (numCuentas === 1) {
-                    tiempoMsg = `\u23F1 Entre grupos: ${conf.intervalo_min}-${conf.intervalo_max}s\n\u23F0 Entre ciclos: 10 min (1 cuenta)`;
-                } else {
-                    tiempoMsg = `\u23F1 Entre grupos: ${conf.intervalo_min}-${conf.intervalo_max}s\n\u{1F504} Entre cuentas: 5-10 min\n\u23F0 Entre ciclos: ${conf.espera_ciclo || 600}s`;
+                const esperaCicloMin = Math.round((conf.espera_ciclo || 900) / 60);
+                const esperaCuentaMin = Math.round((conf.espera_cuenta || 300) / 60);
+                let tiempoMsg = `\u23F1 Entre grupos: ${conf.intervalo_min}-${conf.intervalo_max}s\n\u23F0 Entre ciclos: ${esperaCicloMin} min`;
+                if (numCuentas >= 2) {
+                    tiempoMsg += `\n\u{1F504} Entre cuentas: ${esperaCuentaMin} min`;
                 }
                 let horarioMsg = "";
                 if (horario.hora_inicio !== 0 || horario.hora_fin !== 24) {
@@ -704,7 +704,7 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                     // Espera entre cuentas (2+)
                     if (numCuentas >= 2 && si < socks.length - 1 && !cancelled) {
-                        const waitCuenta = randomDelay(300, 600) * 1000;
+                        const waitCuenta = (conf.espera_cuenta || 300) * 1000;
                         console.log(`   Esperando ${Math.round(waitCuenta/1000)}s antes de siguiente cuenta...`);
                         await delay(waitCuenta);
                     }
@@ -731,9 +731,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                         enviosDiaMsg = "\n\u{1F4CA} Envios hoy: " + enviosDia.map(e => `${e.cuenta_nombre}=${e.total}`).join(", ");
                     }
 
-                    let esperaMsg = numCuentas === 1
-                        ? `\u23F0 Esperando 10 min...`
-                        : `\u23F0 Esperando ${conf.espera_ciclo || 600}s...`;
+                    const esperaCicloSeg = conf.espera_ciclo || 900;
+                    const esperaCicloMin = Math.round(esperaCicloSeg / 60);
+                    let esperaMsg = `\u23F0 Esperando ${esperaCicloMin} min (${esperaCicloSeg}s)...`;
 
                     try {
                         await botSock.sendMessage(userId, {
@@ -741,11 +741,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                         });
                     } catch (e) {}
 
-                    if (numCuentas === 1) {
-                        await delay(600 * 1000);
-                    } else {
-                        await delay((conf.espera_ciclo || 600) * 1000);
-                    }
+                    await delay(esperaCicloSeg * 1000);
                     delayMultiplier = Math.max(1.0, delayMultiplier - 0.5);
                 }
             }
