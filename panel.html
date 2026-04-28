@@ -399,10 +399,17 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- ENVIO A MIEMBROS -->
     <div class="section" id="sec-enviomiembros">
       <h2>👥 Envio a Miembros de Grupo</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia un DM personalizado a cada miembro de un grupo.</p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia un DM personalizado a cada miembro de un grupo. Selecciona la cuenta WSP para cargar sus grupos.</p>
+      <div class="form-group" style="margin-bottom:15px">
+        <label>Cuenta WhatsApp</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select id="emCuenta" style="flex:1"><option value="">-- Cargando cuentas... --</option></select>
+          <button class="btn btn-primary" onclick="cargarGruposCuenta()">🔄 Cargar Grupos</button>
+        </div>
+      </div>
       <div class="grid" style="grid-template-columns:1fr 1fr;margin-bottom:15px">
         <div class="form-group">
-          <label>Selecciona un grupo</label>
+          <label>Grupo origen (de donde tomar miembros)</label>
           <select id="emGrupo" onchange="cargarMiembros()"><option value="">-- Carga grupos primero --</option></select>
         </div>
         <div class="form-group">
@@ -419,7 +426,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-primary" onclick="agregarMiembrosAGrupo()">➕ Agregar Miembros al Grupo Destino</button>
         <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Cancelar Envio</button>
       </div>
-      <div id="miembrosContent" class="empty-state"><div class="icon">👥</div><p>Selecciona un grupo para ver sus miembros</p></div>
+      <div id="miembrosContent" class="empty-state"><div class="icon">👥</div><p>Selecciona una cuenta y carga sus grupos</p></div>
     </div>
 
     <!-- STATS -->
@@ -766,24 +773,47 @@ async function cancelarEnvioPersonal(){
 
 // --- ENVIO A MIEMBROS ---
 async function loadEnvioMiembros(){
-  const r=await api('/api/grupos?u='+userId);
+  // Cargar cuentas WSP
+  const r=await api('/api/sesiones?u='+userId);
+  const sel=$('emCuenta');
+  sel.innerHTML='<option value="">-- Selecciona cuenta --</option>';
+  if(r.ok){
+    (r.sesiones||[]).forEach(s=>{
+      sel.innerHTML+=`<option value="${s.nombre}">${s.nombre} (${s.telefono||'?'})</option>`;
+    });
+  }
+  $('emGrupo').innerHTML='<option value="">-- Carga grupos primero --</option>';
+  $('emDestino').innerHTML='<option value="">-- Opcional: grupo destino --</option>';
+}
+async function cargarGruposCuenta(){
+  const cuenta=$('emCuenta').value;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
+  toast('Cargando grupos de '+cuenta+'...','success');
   const sel=$('emGrupo'),sel2=$('emDestino');
+  sel.innerHTML='<option value="">-- Cargando... --</option>';
+  sel2.innerHTML='<option value="">-- Cargando... --</option>';
+  const r=await api('/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
   sel.innerHTML='<option value="">-- Selecciona grupo origen --</option>';
   sel2.innerHTML='<option value="">-- Opcional: grupo destino --</option>';
   if(r.ok){
-    (r.grupos||[]).forEach(g=>{
-      const name=g.nombre||g.link||g.id||'?';
-      const jid=g.jid||g.id||'';
-      sel.innerHTML+=`<option value="${jid}">${name}</option>`;
-      sel2.innerHTML+=`<option value="${jid}">${name}</option>`;
+    const grupos=(r.grupos||[]).sort((a,b)=>(a.subject||'').localeCompare(b.subject||''));
+    grupos.forEach(g=>{
+      const name=g.subject||'Sin nombre';
+      const info=name+' ('+g.size+' miembros)';
+      sel.innerHTML+=`<option value="${g.jid}">${info}</option>`;
+      sel2.innerHTML+=`<option value="${g.jid}">${info}</option>`;
     });
-  }
+    toast(grupos.length+' grupos cargados','success');
+  }else{toast('Error: '+(r.error||''),'error')}
 }
 async function cargarMiembros(){
   const grupoJid=$('emGrupo').value;
+  const cuenta=$('emCuenta').value;
   if(!grupoJid){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>Selecciona un grupo</p></div>';return}
   $('miembrosContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando miembros...</div>';
-  const r=await api('/api/miembros_grupo?u='+userId+'&grupo='+encodeURIComponent(grupoJid));
+  let url='/api/miembros_grupo?u='+userId+'&grupo='+encodeURIComponent(grupoJid);
+  if(cuenta)url+='&cuenta='+encodeURIComponent(cuenta);
+  const r=await api(url);
   if(!r.ok){$('miembrosContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
   const m=r.miembros||[];
   if(!m.length){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>No se encontraron miembros</p></div>';return}
