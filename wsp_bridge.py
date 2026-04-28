@@ -55,6 +55,9 @@ async def wsp_campanas(user_id):
 async def wsp_crear_campana(user_id, nombre, mensaje):
     return await _post("/api/campanas/crear", {"u": str(user_id), "nombre": nombre, "mensaje": mensaje})
 
+async def wsp_crear_campana_full(user_id, nombre, mensaje, imagen=None):
+    return await _post("/api/campanas/crear", {"u": str(user_id), "nombre": nombre, "mensaje": mensaje, "imagen": imagen})
+
 async def wsp_eliminar_campana(campana_id):
     return await _post("/api/campanas/del", {"id": campana_id})
 

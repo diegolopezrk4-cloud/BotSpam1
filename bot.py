@@ -3649,8 +3649,9 @@ async def recibir_nombre_wspcamp(msg: types.Message, state: FSMContext):
     await state.update_data(wsp_camp_nombre=nombre)
     await msg.answer(
         f"✅ Nombre: {nombre}\n\n"
-        "Ahora envía el mensaje de la campaña:\n"
-        "(Solo texto por ahora)\n\n"
+        "Ahora envía el contenido:\n\n"
+        "• Solo texto: escribe el mensaje\n"
+        "• Foto + texto: envía foto con descripción\n\n"
         "⏳ Tienes 1 minuto."
     )
     await state.set_state(WspCampanaState.esperando_contenido)
@@ -3661,17 +3662,29 @@ async def recibir_contenido_wspcamp(msg: types.Message, state: FSMContext):
     if msg.text and msg.text.startswith("/"):
         await state.clear()
         return await msg.answer("❌ Cancelado.", reply_markup=kb_menu_principal(msg.from_user.id))
-    mensaje = msg.text.strip() if msg.text else ""
-    if not mensaje:
-        return await msg.answer("⚠ Envía un mensaje de texto.")
+    mensaje = ""
+    imagen_path = None
+    if msg.photo:
+        foto = msg.photo[-1]
+        imagen_path = f"media/{msg.from_user.id}_wsp_{foto.file_id}.jpg"
+        os.makedirs("media", exist_ok=True)
+        await bot.download(foto, destination=imagen_path)
+        mensaje = msg.caption or ""
+    elif msg.text:
+        mensaje = msg.text.strip()
+    else:
+        return await msg.answer("❌ Solo texto o foto con texto.")
+    if not mensaje and not imagen_path:
+        return await msg.answer("⚠ Envía un mensaje de texto o una foto.")
     data = await state.get_data()
     nombre = data.get("wsp_camp_nombre", "sin_nombre")
     import wsp_bridge as wsp
-    r = await wsp.wsp_crear_campana(msg.from_user.id, nombre, mensaje)
+    r = await wsp.wsp_crear_campana_full(msg.from_user.id, nombre, mensaje, imagen_path)
     await state.clear()
     if r.get("ok"):
+        extra = " (con foto)" if imagen_path else ""
         await msg.answer(
-            f"✅ Campaña WSP '{nombre}' creada (ID: {r['id']}).\n\n"
+            f"✅ Campaña WSP '{nombre}' creada{extra} (ID: {r['id']}).\n\n"
             f"Para iniciar usa el botón 🚀 Iniciar campaña en el menú WSP.",
             reply_markup=kb_menu_principal(msg.from_user.id)
         )
@@ -3705,7 +3718,9 @@ async def cb_wspcamp_edit_start(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(wsp_edit_camp_id=camp_id, user_id=call.from_user.id)
     await state.set_state(WspCampanaState.editando_contenido)
     await call.message.answer(
-        "✏ Envía el nuevo mensaje para la campaña:\n\n"
+        "✏ Envía el nuevo contenido para la campaña:\n\n"
+        "• Solo texto: escribe el mensaje\n"
+        "• Foto + texto: envía foto con descripción\n\n"
         "Envía /cancelar para cancelar.",
         reply_markup=ReplyKeyboardRemove()
     )
@@ -3717,15 +3732,27 @@ async def recibir_edit_wspcamp(msg: types.Message, state: FSMContext):
     if msg.text and msg.text.startswith("/"):
         await state.clear()
         return await msg.answer("❌ Cancelado.", reply_markup=kb_menu_principal(msg.from_user.id))
-    mensaje = msg.text.strip() if msg.text else ""
-    if not mensaje:
-        return await msg.answer("⚠ Envía un mensaje de texto.")
+    mensaje = ""
+    imagen_path = None
+    if msg.photo:
+        foto = msg.photo[-1]
+        imagen_path = f"media/{msg.from_user.id}_wsp_{foto.file_id}.jpg"
+        os.makedirs("media", exist_ok=True)
+        await bot.download(foto, destination=imagen_path)
+        mensaje = msg.caption or ""
+    elif msg.text:
+        mensaje = msg.text.strip()
+    else:
+        return await msg.answer("❌ Solo texto o foto con texto.")
+    if not mensaje and not imagen_path:
+        return await msg.answer("⚠ Envía un mensaje de texto o una foto.")
     data = await state.get_data()
     import wsp_bridge as wsp
-    r = await wsp.wsp_editar_campana(data["wsp_edit_camp_id"], mensaje)
+    r = await wsp.wsp_editar_campana(data["wsp_edit_camp_id"], mensaje, imagen_path)
     await state.clear()
+    extra = " (con foto)" if imagen_path else ""
     if r.get("ok"):
-        await msg.answer("✅ Campaña actualizada.", reply_markup=kb_menu_principal(msg.from_user.id))
+        await msg.answer(f"✅ Campaña WSP actualizada{extra}.", reply_markup=kb_menu_principal(msg.from_user.id))
     else:
         await msg.answer(f"❌ Error: {r.get('error', '?')}", reply_markup=kb_menu_principal(msg.from_user.id))
 
