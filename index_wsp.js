@@ -237,7 +237,7 @@ poll();
                 return res.end(JSON.stringify({
                     ok: true,
                     status: botStatus,
-                    bot_number: botSock?.user?.id ? jidToNumber(botSock.user.id) : null,
+                    bot_number: "Modo API (sin bot WSP)",
                 }));
             }
 
@@ -449,7 +449,7 @@ poll();
                 if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
                 const camp = db.getCampanaById(body.id);
                 if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "campana no encontrada" })); }
-                motor.iniciarCampana(body.id, body.u, botSock);
+                motor.iniciarCampana(body.id, body.u, null);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campana: camp.nombre }));
             }
@@ -667,77 +667,18 @@ async function startBot() {
     fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
     fs.mkdirSync("media", { recursive: true });
 
-    const { state, saveCreds } = await useMultiFileAuthState("sessions");
+    // Modo API: sin cuenta de bot WSP, todo se controla desde Telegram
+    botStatus = "conectado";
+    console.log("\n\u2705 Servidor WSP iniciado en modo API (sin cuenta bot)");
+    console.log("\u{1F4F1} Las notificaciones se envian por Telegram.");
+    console.log("\u{1F4F1} Vincular cuentas WSP desde el bot de Telegram.\n");
+}
 
-    let version;
-    try {
-        const { version: v } = await fetchLatestBaileysVersion();
-        version = v;
-    } catch (e) {}
-
-    botSock = makeWASocket({
-        auth: state,
-        logger: pino({ level: "silent" }),
-        browser: Browsers.ubuntu("Chrome"),
-        version,
-        connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 30000,
-        retryRequestDelayMs: 2000,
-    });
-
-    botSock.ev.on("creds.update", saveCreds);
-
-    botSock.ev.on("connection.update", async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-            currentQR = qr;
-            botStatus = "esperando_qr";
-            console.log("\u{1F4F1} QR generado. Escanea desde la pagina web.");
-        }
-
-        if (connection === "open") {
-            currentQR = null;
-            botStatus = "conectado";
-            console.log("\n\u2705 Bot de WhatsApp J&D conectado exitosamente!");
-
-            motor.setBotSocket(botSock);
-            console.log(`\u{1F4F1} Bot disponible como cuenta de spam: '${motor.BOT_NOMBRE}'`);
-            console.log("\u{1F4F1} Listo para recibir mensajes.\n");
-
-            // Resolver JID del admin
-            try {
-                const results = await botSock.onWhatsApp(config.ADMIN_NUMBER + "@s.whatsapp.net");
-                if (results && results.length > 0) {
-                    addAdminJid(results[0].jid);
-                    console.log(`\u{1F451} Admin JID resuelto: ${results[0].jid}`);
-                }
-                if (config.BOT_NUMBER) {
-                    const botResults = await botSock.onWhatsApp(config.BOT_NUMBER + "@s.whatsapp.net");
-                    if (botResults && botResults.length > 0) {
-                        addAdminJid(botResults[0].jid);
-                        console.log(`\u{1F451} Bot JID resuelto: ${botResults[0].jid}`);
-                    }
-                }
-            } catch (e) {
-                console.log(`   (No se pudo resolver admin JID: ${e.message})`);
-            }
-        }
-
-        if (connection === "close") {
-            botStatus = "desconectado";
-            const code = lastDisconnect?.error?.output?.statusCode;
-            if (code === DisconnectReason.loggedOut) {
-                console.log("\u274C Bot deslogueado. Borrando sesion...");
-                try { fs.rmSync("sessions", { recursive: true, force: true }); } catch (e) {}
-            }
-            console.log(`\u{1F504} Reconectando bot... (codigo: ${code})`);
-            setTimeout(startBot, 5000);
-        }
-    });
-
-    // --- RECEPCION DE MENSAJES ---
-    botSock.ev.on("messages.upsert", async ({ messages, type }) => {
+// (Message handler removed - all commands via Telegram bot)
+// Old handler kept as reference but not active
+function _unusedMessageHandler() {
+    const botSock_unused = null;
+    botSock_unused && botSock_unused.ev.on("messages.upsert", async ({ messages, type }) => {
         if (type !== "notify") return;
 
         for (const msg of messages) {

@@ -1,6 +1,7 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay, fetchLatestBaileysVersion, Browsers } = require("@whiskeysockets/baileys");
 const path = require("path");
 const fs = require("fs");
+const https = require("https");
 const db = require("./db_wsp");
 const config = require("./config_wsp");
 
@@ -18,6 +19,21 @@ let _botNombre = "Bot_Principal";
 
 function setBotSocket(sock) {
     _botSock = sock;
+}
+
+// --- Notificaciones via Telegram ---
+function notifyTelegram(chatId, text) {
+    const tgId = chatId || config.TG_ADMIN_ID;
+    const payload = JSON.stringify({ chat_id: tgId, text, parse_mode: "Markdown" });
+    const req = https.request({
+        hostname: "api.telegram.org",
+        path: `/bot${config.TG_BOT_TOKEN}/sendMessage`,
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+    }, () => {});
+    req.on("error", () => {});
+    req.write(payload);
+    req.end();
 }
 
 function getSessionDir(userId, nombre) {
@@ -451,7 +467,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             }
 
             if (!sesionesNombres.length || !gruposLinks.length) {
-                await botSock.sendMessage(userId, { text: "\u26A0 Campana sin cuentas o grupos asignados.\nAgrega cuentas y grupos primero." });
+                notifyTelegram(userId, "⚠ Campana WSP sin cuentas o grupos asignados. Agrega cuentas y grupos primero.");
                 return;
             }
 
@@ -472,7 +488,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                 }
             }
             if (!socks.length) {
-                await botSock.sendMessage(userId, { text: "\u274C No se pudo conectar ninguna cuenta." });
+                notifyTelegram(userId, "❌ WSP: No se pudo conectar ninguna cuenta.");
                 return;
             }
 
@@ -498,9 +514,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                 }
                 let templateMsg = templates.length ? `\n\u{1F4DD} ${templates.length} template(s) para rotacion` : "";
 
-                await botSock.sendMessage(userId, {
-                    text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}${templateMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`,
-                });
+                notifyTelegram(userId, `🚀 Campana WSP '${campana.nombre}' iniciada!\n👤 ${socks.length} cuenta(s)\n🌐 ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}${templateMsg}\n\n💡 Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`);
             } catch (e) {}
 
             while (!cancelled) {
@@ -512,9 +526,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                     const hor = db.getCampanaHorario(campanaId);
                     console.log(`   [Horario] Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00). Esperando...`);
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u{1F553} *${campana.nombre}*: Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00).\n\u23F3 Esperando hasta la proxima ventana...`,
-                        });
+                        notifyTelegram(userId, `🕓 ${campana.nombre}: Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00). Esperando...`);
                     } catch (e) {}
                     // Revisar cada 5 minutos
                     while (!dentroDeHorario(campanaId) && !cancelled) {
@@ -522,19 +534,14 @@ function iniciarCampana(campanaId, userId, botSock) {
                     }
                     if (cancelled) break;
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u2705 *${campana.nombre}*: Dentro de horario. Reanudando envios...`,
-                        });
+                        notifyTelegram(userId, `✅ ${campana.nombre}: Dentro de horario. Reanudando envios...`);
                     } catch (e) {}
                 }
 
                 gruposLinks = db.getGruposCampana(campanaId);
                 if (!gruposLinks.length) {
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u26A0 *${campana.nombre}*: No quedan grupos validos. Campana detenida.` +
-                                (gruposEliminados.length ? `\n\u{1F5D1} Se eliminaron ${gruposEliminados.length} grupo(s).` : ""),
-                        });
+                        notifyTelegram(userId, `⚠ ${campana.nombre}: No quedan grupos validos. Campana detenida.` + (gruposEliminados.length ? `\n🗑 Se eliminaron ${gruposEliminados.length} grupo(s).` : ""));
                     } catch (e) {}
                     break;
                 }
@@ -553,9 +560,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                     if (enviosHoy >= LIMITE_ENVIOS_DIARIOS) {
                         console.log(`   [Limite] Cuenta '${currentSock.nombre}' alcanzo limite diario (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS})`);
                         try {
-                            await botSock.sendMessage(userId, {
-                                text: `\u26A0 *${currentSock.nombre}*: Limite diario alcanzado (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS}). Saltando cuenta.`,
-                            });
+                            notifyTelegram(userId, `⚠ WSP ${currentSock.nombre}: Limite diario alcanzado (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS}). Saltando cuenta.`);
                         } catch (e) {}
                         continue;
                     }
@@ -630,9 +635,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                             if (consecutivePending >= MAX_CONSECUTIVE_PENDING) {
                                 console.log(`   \u{1F6D1} ${consecutivePending} pending seguidos. Pausando ${PAUSA_RATE_LIMIT}s...`);
                                 try {
-                                    await botSock.sendMessage(userId, {
-                                        text: `\u26A0 *${campana.nombre}*: ${consecutivePending} mensajes pendientes seguidos con '${currentSock.nombre}'.\n\u23F3 Pausando ${Math.round(PAUSA_RATE_LIMIT/60)} min...`,
-                                    });
+                                    notifyTelegram(userId, `⚠ WSP ${campana.nombre}: ${consecutivePending} msgs pendientes con '${currentSock.nombre}'. Pausando ${Math.round(PAUSA_RATE_LIMIT/60)} min...`);
                                 } catch (e) {}
                                 await delay(PAUSA_RATE_LIMIT * 1000);
                                 consecutivePending = 0;
@@ -644,9 +647,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 console.log(`   \u{1F6A8} BAN DETECTADO en cuenta '${currentSock.nombre}'`);
                                 db.marcarCuentaBaneada(userId, currentSock.nombre);
                                 try {
-                                    await botSock.sendMessage(userId, {
-                                        text: `\u{1F6A8} *BAN DETECTADO*\n\nLa cuenta *${currentSock.nombre}* ha sido baneada/desconectada por WhatsApp.\n\nSe ha marcado como baneada y no se usara mas.\n\nSigue con las demas cuentas si hay.`,
-                                    });
+                                    notifyTelegram(userId, `🚨 BAN DETECTADO WSP\n\nCuenta '${currentSock.nombre}' baneada por WhatsApp.\nMarcada como baneada. Sigue con las demas cuentas.`);
                                 } catch (e) {}
                                 break; // Salir del loop de grupos para esta cuenta
                             }
@@ -655,25 +656,19 @@ function iniciarCampana(campanaId, userId, botSock) {
                             if (result.reason === "disconnected") {
                                 console.log(`   [Reconexion] Intentando reconectar '${currentSock.nombre}'...`);
                                 try {
-                                    await botSock.sendMessage(userId, {
-                                        text: `\u{1F504} Cuenta '${currentSock.nombre}' desconectada. Intentando reconectar...`,
-                                    });
+                                    notifyTelegram(userId, `🔄 WSP cuenta '${currentSock.nombre}' desconectada. Intentando reconectar...`);
                                 } catch (e) {}
                                 const newSock = await reconectarCuenta(userId, currentSock.nombre);
                                 if (newSock) {
                                     currentSock.sock = newSock;
                                     socks[si].sock = newSock;
                                     try {
-                                        await botSock.sendMessage(userId, {
-                                            text: `\u2705 Cuenta '${currentSock.nombre}' reconectada. Continuando...`,
-                                        });
+                                        notifyTelegram(userId, `✅ WSP cuenta '${currentSock.nombre}' reconectada. Continuando...`);
                                     } catch (e) {}
                                     continue; // Reintentar este grupo
                                 } else {
                                     try {
-                                        await botSock.sendMessage(userId, {
-                                            text: `\u274C No se pudo reconectar '${currentSock.nombre}'. Saltando cuenta.`,
-                                        });
+                                        notifyTelegram(userId, `❌ WSP no se pudo reconectar '${currentSock.nombre}'. Saltando cuenta.`);
                                     } catch (e) {}
                                     break;
                                 }
@@ -736,9 +731,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                     let esperaMsg = `\u23F0 Esperando ${esperaCicloMin} min (${esperaCicloSeg}s)...`;
 
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c.enviados} env | \u274C ${c.errores} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`,
-                        });
+                        notifyTelegram(userId, `📊 WSP ${campana.nombre} ciclo #${ciclo}\n✅ ${c.enviados} env | ❌ ${c.errores} err\n🌐 ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`);
                     } catch (e) {}
 
                     await delay(esperaCicloSeg * 1000);
@@ -795,7 +788,7 @@ function iniciarReporteDiario(userId, botSock) {
             if (baneadas.length) {
                 texto += `\n\u{1F6A8} *Cuentas baneadas:* ${baneadas.map(b => b.cuenta_nombre).join(", ")}`;
             }
-            await botSock.sendMessage(userId, { text: texto });
+            notifyTelegram(userId, texto);
         } catch (e) {
             console.error(`Error reporte diario: ${e.message}`);
         }
