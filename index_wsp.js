@@ -3,9 +3,9 @@ const pino = require("pino");
 const QRCode = require("qrcode");
 const http = require("http");
 const fs = require("fs");
-const config = require("./config");
-const db = require("./db");
-const motor = require("./motor");
+const config = require("./config_wsp");
+const db = require("./db_wsp");
+const motor = require("./motor_wsp");
 
 const QR_PORT = process.env.QR_PORT || 3000;
 
@@ -237,7 +237,7 @@ poll();
                 return res.end(JSON.stringify({
                     ok: true,
                     status: botStatus,
-                    bot_number: botSock?.user?.id ? jidToNumber(botSock.user.id) : null,
+                    bot_number: "Modo API (sin bot WSP)",
                 }));
             }
 
@@ -249,6 +249,20 @@ poll();
                 const maxG = db.getMaxGrupos(userId);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, grupos, max: maxG }));
+            }
+
+            // POST /api/grupos/detectar — Detectar grupos de una cuenta vinculada { u, nombre }
+            if (url.pathname === "/api/grupos/detectar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                try {
+                    const grupos = await motor.detectarGrupos(body.u, body.nombre);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, grupos }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
             }
 
             // POST /api/grupos/add — Agregar grupo { u, link }
@@ -320,13 +334,136 @@ poll();
                 return res.end(JSON.stringify({ ok: true }));
             }
 
+            // POST /api/campanas/editar — Editar mensaje de campaña { id, mensaje, imagen }
+            if (url.pathname === "/api/campanas/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id o mensaje" })); }
+                db.actualizarCampanaMensaje(body.id, body.mensaje, body.imagen || null);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/campanas/detalle?id=CAMP_ID — Ver detalle de campaña
+            if (url.pathname === "/api/campanas/detalle" && req.method === "GET") {
+                const campId = url.searchParams.get("id");
+                if (!campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                const camp = db.getCampanaById(parseInt(campId));
+                if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "no encontrada" })); }
+                const sesiones = db.getSesionesCampana(parseInt(campId));
+                const grupos = db.getGruposCampana(parseInt(campId));
+                const config = db.getCampanaConfig(parseInt(campId));
+                const horario = db.getCampanaHorario(parseInt(campId));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, campana: camp, sesiones, grupos, config, horario }));
+            }
+
+            // POST /api/campanas/clonar — Clonar campaña { id, u }
+            if (url.pathname === "/api/campanas/clonar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id || !body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id o u" })); }
+                const newId = db.clonarCampana(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id: newId }));
+            }
+
+            // POST /api/campanas/reset — Resetear stats { id }
+            if (url.pathname === "/api/campanas/reset" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.resetearStatsCampana(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/sesiones/del — Eliminar cuenta WSP { u, nombre }
+            if (url.pathname === "/api/sesiones/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                db.eliminarSesion(body.u, body.nombre);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/grupos/edit — Editar link de grupo { u, id, link }
+            if (url.pathname === "/api/grupos/edit" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id || !body.link) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, id o link" })); }
+                db.actualizarGrupoLink(body.u, body.id, body.link);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/campanas/config?id=CAMP_ID — Config de campaña (intervalo)
+            if (url.pathname === "/api/campanas/config" && req.method === "GET") {
+                const campId = url.searchParams.get("id");
+                if (!campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                const config = db.getCampanaConfig(parseInt(campId));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, config }));
+            }
+
+            // POST /api/campanas/config — Cambiar intervalo { id, min, max }
+            if (url.pathname === "/api/campanas/config" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.setCampanaConfig(body.id, body.min || 30, body.max || 60, body.espera_cuenta, body.espera_ciclo);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/responder?u=USER_ID — Config del auto-responder
+            if (url.pathname === "/api/responder" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const config = db.getResponderConfig(userId);
+                const keywords = db.getKeywords(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, config: config || null, keywords }));
+            }
+
+            // POST /api/responder/config — Configurar responder { u, contacto, activo }
+            if (url.pathname === "/api/responder/config" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.setResponderConfig(body.u, body.contacto || "", body.activo !== undefined ? body.activo : 1);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/responder/toggle — Activar/desactivar responder { u, activo }
+            if (url.pathname === "/api/responder/toggle" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.toggleResponder(body.u, body.activo ? 1 : 0);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/responder/keywords — Agregar keywords { u, palabras }
+            if (url.pathname === "/api/responder/keywords" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.palabras) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o palabras" })); }
+                db.agregarKeywords(body.u, body.palabras);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/responder/keywords/clear — Limpiar keywords { u }
+            if (url.pathname === "/api/responder/keywords/clear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.limpiarKeywords(body.u);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
             // POST /api/iniciar — Iniciar campaña { u, id }
             if (url.pathname === "/api/iniciar" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
                 const camp = db.getCampanaById(body.id);
                 if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "campana no encontrada" })); }
-                motor.iniciarCampana(body.id, body.u, botSock);
+                motor.iniciarCampana(body.id, body.u, null);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campana: camp.nombre }));
             }
@@ -544,77 +681,18 @@ async function startBot() {
     fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
     fs.mkdirSync("media", { recursive: true });
 
-    const { state, saveCreds } = await useMultiFileAuthState("sessions");
+    // Modo API: sin cuenta de bot WSP, todo se controla desde Telegram
+    botStatus = "conectado";
+    console.log("\n\u2705 Servidor WSP iniciado en modo API (sin cuenta bot)");
+    console.log("\u{1F4F1} Las notificaciones se envian por Telegram.");
+    console.log("\u{1F4F1} Vincular cuentas WSP desde el bot de Telegram.\n");
+}
 
-    let version;
-    try {
-        const { version: v } = await fetchLatestBaileysVersion();
-        version = v;
-    } catch (e) {}
-
-    botSock = makeWASocket({
-        auth: state,
-        logger: pino({ level: "silent" }),
-        browser: Browsers.ubuntu("Chrome"),
-        version,
-        connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 30000,
-        retryRequestDelayMs: 2000,
-    });
-
-    botSock.ev.on("creds.update", saveCreds);
-
-    botSock.ev.on("connection.update", async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-            currentQR = qr;
-            botStatus = "esperando_qr";
-            console.log("\u{1F4F1} QR generado. Escanea desde la pagina web.");
-        }
-
-        if (connection === "open") {
-            currentQR = null;
-            botStatus = "conectado";
-            console.log("\n\u2705 Bot de WhatsApp J&D conectado exitosamente!");
-
-            motor.setBotSocket(botSock);
-            console.log(`\u{1F4F1} Bot disponible como cuenta de spam: '${motor.BOT_NOMBRE}'`);
-            console.log("\u{1F4F1} Listo para recibir mensajes.\n");
-
-            // Resolver JID del admin
-            try {
-                const results = await botSock.onWhatsApp(config.ADMIN_NUMBER + "@s.whatsapp.net");
-                if (results && results.length > 0) {
-                    addAdminJid(results[0].jid);
-                    console.log(`\u{1F451} Admin JID resuelto: ${results[0].jid}`);
-                }
-                if (config.BOT_NUMBER) {
-                    const botResults = await botSock.onWhatsApp(config.BOT_NUMBER + "@s.whatsapp.net");
-                    if (botResults && botResults.length > 0) {
-                        addAdminJid(botResults[0].jid);
-                        console.log(`\u{1F451} Bot JID resuelto: ${botResults[0].jid}`);
-                    }
-                }
-            } catch (e) {
-                console.log(`   (No se pudo resolver admin JID: ${e.message})`);
-            }
-        }
-
-        if (connection === "close") {
-            botStatus = "desconectado";
-            const code = lastDisconnect?.error?.output?.statusCode;
-            if (code === DisconnectReason.loggedOut) {
-                console.log("\u274C Bot deslogueado. Borrando sesion...");
-                try { fs.rmSync("sessions", { recursive: true, force: true }); } catch (e) {}
-            }
-            console.log(`\u{1F504} Reconectando bot... (codigo: ${code})`);
-            setTimeout(startBot, 5000);
-        }
-    });
-
-    // --- RECEPCION DE MENSAJES ---
-    botSock.ev.on("messages.upsert", async ({ messages, type }) => {
+// (Message handler removed - all commands via Telegram bot)
+// Old handler kept as reference but not active
+function _unusedMessageHandler() {
+    const botSock_unused = null;
+    botSock_unused && botSock_unused.ev.on("messages.upsert", async ({ messages, type }) => {
         if (type !== "notify") return;
 
         for (const msg of messages) {

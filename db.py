@@ -130,6 +130,17 @@ async def init_db():
                 FOREIGN KEY(user_id) REFERENCES usuarios(telegram_id)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS mensajes_chat (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                nombre TEXT,
+                mensaje TEXT,
+                foto_path TEXT DEFAULT NULL,
+                fecha TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY(user_id) REFERENCES usuarios(telegram_id)
+            )
+        """)
         await db.commit()
 
 # ─────────────────────────────────────────
@@ -647,4 +658,52 @@ async def get_dashboard(user_id):
         "responder_activo": bool(config and config['activo']),
         "keywords": len(keywords),
     }
+
+# ─────────────────────────────────────────
+#   MENSAJES PARA /enviarchat
+# ─────────────────────────────────────────
+async def get_mensajes_chat(user_id):
+    async with _connect() as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM mensajes_chat WHERE user_id=? ORDER BY id DESC",
+            (user_id,)
+        ) as cur:
+            return await cur.fetchall()
+
+async def get_mensaje_chat_by_id(msg_id):
+    async with _connect() as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM mensajes_chat WHERE id=?", (msg_id,)
+        ) as cur:
+            return await cur.fetchone()
+
+async def crear_mensaje_chat(user_id, nombre, mensaje, foto_path=None):
+    async with _connect() as db:
+        cur = await db.execute(
+            "INSERT INTO mensajes_chat (user_id, nombre, mensaje, foto_path) VALUES (?,?,?,?)",
+            (user_id, nombre, mensaje, foto_path)
+        )
+        await db.commit()
+        return cur.lastrowid
+
+async def editar_mensaje_chat(msg_id, mensaje, foto_path=None):
+    async with _connect() as db:
+        if foto_path is not None:
+            await db.execute(
+                "UPDATE mensajes_chat SET mensaje=?, foto_path=? WHERE id=?",
+                (mensaje, foto_path, msg_id)
+            )
+        else:
+            await db.execute(
+                "UPDATE mensajes_chat SET mensaje=? WHERE id=?",
+                (mensaje, msg_id)
+            )
+        await db.commit()
+
+async def eliminar_mensaje_chat(msg_id):
+    async with _connect() as db:
+        await db.execute("DELETE FROM mensajes_chat WHERE id=?", (msg_id,))
+        await db.commit()
 

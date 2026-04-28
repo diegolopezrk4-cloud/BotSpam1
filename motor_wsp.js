@@ -1,8 +1,9 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay, fetchLatestBaileysVersion, Browsers } = require("@whiskeysockets/baileys");
 const path = require("path");
 const fs = require("fs");
-const db = require("./db");
-const config = require("./config");
+const https = require("https");
+const db = require("./db_wsp");
+const config = require("./config_wsp");
 
 const tareasActivas = {};    // { campanaId: { running, cancel } }
 const responderActivos = {}; // { userId: { running, cancel } }
@@ -18,6 +19,21 @@ let _botNombre = "Bot_Principal";
 
 function setBotSocket(sock) {
     _botSock = sock;
+}
+
+// --- Notificaciones via Telegram ---
+function notifyTelegram(chatId, text) {
+    const tgId = chatId || config.TG_ADMIN_ID;
+    const payload = JSON.stringify({ chat_id: tgId, text, parse_mode: "Markdown" });
+    const req = https.request({
+        hostname: "api.telegram.org",
+        path: `/bot${config.TG_BOT_TOKEN}/sendMessage`,
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+    }, () => {});
+    req.on("error", () => {});
+    req.write(payload);
+    req.end();
 }
 
 function getSessionDir(userId, nombre) {
@@ -347,16 +363,38 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
 }
 
 async function resolveGroupJid(sock, link) {
+    // Caso 1: ya es un JID directo
+    if (link.endsWith("@g.us")) return link;
+
+    // Caso 2: link de invitación de WhatsApp
     if (link.includes("chat.whatsapp.com/")) {
         const code = link.split("chat.whatsapp.com/").pop().split(/[?#]/)[0];
-        try {
-            const metadata = await sock.groupGetInviteInfo(code);
-            return metadata.id;
-        } catch (e) {
-            return null;
+
+        // Intentar resolver via inviteInfo (hasta 2 intentos)
+        for (let intento = 0; intento < 2; intento++) {
+            try {
+                const metadata = await sock.groupGetInviteInfo(code);
+                if (metadata && metadata.id) return metadata.id;
+            } catch (e) {
+                console.log(`[resolveGroupJid] Intento ${intento + 1} fallido para ${link}: ${e.message}`);
+                if (intento === 0) await delay(2000);
+            }
         }
+
+        // Fallback: buscar en los grupos del sock
+        try {
+            const allGroups = await sock.groupFetchAllParticipating();
+            for (const gid of Object.keys(allGroups)) {
+                const g = allGroups[gid];
+                if (g.inviteCode === code) return gid;
+            }
+        } catch (e) {
+            console.log(`[resolveGroupJid] Fallback groupFetchAll falló: ${e.message}`);
+        }
+
+        return null;
     }
-    if (link.endsWith("@g.us")) return link;
+
     return null;
 }
 
@@ -402,7 +440,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             if (!campana) return;
             db.setCampanaActiva(campanaId, true);
 
-            const sesionesNombres = db.getSesionesCampana(campanaId);
+            let sesionesNombres = db.getSesionesCampana(campanaId);
             let gruposLinks = db.getGruposCampana(campanaId);
             const conf = db.getCampanaConfig(campanaId);
             const horario = db.getCampanaHorario(campanaId);
@@ -410,8 +448,26 @@ function iniciarCampana(campanaId, userId, botSock) {
             // MEJORA 4: Cargar templates para rotacion
             const templates = db.getTemplates(userId);
 
+            // Auto-asignar grupos si la campaña no tiene
+            if (!gruposLinks.length) {
+                const gruposUser = db.getGrupos(userId);
+                for (const g of gruposUser) {
+                    db.agregarGrupoCampana(campanaId, g.link);
+                }
+                gruposLinks = db.getGruposCampana(campanaId);
+            }
+
+            // Auto-asignar cuentas si la campaña no tiene
+            if (!sesionesNombres.length) {
+                const sesionesUser = db.getSesiones(userId);
+                for (const s of sesionesUser) {
+                    db.agregarSesionCampana(campanaId, s.nombre);
+                }
+                sesionesNombres = db.getSesionesCampana(campanaId);
+            }
+
             if (!sesionesNombres.length || !gruposLinks.length) {
-                await botSock.sendMessage(userId, { text: "\u26A0 Campana sin cuentas o grupos asignados." });
+                notifyTelegram(userId, "⚠ Campana WSP sin cuentas o grupos asignados. Agrega cuentas y grupos primero.");
                 return;
             }
 
@@ -432,24 +488,25 @@ function iniciarCampana(campanaId, userId, botSock) {
                 }
             }
             if (!socks.length) {
-                await botSock.sendMessage(userId, { text: "\u274C No se pudo conectar ninguna cuenta." });
+                notifyTelegram(userId, "❌ WSP: No se pudo conectar ninguna cuenta.");
                 return;
             }
 
             const numCuentas = socks.length;
             let ciclo = 0;
             const gruposEliminados = [];
+            const grupoFallos = {};  // {grupoLink: contadorFallos} para no eliminar al primer fallo
             let delayMultiplier = 1.0;
             let consecutivePending = 0;
             const MAX_CONSECUTIVE_PENDING = 3;
             const PAUSA_RATE_LIMIT = 300;
 
             try {
-                let tiempoMsg = "";
-                if (numCuentas === 1) {
-                    tiempoMsg = `\u23F1 Entre grupos: ${conf.intervalo_min}-${conf.intervalo_max}s\n\u23F0 Entre ciclos: 10 min (1 cuenta)`;
-                } else {
-                    tiempoMsg = `\u23F1 Entre grupos: ${conf.intervalo_min}-${conf.intervalo_max}s\n\u{1F504} Entre cuentas: 5-10 min\n\u23F0 Entre ciclos: ${conf.espera_ciclo || 600}s`;
+                const esperaCicloMin = Math.round((conf.espera_ciclo || 900) / 60);
+                const esperaCuentaMin = Math.round((conf.espera_cuenta || 300) / 60);
+                let tiempoMsg = `\u23F1 Entre grupos: ${conf.intervalo_min}-${conf.intervalo_max}s\n\u23F0 Entre ciclos: ${esperaCicloMin} min`;
+                if (numCuentas >= 2) {
+                    tiempoMsg += `\n\u{1F504} Entre cuentas: ${esperaCuentaMin} min`;
                 }
                 let horarioMsg = "";
                 if (horario.hora_inicio !== 0 || horario.hora_fin !== 24) {
@@ -457,9 +514,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                 }
                 let templateMsg = templates.length ? `\n\u{1F4DD} ${templates.length} template(s) para rotacion` : "";
 
-                await botSock.sendMessage(userId, {
-                    text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}${templateMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`,
-                });
+                notifyTelegram(userId, `🚀 Campana WSP '${campana.nombre}' iniciada!\n👤 ${socks.length} cuenta(s)\n🌐 ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}${templateMsg}\n\n💡 Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`);
             } catch (e) {}
 
             while (!cancelled) {
@@ -471,9 +526,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                     const hor = db.getCampanaHorario(campanaId);
                     console.log(`   [Horario] Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00). Esperando...`);
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u{1F553} *${campana.nombre}*: Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00).\n\u23F3 Esperando hasta la proxima ventana...`,
-                        });
+                        notifyTelegram(userId, `🕓 ${campana.nombre}: Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00). Esperando...`);
                     } catch (e) {}
                     // Revisar cada 5 minutos
                     while (!dentroDeHorario(campanaId) && !cancelled) {
@@ -481,19 +534,14 @@ function iniciarCampana(campanaId, userId, botSock) {
                     }
                     if (cancelled) break;
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u2705 *${campana.nombre}*: Dentro de horario. Reanudando envios...`,
-                        });
+                        notifyTelegram(userId, `✅ ${campana.nombre}: Dentro de horario. Reanudando envios...`);
                     } catch (e) {}
                 }
 
                 gruposLinks = db.getGruposCampana(campanaId);
                 if (!gruposLinks.length) {
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u26A0 *${campana.nombre}*: No quedan grupos validos. Campana detenida.` +
-                                (gruposEliminados.length ? `\n\u{1F5D1} Se eliminaron ${gruposEliminados.length} grupo(s).` : ""),
-                        });
+                        notifyTelegram(userId, `⚠ ${campana.nombre}: No quedan grupos validos. Campana detenida.` + (gruposEliminados.length ? `\n🗑 Se eliminaron ${gruposEliminados.length} grupo(s).` : ""));
                     } catch (e) {}
                     break;
                 }
@@ -512,9 +560,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                     if (enviosHoy >= LIMITE_ENVIOS_DIARIOS) {
                         console.log(`   [Limite] Cuenta '${currentSock.nombre}' alcanzo limite diario (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS})`);
                         try {
-                            await botSock.sendMessage(userId, {
-                                text: `\u26A0 *${currentSock.nombre}*: Limite diario alcanzado (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS}). Saltando cuenta.`,
-                            });
+                            notifyTelegram(userId, `⚠ WSP ${currentSock.nombre}: Limite diario alcanzado (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS}). Saltando cuenta.`);
                         } catch (e) {}
                         continue;
                     }
@@ -533,15 +579,26 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                         const groupJid = await resolveGroupJid(currentSock.sock, grupoLink);
                         if (!groupJid) {
-                            db.eliminarGrupoPorLink(userId, grupoLink);
-                            db.eliminarGrupoCampana(campanaId, grupoLink);
-                            db.actualizarStatsCampana(campanaId, 0, 1);
-                            db.registrarEnvio(userId, campanaId, grupoLink, "error_jid_eliminado");
-                            gruposEliminados.push(grupoLink);
-                            const idx = gruposLinks.indexOf(grupoLink);
-                            if (idx !== -1) gruposLinks.splice(idx, 1);
+                            // Contar fallos consecutivos antes de eliminar
+                            grupoFallos[grupoLink] = (grupoFallos[grupoLink] || 0) + 1;
+                            if (grupoFallos[grupoLink] >= 3) {
+                                // Después de 3 fallos, eliminar
+                                db.eliminarGrupoPorLink(userId, grupoLink);
+                                db.eliminarGrupoCampana(campanaId, grupoLink);
+                                db.actualizarStatsCampana(campanaId, 0, 1);
+                                db.registrarEnvio(userId, campanaId, grupoLink, "error_jid_eliminado");
+                                gruposEliminados.push(grupoLink);
+                                const idx = gruposLinks.indexOf(grupoLink);
+                                if (idx !== -1) gruposLinks.splice(idx, 1);
+                                console.log(`   [Grupo] ${grupoLink} eliminado tras ${grupoFallos[grupoLink]} fallos de resolución.`);
+                            } else {
+                                console.log(`   [Grupo] ${grupoLink} no resuelto (intento ${grupoFallos[grupoLink]}/3), saltando.`);
+                                db.registrarEnvio(userId, campanaId, grupoLink, "skip_no_resuelto");
+                            }
                             continue;
                         }
+                        // Reset contador de fallos si resolvió OK
+                        if (grupoFallos[grupoLink]) delete grupoFallos[grupoLink];
 
                         // MEJORA 1 + 4: Variar mensaje o usar template rotativo
                         let mensajeAEnviar = campana.mensaje;
@@ -578,9 +635,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                             if (consecutivePending >= MAX_CONSECUTIVE_PENDING) {
                                 console.log(`   \u{1F6D1} ${consecutivePending} pending seguidos. Pausando ${PAUSA_RATE_LIMIT}s...`);
                                 try {
-                                    await botSock.sendMessage(userId, {
-                                        text: `\u26A0 *${campana.nombre}*: ${consecutivePending} mensajes pendientes seguidos con '${currentSock.nombre}'.\n\u23F3 Pausando ${Math.round(PAUSA_RATE_LIMIT/60)} min...`,
-                                    });
+                                    notifyTelegram(userId, `⚠ WSP ${campana.nombre}: ${consecutivePending} msgs pendientes con '${currentSock.nombre}'. Pausando ${Math.round(PAUSA_RATE_LIMIT/60)} min...`);
                                 } catch (e) {}
                                 await delay(PAUSA_RATE_LIMIT * 1000);
                                 consecutivePending = 0;
@@ -592,9 +647,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 console.log(`   \u{1F6A8} BAN DETECTADO en cuenta '${currentSock.nombre}'`);
                                 db.marcarCuentaBaneada(userId, currentSock.nombre);
                                 try {
-                                    await botSock.sendMessage(userId, {
-                                        text: `\u{1F6A8} *BAN DETECTADO*\n\nLa cuenta *${currentSock.nombre}* ha sido baneada/desconectada por WhatsApp.\n\nSe ha marcado como baneada y no se usara mas.\n\nSigue con las demas cuentas si hay.`,
-                                    });
+                                    notifyTelegram(userId, `🚨 BAN DETECTADO WSP\n\nCuenta '${currentSock.nombre}' baneada por WhatsApp.\nMarcada como baneada. Sigue con las demas cuentas.`);
                                 } catch (e) {}
                                 break; // Salir del loop de grupos para esta cuenta
                             }
@@ -603,25 +656,19 @@ function iniciarCampana(campanaId, userId, botSock) {
                             if (result.reason === "disconnected") {
                                 console.log(`   [Reconexion] Intentando reconectar '${currentSock.nombre}'...`);
                                 try {
-                                    await botSock.sendMessage(userId, {
-                                        text: `\u{1F504} Cuenta '${currentSock.nombre}' desconectada. Intentando reconectar...`,
-                                    });
+                                    notifyTelegram(userId, `🔄 WSP cuenta '${currentSock.nombre}' desconectada. Intentando reconectar...`);
                                 } catch (e) {}
                                 const newSock = await reconectarCuenta(userId, currentSock.nombre);
                                 if (newSock) {
                                     currentSock.sock = newSock;
                                     socks[si].sock = newSock;
                                     try {
-                                        await botSock.sendMessage(userId, {
-                                            text: `\u2705 Cuenta '${currentSock.nombre}' reconectada. Continuando...`,
-                                        });
+                                        notifyTelegram(userId, `✅ WSP cuenta '${currentSock.nombre}' reconectada. Continuando...`);
                                     } catch (e) {}
                                     continue; // Reintentar este grupo
                                 } else {
                                     try {
-                                        await botSock.sendMessage(userId, {
-                                            text: `\u274C No se pudo reconectar '${currentSock.nombre}'. Saltando cuenta.`,
-                                        });
+                                        notifyTelegram(userId, `❌ WSP no se pudo reconectar '${currentSock.nombre}'. Saltando cuenta.`);
                                     } catch (e) {}
                                     break;
                                 }
@@ -652,7 +699,7 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                     // Espera entre cuentas (2+)
                     if (numCuentas >= 2 && si < socks.length - 1 && !cancelled) {
-                        const waitCuenta = randomDelay(300, 600) * 1000;
+                        const waitCuenta = (conf.espera_cuenta || 300) * 1000;
                         console.log(`   Esperando ${Math.round(waitCuenta/1000)}s antes de siguiente cuenta...`);
                         await delay(waitCuenta);
                     }
@@ -679,21 +726,15 @@ function iniciarCampana(campanaId, userId, botSock) {
                         enviosDiaMsg = "\n\u{1F4CA} Envios hoy: " + enviosDia.map(e => `${e.cuenta_nombre}=${e.total}`).join(", ");
                     }
 
-                    let esperaMsg = numCuentas === 1
-                        ? `\u23F0 Esperando 10 min...`
-                        : `\u23F0 Esperando ${conf.espera_ciclo || 600}s...`;
+                    const esperaCicloSeg = conf.espera_ciclo || 900;
+                    const esperaCicloMin = Math.round(esperaCicloSeg / 60);
+                    let esperaMsg = `\u23F0 Esperando ${esperaCicloMin} min (${esperaCicloSeg}s)...`;
 
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c.enviados} env | \u274C ${c.errores} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`,
-                        });
+                        notifyTelegram(userId, `📊 WSP ${campana.nombre} ciclo #${ciclo}\n✅ ${c.enviados} env | ❌ ${c.errores} err\n🌐 ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`);
                     } catch (e) {}
 
-                    if (numCuentas === 1) {
-                        await delay(600 * 1000);
-                    } else {
-                        await delay((conf.espera_ciclo || 600) * 1000);
-                    }
+                    await delay(esperaCicloSeg * 1000);
                     delayMultiplier = Math.max(1.0, delayMultiplier - 0.5);
                 }
             }
@@ -747,7 +788,7 @@ function iniciarReporteDiario(userId, botSock) {
             if (baneadas.length) {
                 texto += `\n\u{1F6A8} *Cuentas baneadas:* ${baneadas.map(b => b.cuenta_nombre).join(", ")}`;
             }
-            await botSock.sendMessage(userId, { text: texto });
+            notifyTelegram(userId, texto);
         } catch (e) {
             console.error(`Error reporte diario: ${e.message}`);
         }
@@ -847,6 +888,24 @@ function getCampanasActivas() {
     return Object.keys(tareasActivas).map(id => parseInt(id));
 }
 
+async function detectarGrupos(userId, nombre) {
+    const sock = await getOrConnectClient(userId, nombre);
+    const allGroups = await sock.groupFetchAllParticipating();
+    const grupos = [];
+    for (const [jid, meta] of Object.entries(allGroups)) {
+        if (!jid.endsWith("@g.us")) continue;
+        const inviteCode = meta.inviteCode || null;
+        const link = inviteCode ? `https://chat.whatsapp.com/${inviteCode}` : jid;
+        grupos.push({
+            jid,
+            nombre: meta.subject || "Sin nombre",
+            participantes: meta.participants ? meta.participants.length : 0,
+            link,
+        });
+    }
+    return grupos;
+}
+
 module.exports = {
     tareasActivas,
     getCampanasActivas,
@@ -872,4 +931,5 @@ module.exports = {
     detenerReporteDiario,
     iniciarResponder,
     detenerResponder,
+    detectarGrupos,
 };

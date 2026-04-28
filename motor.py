@@ -14,7 +14,7 @@ from db import (get_campana_by_id, get_grupos_campana, get_sesiones_campana,
                 actualizar_stats_campana, set_campana_activa, get_campana_config,
                 get_all_responder_activos, get_keywords, get_sesiones,
                 registrar_envio, registrar_respuesta, get_grupos,
-                eliminar_grupo_por_link)
+                eliminar_grupo_por_link, get_mensaje_chat_by_id)
 
 # Caracteres invisibles para variar el mensaje y evitar detección
 CHARS_INVISIBLES = [
@@ -37,6 +37,75 @@ tareas_activas = {}
 
 # Diccionario global: user_id -> Task del auto-responder
 responder_activos = {}
+
+# ─── Pool global de conexiones Telethon ───
+# Clave: (user_id, nombre_sesion) -> {"client": TelegramClient, "campanas": set()}
+# Permite que múltiples campañas compartan la misma conexión
+_pool_clientes = {}
+_pool_lock = asyncio.Lock()
+
+
+async def pool_obtener_cliente(user_id, nombre):
+    """Obtiene un cliente del pool o crea uno nuevo. Incrementa el refcount."""
+    key = (user_id, nombre)
+    async with _pool_lock:
+        if key in _pool_clientes:
+            entry = _pool_clientes[key]
+            client = entry["client"]
+            try:
+                if not client.is_connected():
+                    await client.connect()
+                if await client.is_user_authorized():
+                    return client
+                else:
+                    # No autorizado, limpiar
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+                    del _pool_clientes[key]
+            except Exception:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+                del _pool_clientes[key]
+
+        # Crear nueva conexión
+        path = get_session_path(user_id, nombre)
+        client = TelegramClient(path, API_ID, API_HASH)
+        await client.connect()
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            return None
+
+        _pool_clientes[key] = {"client": client, "campanas": set()}
+        logger.info(f"Pool: nueva conexión para '{nombre}' (user {user_id})")
+        return client
+
+
+def pool_registrar_campana(user_id, nombre, campana_id):
+    """Registra que una campaña está usando este cliente."""
+    key = (user_id, nombre)
+    if key in _pool_clientes:
+        _pool_clientes[key]["campanas"].add(campana_id)
+
+
+async def pool_liberar_campana(user_id, nombre, campana_id):
+    """Libera el uso de un cliente por una campaña. Desconecta si nadie más lo usa."""
+    key = (user_id, nombre)
+    async with _pool_lock:
+        if key not in _pool_clientes:
+            return
+        entry = _pool_clientes[key]
+        entry["campanas"].discard(campana_id)
+        if not entry["campanas"]:
+            try:
+                await entry["client"].disconnect()
+                logger.info(f"Pool: desconectando '{nombre}' (sin campañas activas)")
+            except Exception:
+                pass
+            del _pool_clientes[key]
 
 # ─────────────────────────────────────────
 #   UTILIDADES
@@ -121,21 +190,19 @@ async def worker_campana(campana_id, user_id, bot_notificar=None):
                 pass
         return
 
-    # Conectar las cuentas de Telethon
+    # Conectar las cuentas de Telethon (usando pool compartido)
     clientes = {}
     cuentas_fallidas = []
     for nombre in nombres_sesiones:
-        path = get_session_path(user_id, nombre)
         try:
-            c = TelegramClient(path, API_ID, API_HASH)
-            await c.connect()
-            if await c.is_user_authorized():
+            c = await pool_obtener_cliente(user_id, nombre)
+            if c:
                 clientes[nombre] = c
-                logger.info(f"Cuenta '{nombre}' conectada OK.")
+                pool_registrar_campana(user_id, nombre, campana_id)
+                logger.info(f"Cuenta '{nombre}' conectada OK (pool).")
             else:
                 logger.warning(f"Cuenta '{nombre}' no autorizada.")
                 cuentas_fallidas.append(nombre)
-                await c.disconnect()
         except Exception as e:
             logger.error(f"Error conectando '{nombre}': {e}")
             cuentas_fallidas.append(nombre)
@@ -225,29 +292,21 @@ async def worker_campana(campana_id, user_id, bot_notificar=None):
                 # Verificar conexión y reconectar si es necesario
                 try:
                     if not client.is_connected():
-                        logger.info(f"Cuenta '{nombre}' desconectada, reconectando...")
-                        await client.connect()
-                        if not await client.is_user_authorized():
-                            raise Exception("No autorizada tras reconectar")
-                        logger.info(f"Cuenta '{nombre}' reconectada OK.")
-                except Exception as reconn_err:
-                    logger.warning(f"Cuenta '{nombre}' no se pudo reconectar: {reconn_err}")
-                    # Intentar recrear la sesion completa
-                    try:
-                        path = get_session_path(user_id, nombre)
-                        new_client = TelegramClient(path, API_ID, API_HASH)
-                        await new_client.connect()
-                        if await new_client.is_user_authorized():
+                        logger.info(f"Cuenta '{nombre}' desconectada, reconectando via pool...")
+                        new_client = await pool_obtener_cliente(user_id, nombre)
+                        if new_client:
                             clientes[nombre] = new_client
                             client = new_client
-                            logger.info(f"Cuenta '{nombre}' reconectada con nueva sesion.")
+                            pool_registrar_campana(user_id, nombre, campana_id)
+                            logger.info(f"Cuenta '{nombre}' reconectada OK (pool).")
                         else:
-                            raise Exception("No autorizada")
-                    except Exception:
-                        logger.warning(f"Cuenta '{nombre}' removida definitivamente.")
-                        clientes.pop(nombre, None)
-                        nombres_rotacion = [n for n in nombres_rotacion if n in clientes]
-                        continue
+                            raise Exception("No autorizada tras reconectar")
+                except Exception as reconn_err:
+                    logger.warning(f"Cuenta '{nombre}' no se pudo reconectar: {reconn_err}")
+                    await pool_liberar_campana(user_id, nombre, campana_id)
+                    clientes.pop(nombre, None)
+                    nombres_rotacion = [n for n in nombres_rotacion if n in clientes]
+                    continue
 
                 try:
                     ent = await client.get_entity(grupo)
@@ -374,6 +433,7 @@ async def worker_campana(campana_id, user_id, bot_notificar=None):
 
                 except errors.AuthKeyUnregisteredError:
                     logger.warning(f"[{nombre}] AuthKey invalida, removiendo cuenta.")
+                    await pool_liberar_campana(user_id, nombre, campana_id)
                     clientes.pop(nombre, None)
                     nombres_rotacion = [n for n in nombres_rotacion if n in clientes]
                     if bot_notificar:
@@ -458,12 +518,8 @@ async def worker_campana(campana_id, user_id, bot_notificar=None):
             except Exception:
                 pass
     finally:
-        for nombre, c in clientes.items():
-            try:
-                await c.disconnect()
-                logger.info(f"Cuenta '{nombre}' desconectada.")
-            except Exception:
-                pass
+        for nombre in list(clientes.keys()):
+            await pool_liberar_campana(user_id, nombre, campana_id)
         await set_campana_activa(campana_id, False)
         tareas_activas.pop(campana_id, None)
         logger.info(f"Campaña {campana_id} finalizada. Enviados: {enviados}, Errores: {errores}")
@@ -787,24 +843,177 @@ def detener_responder(user_id):
     return False
 
 # ─────────────────────────────────────────
+#   ENVIAR A CHATS (1 sola vez, sin loop)
+# ─────────────────────────────────────────
+async def leer_chats_cuenta(user_id, nombre_sesion):
+    """Lee todos los chats de una cuenta, filtrando bloqueados.
+    Retorna lista de dicts con info de cada chat."""
+    from telethon.tl.types import User, Channel, Chat
+    path = get_session_path(user_id, nombre_sesion)
+    client = await pool_obtener_cliente(user_id, nombre_sesion)
+    if not client:
+        return None, "Cuenta no autorizada. Vincúlala de nuevo con /cuentas"
+
+    try:
+        dialogs = await client.get_dialogs(limit=500)
+        chats = []
+        for d in dialogs:
+            ent = d.entity
+            if isinstance(ent, User):
+                if ent.is_self:
+                    continue
+                # Filtrar bloqueados
+                if getattr(ent, 'blocked', False):
+                    continue
+                # Filtrar bots
+                if getattr(ent, 'bot', False):
+                    continue
+                # Filtrar eliminados
+                if getattr(ent, 'deleted', False):
+                    continue
+                nombre = ""
+                if ent.first_name:
+                    nombre = ent.first_name
+                if ent.last_name:
+                    nombre += f" {ent.last_name}"
+                nombre = nombre.strip() or "Sin nombre"
+                chats.append({
+                    "id": ent.id,
+                    "nombre": nombre,
+                    "username": ent.username,
+                    "tipo": "usuario",
+                    "bloqueado": False,
+                })
+            elif isinstance(ent, (Channel, Chat)):
+                # Solo incluir grupos/supergrupos, no canales broadcast
+                if isinstance(ent, Channel) and not (ent.megagroup or ent.gigagroup):
+                    continue
+                titulo = ent.title or "Sin nombre"
+                chats.append({
+                    "id": ent.id,
+                    "nombre": titulo,
+                    "username": getattr(ent, 'username', None),
+                    "tipo": "grupo",
+                    "bloqueado": False,
+                })
+        return chats, nombre_sesion
+    except Exception as e:
+        return None, f"Error: {str(e)[:100]}"
+
+
+async def enviar_a_chats(user_id, nombre_sesion, mensaje_id, bot_notificar=None):
+    """Envía un mensaje guardado a todos los chats de una cuenta (1 sola vez).
+    Filtra bloqueados y bots. No hace spam (no repite)."""
+    from telethon.tl.types import User, Channel, Chat
+
+    mensaje_data = await get_mensaje_chat_by_id(mensaje_id)
+    if not mensaje_data:
+        if bot_notificar:
+            try:
+                await bot_notificar.send_message(user_id, "❌ Mensaje no encontrado.")
+            except Exception:
+                pass
+        return 0, 0
+
+    texto = mensaje_data['mensaje']
+    foto = mensaje_data['foto_path']
+
+    client = await pool_obtener_cliente(user_id, nombre_sesion)
+    if not client:
+        if bot_notificar:
+            try:
+                await bot_notificar.send_message(user_id,
+                    f"❌ Cuenta '{nombre_sesion}' no autorizada.\n"
+                    f"Vincúlala con /cuentas")
+            except Exception:
+                pass
+        return 0, 0
+
+    pool_registrar_campana(user_id, nombre_sesion, f"chat_{mensaje_id}")
+
+    try:
+        dialogs = await client.get_dialogs(limit=500)
+        enviados = 0
+        errores = 0
+        saltados = 0
+
+        for d in dialogs:
+            ent = d.entity
+            # Solo usuarios (no grupos)
+            if not isinstance(ent, User):
+                continue
+            if ent.is_self:
+                continue
+            if getattr(ent, 'blocked', False):
+                saltados += 1
+                continue
+            if getattr(ent, 'bot', False):
+                saltados += 1
+                continue
+            if getattr(ent, 'deleted', False):
+                saltados += 1
+                continue
+
+            try:
+                if foto and os.path.exists(foto):
+                    if len(texto) <= 1024:
+                        await client.send_file(ent, foto, caption=texto)
+                    else:
+                        await client.send_file(ent, foto)
+                        await client.send_message(ent, texto)
+                else:
+                    await client.send_message(ent, texto)
+                enviados += 1
+                logger.info(f"[EnviarChat] Enviado a {getattr(ent, 'first_name', ent.id)}")
+                # Pausa para no ser detectado
+                await asyncio.sleep(random.randint(3, 8))
+            except Exception as e:
+                errores += 1
+                logger.warning(f"[EnviarChat] Error enviando a {ent.id}: {e}")
+
+        if bot_notificar:
+            try:
+                await bot_notificar.send_message(user_id,
+                    f"✅ ENVIAR A CHATS COMPLETADO\n\n"
+                    f"📨 Enviados: {enviados}\n"
+                    f"❌ Errores: {errores}\n"
+                    f"⏭ Saltados (bloqueados/bots): {saltados}\n"
+                    f"👤 Cuenta: {nombre_sesion}")
+            except Exception:
+                pass
+        return enviados, errores
+    except Exception as e:
+        logger.error(f"[EnviarChat] Error general: {e}")
+        if bot_notificar:
+            try:
+                await bot_notificar.send_message(user_id,
+                    f"❌ Error en enviar a chats: {str(e)[:200]}")
+            except Exception:
+                pass
+        return 0, 0
+    finally:
+        await pool_liberar_campana(user_id, nombre_sesion, f"chat_{mensaje_id}")
+
+# ─────────────────────────────────────────
 #   DETECTAR GRUPOS Y CARPETAS DE TELEGRAM
 # ─────────────────────────────────────────
-async def detectar_grupos_telegram(user_id):
+async def detectar_grupos_telegram(user_id, nombre_sesion=None):
     """Lee todos los grupos/supergrupos del Telegram del usuario.
+    Si nombre_sesion es None, usa la primera cuenta.
     Retorna lista de dicts con info de cada grupo."""
     from telethon.tl.types import Channel, Chat
     sesiones = await get_sesiones(user_id)
     if not sesiones:
         return None, "No tienes cuentas registradas."
 
-    nombre = sesiones[0]['nombre']
-    path = get_session_path(user_id, nombre)
-    client = TelegramClient(path, API_ID, API_HASH)
+    nombre = nombre_sesion or sesiones[0]['nombre']
+    client = await pool_obtener_cliente(user_id, nombre)
+    if not client:
+        return None, f"Cuenta '{nombre}' no autorizada. Vincúlala de nuevo."
+
+    pool_registrar_campana(user_id, nombre, f"detect_grupos_{user_id}")
 
     try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            return None, f"Cuenta '{nombre}' no autorizada. Vincúlala de nuevo."
 
         dialogs = await client.get_dialogs(limit=500)
         grupos = []
@@ -843,28 +1052,26 @@ async def detectar_grupos_telegram(user_id):
     except Exception as e:
         return None, f"Error: {str(e)[:100]}"
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        await pool_liberar_campana(user_id, nombre, f"detect_grupos_{user_id}")
 
 
-async def detectar_carpetas_telegram(user_id):
+async def detectar_carpetas_telegram(user_id, nombre_sesion=None):
     """Lee las carpetas (folders) del Telegram del usuario.
+    Si nombre_sesion es None, usa la primera cuenta.
     Retorna lista de carpetas con id y nombre."""
     from telethon.tl.functions.messages import GetDialogFiltersRequest
     sesiones = await get_sesiones(user_id)
     if not sesiones:
         return None, "No tienes cuentas registradas."
 
-    nombre = sesiones[0]['nombre']
-    path = get_session_path(user_id, nombre)
-    client = TelegramClient(path, API_ID, API_HASH)
+    nombre = nombre_sesion or sesiones[0]['nombre']
+    client = await pool_obtener_cliente(user_id, nombre)
+    if not client:
+        return None, f"Cuenta '{nombre}' no autorizada."
+
+    pool_registrar_campana(user_id, nombre, f"detect_carpetas_{user_id}")
 
     try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            return None, f"Cuenta '{nombre}' no autorizada."
 
         result = await client(GetDialogFiltersRequest())
         carpetas = []
@@ -884,14 +1091,12 @@ async def detectar_carpetas_telegram(user_id):
     except Exception as e:
         return None, f"Error: {str(e)[:100]}"
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        await pool_liberar_campana(user_id, nombre, f"detect_carpetas_{user_id}")
 
 
-async def detectar_grupos_carpeta(user_id, folder_id):
+async def detectar_grupos_carpeta(user_id, folder_id, nombre_sesion=None):
     """Lee los grupos de una carpeta específica de Telegram.
+    Si nombre_sesion es None, usa la primera cuenta.
     Retorna lista de grupos filtrados por esa carpeta."""
     from telethon.tl.functions.messages import GetDialogFiltersRequest
     from telethon.tl.types import Channel, Chat, InputPeerChannel, InputPeerChat, InputPeerUser
@@ -899,14 +1104,14 @@ async def detectar_grupos_carpeta(user_id, folder_id):
     if not sesiones:
         return None, "No tienes cuentas registradas."
 
-    nombre = sesiones[0]['nombre']
-    path = get_session_path(user_id, nombre)
-    client = TelegramClient(path, API_ID, API_HASH)
+    nombre = nombre_sesion or sesiones[0]['nombre']
+    client = await pool_obtener_cliente(user_id, nombre)
+    if not client:
+        return None, f"Cuenta '{nombre}' no autorizada."
+
+    pool_registrar_campana(user_id, nombre, f"detect_carpeta_{folder_id}")
 
     try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            return None, f"Cuenta '{nombre}' no autorizada."
 
         result = await client(GetDialogFiltersRequest())
         filters_list = getattr(result, 'filters', result)
@@ -964,13 +1169,10 @@ async def detectar_grupos_carpeta(user_id, folder_id):
     except Exception as e:
         return None, f"Error: {str(e)[:100]}"
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        await pool_liberar_campana(user_id, nombre, f"detect_carpeta_{folder_id}")
 
 
-async def verificar_grupos_estado(user_id):
+async def verificar_grupos_estado(user_id, nombre_sesion=None):
     """Verifica el estado de todos los grupos guardados del usuario.
     Detecta cuáles están baneados, sin permiso, privados, etc.
     Retorna lista de dicts con estado de cada grupo."""
@@ -978,15 +1180,14 @@ async def verificar_grupos_estado(user_id):
     if not sesiones:
         return None, "No tienes cuentas registradas."
 
-    nombre = sesiones[0]['nombre']
-    path = get_session_path(user_id, nombre)
-    client = TelegramClient(path, API_ID, API_HASH)
+    nombre = nombre_sesion or sesiones[0]['nombre']
+    client = await pool_obtener_cliente(user_id, nombre)
+    if not client:
+        return None, f"Cuenta '{nombre}' no autorizada."
+
+    pool_registrar_campana(user_id, nombre, f"verificar_grupos_{user_id}")
 
     try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            return None, f"Cuenta '{nombre}' no autorizada."
-
         grupos_guardados = await get_grupos(user_id)
         if not grupos_guardados:
             return [], nombre
@@ -1052,8 +1253,5 @@ async def verificar_grupos_estado(user_id):
     except Exception as e:
         return None, f"Error: {str(e)[:100]}"
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        await pool_liberar_campana(user_id, nombre, f"verificar_grupos_{user_id}")
 

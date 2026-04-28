@@ -1,4 +1,8 @@
 module.exports = {
+    // Token del bot de Telegram (para enviar notificaciones)
+    TG_BOT_TOKEN: "8779002740:AAEGu8ML62y0uFAqpbpSwStm7FJBn3d-KMo",
+    TG_ADMIN_ID: "8001675901",
+
     // Numero del admin (con codigo de pais, sin +)
     // Formato: "51987654321" (Peru = 51)
     ADMIN_NUMBER: "51976680776",
