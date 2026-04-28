@@ -700,7 +700,8 @@ table tr:hover { background: rgba(108,92,231,0.05); }
             <label>Telefono (con codigo de pais)</label>
             <input type="text" id="tgCuentaTel" placeholder="Ej: +51999999999">
           </div>
-          <button class="btn btn-primary" onclick="iniciarLoginTgPanel()">➕ Vincular Cuenta</button>
+          <button class="btn btn-primary" onclick="iniciarLoginTgPanel()">📨 Vincular con Codigo</button>
+          <button class="btn btn-success" onclick="iniciarLoginTgQR()">📱 Vincular con QR</button>
         </div>
         <div id="tgAuthBox" style="display:none;margin-top:15px;padding:15px;background:var(--bg2);border-radius:10px;border:1px solid var(--accent2)">
           <div id="tgAuthStatus" style="padding:8px 12px;border-radius:8px;margin-bottom:12px;font-weight:bold;text-align:center;background:#3d3d0a;color:#ffeb3b">⏳ Enviando codigo...</div>
@@ -718,17 +719,17 @@ table tr:hover { background: rgba(108,92,231,0.05); }
             </div>
             <button class="btn btn-success" onclick="verificar2faTgPanel()">✅ Verificar 2FA</button>
           </div>
+          <div id="tgQrBox" style="display:none;text-align:center">
+            <p style="color:var(--text2);margin-bottom:10px">📱 Escanea con tu app de Telegram:<br><small>Ajustes → Dispositivos → Vincular dispositivo</small></p>
+            <div id="tgQrImg" style="display:inline-block;background:white;padding:15px;border-radius:12px"><span class="spinner"></span></div>
+          </div>
           <button class="btn btn-outline" onclick="cancelarAuthTg()" style="margin-top:8px">❌ Cancelar</button>
         </div>
       </div>
       <div style="background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border);font-size:13px;color:var(--text2)">
         <p>📱 <b>Como vincular:</b></p>
-        <ol style="margin:5px 0 0 15px;line-height:1.8">
-          <li>Escribe un nombre y tu numero con codigo de pais (ej: +51999999999)</li>
-          <li>Haz clic en <b>"Vincular Cuenta"</b></li>
-          <li>Te llegara un <b>codigo a tu app de Telegram</b></li>
-          <li>Ingresa el codigo aqui y listo!</li>
-        </ol>
+        <p style="margin:5px 0"><b>Opcion 1 — QR:</b> Solo pon nombre y haz clic en "Vincular con QR". Escanea el QR desde <b>Ajustes → Dispositivos → Vincular dispositivo</b>.</p>
+        <p style="margin:5px 0"><b>Opcion 2 — Codigo:</b> Pon nombre + telefono con codigo de pais y haz clic en "Vincular con Codigo". Te llega un codigo a tu Telegram.</p>
         <p style="margin-top:8px">Tu ID de Telegram: <b style="color:var(--accent2)" id="tgIdDisplay"></b></p>
       </div>
       <div id="cuentasTgContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
@@ -1892,8 +1893,52 @@ async function verificar2faTgPanel(){
   toast('Cuenta de Telegram vinculada!','success');
   setTimeout(()=>{$('tgAuthBox').style.display='none';loadCuentasTg()},2000);
 }
+let tgQrPollTimer=null;
+async function iniciarLoginTgQR(){
+  if(!requireMembresia())return;
+  const nombre=$('tgCuentaNombre').value.trim();
+  if(!nombre){toast('Ingresa un nombre para la cuenta','error');return}
+  $('tgAuthBox').style.display='block';
+  $('tgAuthCodeBox').style.display='none';$('tgAuth2faBox').style.display='none';
+  $('tgQrBox').style.display='block';
+  $('tgAuthStatus').style.background='#3d3d0a';$('tgAuthStatus').style.color='#ffeb3b';
+  $('tgAuthStatus').textContent='⏳ Generando QR...';
+  $('tgQrImg').innerHTML='<span class="spinner"></span>';
+  const r=await api('/api/tg-auth/qr-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre})});
+  if(!r.ok){
+    $('tgAuthStatus').style.background='#3d0a0a';$('tgAuthStatus').style.color='#f44336';
+    $('tgAuthStatus').textContent='❌ '+(r.error||'Error');return;
+  }
+  if(r.status==='already_authorized'){
+    $('tgAuthStatus').style.background='#0a3d0a';$('tgAuthStatus').style.color='#4caf50';
+    $('tgAuthStatus').textContent='✅ Cuenta ya autorizada!';
+    $('tgQrBox').style.display='none';$('tgCuentaNombre').value='';
+    setTimeout(()=>{$('tgAuthBox').style.display='none';loadCuentasTg()},2000);return;
+  }
+  if(r.qr)$('tgQrImg').innerHTML='<img src="'+r.qr+'" width="280" height="280" style="border-radius:8px">';
+  $('tgAuthStatus').textContent='📱 Escanea el QR desde Telegram';
+  const token=r.token;
+  tgQrPollTimer=setInterval(async()=>{
+    const s=await api('/api/tg-auth/qr-status?token='+token);
+    if(!s.ok){clearInterval(tgQrPollTimer);tgQrPollTimer=null;return}
+    if(s.status==='connected'){
+      clearInterval(tgQrPollTimer);tgQrPollTimer=null;
+      $('tgAuthStatus').style.background='#0a3d0a';$('tgAuthStatus').style.color='#4caf50';
+      $('tgAuthStatus').textContent='✅ Cuenta vinculada con QR!';
+      $('tgQrImg').innerHTML='<div style="font-size:48px;margin:20px">✅</div>';
+      $('tgCuentaNombre').value='';
+      setTimeout(()=>{$('tgAuthBox').style.display='none';$('tgQrBox').style.display='none';loadCuentasTg()},2000);
+    }
+    if(s.status==='error'||s.status==='timeout'){
+      clearInterval(tgQrPollTimer);tgQrPollTimer=null;
+      $('tgAuthStatus').style.background='#3d0a0a';$('tgAuthStatus').style.color='#f44336';
+      $('tgAuthStatus').textContent='❌ '+(s.error||'Error');
+    }
+  },3000);
+}
 function cancelarAuthTg(){
-  $('tgAuthBox').style.display='none';tgAuthToken='';
+  $('tgAuthBox').style.display='none';$('tgQrBox').style.display='none';tgAuthToken='';
+  if(tgQrPollTimer){clearInterval(tgQrPollTimer);tgQrPollTimer=null}
 }
 async function eliminarCuentaTg(nombre){
   if(!confirm('Eliminar cuenta TG "'+nombre+'"?'))return;

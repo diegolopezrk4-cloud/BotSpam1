@@ -170,6 +170,86 @@ async def api_tg_auth_verify_2fa(request):
 
 
 # ─────────────────────────────────────────
+#   AUTH QR: /api/tg-auth/qr-*
+# ─────────────────────────────────────────
+
+web_qr_sessions = {}
+
+async def api_tg_auth_qr_start(request):
+    body = await request.json()
+    user_id = int(body.get("u", 0))
+    nombre = body.get("nombre", "").strip()
+    if not user_id or not nombre:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    if not re.match(r'^[a-zA-Z0-9_]{1,30}$', nombre):
+        return web.json_response({"ok": False, "error": "Nombre invalido"})
+    sesiones = await db.get_sesiones(user_id)
+    if len(sesiones) >= 5:
+        return web.json_response({"ok": False, "error": "Limite de 5 cuentas"})
+    for s in sesiones:
+        if s["nombre"].lower() == nombre.lower():
+            return web.json_response({"ok": False, "error": f"Ya tienes cuenta '{nombre}'"})
+    token = uuid.uuid4().hex
+    path = get_session_path(user_id, nombre)
+    try:
+        client = TelegramClient(path, API_ID, API_HASH)
+        await client.connect()
+        if await client.is_user_authorized():
+            await db.agregar_sesion(user_id, nombre, "autorizado")
+            await client.disconnect()
+            return web.json_response({"ok": True, "status": "already_authorized"})
+        qr_login = await client.qr_login()
+        import qrcode, io, base64
+        qr_img = qrcode.make(qr_login.url)
+        buf = io.BytesIO()
+        qr_img.save(buf, format="PNG")
+        qr_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+        web_qr_sessions[token] = {
+            "client": client, "qr_login": qr_login, "user_id": user_id,
+            "nombre": nombre, "status": "waiting_scan", "qr": qr_b64
+        }
+        async def wait_for_scan():
+            try:
+                await qr_login.wait(timeout=120)
+                web_qr_sessions[token]["status"] = "connected"
+                me = await client.get_me()
+                phone = me.phone or "desconocido"
+                await db.agregar_sesion(user_id, nombre, phone)
+                await client.disconnect()
+            except asyncio.TimeoutError:
+                web_qr_sessions[token]["status"] = "timeout"
+                web_qr_sessions[token]["error"] = "Timeout: no escaneaste a tiempo"
+                try: await client.disconnect()
+                except: pass
+            except Exception as e:
+                web_qr_sessions[token]["status"] = "error"
+                web_qr_sessions[token]["error"] = str(e)
+                try: await client.disconnect()
+                except: pass
+        asyncio.ensure_future(wait_for_scan())
+        return web.json_response({"ok": True, "status": "qr_ready", "token": token, "qr": qr_b64})
+    except ImportError:
+        return web.json_response({"ok": False, "error": "qrcode no instalado. pip install qrcode[pil]"})
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)})
+
+
+async def api_tg_auth_qr_status(request):
+    token = request.query.get("token", "")
+    if not token or token not in web_qr_sessions:
+        return web.json_response({"ok": False, "error": "Token invalido o expirado"})
+    session = web_qr_sessions[token]
+    result = {"ok": True, "status": session["status"]}
+    if session.get("qr"):
+        result["qr"] = session["qr"]
+    if session.get("error"):
+        result["error"] = session["error"]
+    if session["status"] in ("connected", "timeout", "error"):
+        del web_qr_sessions[token]
+    return web.json_response(result)
+
+
+# ─────────────────────────────────────────
 #   SESIONES TG: /api/sesiones_tg*
 # ─────────────────────────────────────────
 
@@ -690,6 +770,9 @@ def create_app():
     app.router.add_post("/api/tg-auth/send-code", api_tg_auth_send_code)
     app.router.add_post("/api/tg-auth/verify-code", api_tg_auth_verify_code)
     app.router.add_post("/api/tg-auth/verify-2fa", api_tg_auth_verify_2fa)
+    # Auth QR
+    app.router.add_post("/api/tg-auth/qr-start", api_tg_auth_qr_start)
+    app.router.add_get("/api/tg-auth/qr-status", api_tg_auth_qr_status)
 
     # Sesiones TG
     app.router.add_get("/api/sesiones_tg", api_sesiones_tg)

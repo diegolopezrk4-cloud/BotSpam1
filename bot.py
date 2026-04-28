@@ -2667,19 +2667,26 @@ async def cb_sec_cmdtlg(call: types.CallbackQuery):
         "📖 COMANDOS TELEGRAM\n\n"
         "1️⃣ Agrega una cuenta (/cuentas)\n"
         "2️⃣ Agrega tus grupos (/grupos)\n"
-        "3️⃣ Crea una campana (/campanas)\n"
-        "4️⃣ Inicia la campana (/iniciar)\n\n"
+        "3️⃣ Crea una campaña (/campanas)\n"
+        "4️⃣ Inicia la campaña (/iniciar)\n\n"
         "👇 Navega las secciones:"
     )
     botones = [
         [InlineKeyboardButton(text="👤 Cuentas", callback_data="sec_cuentas"),
          InlineKeyboardButton(text="🌐 Grupos", callback_data="sec_grupos")],
-        [InlineKeyboardButton(text="📋 Campanas", callback_data="sec_campanas"),
+        [InlineKeyboardButton(text="🔍 Detectar Grupos", callback_data="grp_detectar_tg")],
+        [InlineKeyboardButton(text="📝 Mensajes/Campañas", callback_data="sec_campanas"),
          InlineKeyboardButton(text="🚀 Iniciar", callback_data="sec_iniciar")],
+        [InlineKeyboardButton(text="🛑 Detener", callback_data="sec_detener"),
+         InlineKeyboardButton(text="⏰ Programados", callback_data="tg_programados")],
         [InlineKeyboardButton(text="🤖 Responder", callback_data="sec_responder"),
+         InlineKeyboardButton(text="🚫 Lista Negra", callback_data="tg_listanegra")],
+        [InlineKeyboardButton(text="⚙ Config Envío", callback_data="tg_config"),
          InlineKeyboardButton(text="📊 Historial", callback_data="sec_historial")],
-        [InlineKeyboardButton(text="🗑 Eliminar", callback_data="sec_eliminar"),
-         InlineKeyboardButton(text="🛑 Detener", callback_data="sec_detener")],
+        [InlineKeyboardButton(text="📈 Stats", callback_data="tg_stats"),
+         InlineKeyboardButton(text="🗑 Eliminar", callback_data="sec_eliminar")],
+        [InlineKeyboardButton(text="👑 Membresía", callback_data="tg_membresia")],
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="tg_panelweb")],
         [InlineKeyboardButton(text="🔙 Volver", callback_data="menu_principal")],
     ]
     if es_admin(call.from_user.id):
@@ -2708,6 +2715,142 @@ async def cb_menu_principal(call: types.CallbackQuery):
         [InlineKeyboardButton(text="📱 Telegram", callback_data="sec_cmdtlg")],
         [InlineKeyboardButton(text="📱 WhatsApp", callback_data="sec_wsp")],
     ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# ╔══════════════════════════════════════╗
+# ║    TELEGRAM: SECCIONES EXTRA        ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "tg_programados")
+async def cb_tg_programados(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_programados(call.from_user.id)
+    progs = r.get("programados", []) if r.get("ok") else []
+    texto = f"⏰ PROGRAMADOS TG ({len(progs)}):\n\n"
+    if progs:
+        for i, p in enumerate(progs, 1):
+            estado = "✅" if p.get("activo") else "⏸"
+            texto += f"{i}. {estado} Hora: {p.get('hora','?')} — Msg ID: {p.get('mensaje_id','?')}\n"
+    else:
+        texto += "(sin envíos programados)\n"
+    texto += "\nUsa el panel web para crear programados."
+    botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "tg_listanegra")
+async def cb_tg_listanegra(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_lista_negra(call.from_user.id)
+    items = r.get("lista", []) if r.get("ok") else []
+    texto = f"🚫 LISTA NEGRA TG ({len(items)}):\n\n"
+    if items:
+        for i, n in enumerate(items[:20], 1):
+            texto += f"{i}. {n.get('numero','?')}\n"
+        if len(items) > 20:
+            texto += f"\n...y {len(items)-20} más"
+    else:
+        texto += "(vacía)\n"
+    texto += "\nUsa el panel web para agregar/quitar."
+    botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "tg_config")
+async def cb_tg_config(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_envio_config(call.from_user.id)
+    if r.get("ok"):
+        c = r.get("config", {})
+        texto = (
+            "⚙ CONFIG ENVÍO TG:\n\n"
+            f"⏱ Delay: {c.get('delay_seg', 10)}s\n"
+            f"📦 Lote: {c.get('lote_tamano', 0)}\n"
+            f"⏸ Pausa lote: {c.get('lote_pausa_seg', 30)}s\n"
+            f"🕐 Horario: {c.get('hora_inicio', 0)}h - {c.get('hora_fin', 24)}h\n"
+        )
+    else:
+        texto = "⚙ Config no disponible\n"
+    texto += "\nModifica desde el panel web."
+    botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "tg_stats")
+async def cb_tg_stats(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_dashboard(call.from_user.id)
+    if r.get("ok"):
+        d = r
+        texto = (
+            "📈 STATS TG:\n\n"
+            f"📤 Enviados: {d.get('enviados', 0)}\n"
+            f"❌ Errores: {d.get('errores', 0)}\n"
+            f"🌐 Grupos: {d.get('grupos', 0)}\n"
+            f"👤 Cuentas: {d.get('sesiones', 0)}\n"
+            f"📋 Campañas: {d.get('campanas', 0)}\n"
+        )
+    else:
+        texto = "📈 Stats no disponible\n"
+    botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "tg_membresia")
+async def cb_tg_membresia(call: types.CallbackQuery):
+    user = await db.get_usuario(call.from_user.id)
+    if user:
+        plan = user.get("plan", "sin_plan")
+        exp = user.get("fecha_expira", "N/A")
+        activo = plan == "permanente" or (exp and datetime.fromisoformat(exp) > datetime.now() if exp and exp != "N/A" else False)
+        texto = (
+            "👑 TU MEMBRESÍA:\n\n"
+            f"📋 Plan: {plan}\n"
+            f"📅 Expira: {exp or 'N/A'}\n"
+            f"✅ Estado: {'Activa' if activo else '⛔ Expirada'}\n"
+        )
+    else:
+        texto = "👑 No tienes membresía activa.\nContacta al admin para activar."
+    botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "tg_panelweb")
+async def cb_tg_panelweb(call: types.CallbackQuery):
+    texto = (
+        "🌐 PANEL WEB\n\n"
+        "Accede al panel desde tu navegador:\n"
+        "https://jdbotspam.duckdns.org\n\n"
+        "Desde el panel puedes controlar todo:\n"
+        "• Cuentas WSP y Telegram\n"
+        "• Grupos, Mensajes, Campañas\n"
+        "• Config de envío, Programados\n"
+        "• Lista negra, Auto-responder\n"
+        "• Estadísticas y Historial\n"
+        "• Admin y Membresías"
+    )
+    botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
