@@ -3389,7 +3389,8 @@ async def cb_wsp_grupos(call: types.CallbackQuery):
         texto = texto[:4000] + "\n(truncado)"
 
     botones = [
-        [InlineKeyboardButton(text="➕ Agregar grupo", callback_data="wspgrp_agregar")],
+        [InlineKeyboardButton(text="➕ Agregar grupo", callback_data="wspgrp_agregar"),
+         InlineKeyboardButton(text="🔍 Detectar grupos", callback_data="wspgrp_detectar")],
     ]
     if grupos:
         botones.append([
@@ -3401,6 +3402,91 @@ async def cb_wsp_grupos(call: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
+
+
+@dp.callback_query(F.data == "wspgrp_detectar")
+async def cb_wspgrp_detectar(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_sesiones(call.from_user.id)
+    sesiones = r.get("sesiones", []) if r.get("ok") else []
+    if not sesiones:
+        await call.answer("No tienes cuentas WSP vinculadas.", show_alert=True)
+        return
+    if len(sesiones) == 1:
+        nombre = sesiones[0].get("nombre", "?")
+        await call.answer(f"Buscando grupos de {nombre}...", show_alert=False)
+        r2 = await wsp.wsp_detectar_grupos(call.from_user.id, nombre)
+        if not r2.get("ok"):
+            botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_grupos")]]
+            kb = InlineKeyboardMarkup(inline_keyboard=botones)
+            await safe_edit(call.message, f"❌ Error detectando grupos: {r2.get('error', '?')}", reply_markup=kb)
+            return
+        grupos_encontrados = r2.get("grupos", [])
+        if not grupos_encontrados:
+            botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_grupos")]]
+            kb = InlineKeyboardMarkup(inline_keyboard=botones)
+            await safe_edit(call.message, f"📭 La cuenta '{nombre}' no está en ningún grupo WSP.", reply_markup=kb)
+            return
+        agregados = 0
+        for g in grupos_encontrados:
+            link = g.get("link", g.get("jid", ""))
+            nombre_grupo = g.get("nombre", None)
+            rr = await wsp.wsp_agregar_grupo(call.from_user.id, link)
+            if rr.get("ok"):
+                agregados += 1
+        texto = f"🔍 GRUPOS DETECTADOS ({nombre})\n\n"
+        texto += f"✅ {agregados} grupo(s) agregados de {len(grupos_encontrados)} encontrados.\n\n"
+        for i, g in enumerate(grupos_encontrados[:30], 1):
+            texto += f"{i}. {g.get('nombre', '?')} ({g.get('participantes', '?')} miembros)\n"
+        botones = [[InlineKeyboardButton(text="🔙 Volver a Grupos", callback_data="wsp_grupos")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, texto[:4000], reply_markup=kb)
+        return
+    botones = []
+    for s in sesiones:
+        nombre = s.get("nombre", "?")
+        botones.append([InlineKeyboardButton(
+            text=f"📱 {nombre}",
+            callback_data=f"wspgrpdet_{nombre}"
+        )])
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_grupos")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "🔍 DETECTAR GRUPOS WSP\n\n¿De qué cuenta quieres detectar los grupos?", reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wspgrpdet_"))
+async def cb_wspgrp_detectar_cuenta(call: types.CallbackQuery):
+    nombre = call.data.replace("wspgrpdet_", "")
+    import wsp_bridge as wsp
+    await call.answer(f"Buscando grupos de {nombre}...", show_alert=False)
+    r = await wsp.wsp_detectar_grupos(call.from_user.id, nombre)
+    if not r.get("ok"):
+        botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_grupos")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, f"❌ Error: {r.get('error', '?')}", reply_markup=kb)
+        return
+    grupos_encontrados = r.get("grupos", [])
+    if not grupos_encontrados:
+        botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_grupos")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, f"📭 La cuenta '{nombre}' no está en ningún grupo.", reply_markup=kb)
+        return
+    agregados = 0
+    for g in grupos_encontrados:
+        link = g.get("link", g.get("jid", ""))
+        rr = await wsp.wsp_agregar_grupo(call.from_user.id, link)
+        if rr.get("ok"):
+            agregados += 1
+    texto = f"🔍 GRUPOS DETECTADOS ({nombre})\n\n"
+    texto += f"✅ {agregados} grupo(s) agregados de {len(grupos_encontrados)} encontrados.\n\n"
+    for i, g in enumerate(grupos_encontrados[:30], 1):
+        texto += f"{i}. {g.get('nombre', '?')} ({g.get('participantes', '?')} miembros)\n"
+    botones = [[InlineKeyboardButton(text="🔙 Volver a Grupos", callback_data="wsp_grupos")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto[:4000], reply_markup=kb)
 
 
 @dp.callback_query(F.data == "wspgrp_agregar")

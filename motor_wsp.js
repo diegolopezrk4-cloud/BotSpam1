@@ -888,6 +888,24 @@ function getCampanasActivas() {
     return Object.keys(tareasActivas).map(id => parseInt(id));
 }
 
+async function detectarGrupos(userId, nombre) {
+    const sock = await getOrConnectClient(userId, nombre);
+    const allGroups = await sock.groupFetchAllParticipating();
+    const grupos = [];
+    for (const [jid, meta] of Object.entries(allGroups)) {
+        if (!jid.endsWith("@g.us")) continue;
+        const inviteCode = meta.inviteCode || null;
+        const link = inviteCode ? `https://chat.whatsapp.com/${inviteCode}` : jid;
+        grupos.push({
+            jid,
+            nombre: meta.subject || "Sin nombre",
+            participantes: meta.participants ? meta.participants.length : 0,
+            link,
+        });
+    }
+    return grupos;
+}
+
 module.exports = {
     tareasActivas,
     getCampanasActivas,
@@ -913,4 +931,5 @@ module.exports = {
     detenerReporteDiario,
     iniciarResponder,
     detenerResponder,
+    detectarGrupos,
 };

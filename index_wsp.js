@@ -251,6 +251,20 @@ poll();
                 return res.end(JSON.stringify({ ok: true, grupos, max: maxG }));
             }
 
+            // POST /api/grupos/detectar — Detectar grupos de una cuenta vinculada { u, nombre }
+            if (url.pathname === "/api/grupos/detectar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                try {
+                    const grupos = await motor.detectarGrupos(body.u, body.nombre);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, grupos }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
             // POST /api/grupos/add — Agregar grupo { u, link }
             if (url.pathname === "/api/grupos/add" && req.method === "POST") {
                 const body = await readBody();

@@ -126,8 +126,14 @@ async def wsp_historial(user_id):
 async def wsp_dashboard(user_id):
     return await _get("/api/dashboard", {"u": str(user_id)})
 
-async def wsp_detectar_grupos(user_id):
-    return await _get("/api/detectar", {"u": str(user_id)})
+async def wsp_detectar_grupos(user_id, nombre):
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post(f"{WSP_API_URL}/api/grupos/detectar", json={"u": str(user_id), "nombre": nombre}, timeout=aiohttp.ClientTimeout(total=30)) as r:
+                return await r.json()
+    except Exception as e:
+        logger.error(f"WSP API detectar grupos error: {e}")
+        return {"ok": False, "error": str(e)}
 
 # --- MEMBRESIA ---
 async def wsp_usuarios_todos():
