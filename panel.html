@@ -269,6 +269,8 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div class="nav-group">Mensajeria</div>
       <a href="#" data-section="mensajes"><span class="icon">✉</span><span>Mensajes</span></a>
       <a href="#" data-section="envios"><span class="icon">📤</span><span>Envio Unico</span></a>
+      <a href="#" data-section="enviopersonal"><span class="icon">💬</span><span>Envio Personal</span></a>
+      <a href="#" data-section="enviomiembros"><span class="icon">👥</span><span>Envio a Miembros</span></a>
       <a href="#" data-section="programados"><span class="icon">⏰</span><span>Programados</span></a>
       <a href="#" data-section="campanas"><span class="icon">📋</span><span>Campanas</span></a>
       <div class="nav-group">Configuracion</div>
@@ -311,6 +313,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <h2>🌐 Grupos WhatsApp</h2>
       <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="detectarGrupos()">🔍 Detectar Grupos</button>
+        <button class="btn btn-success" onclick="showAutoJoin()">🔗 Auto-unirse a Grupos</button>
         <button class="btn btn-outline" onclick="loadGrupos()">🔄 Refrescar</button>
       </div>
       <div id="gruposContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
@@ -373,6 +376,50 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-outline" onclick="limpiarAutoResp()">🗑 Limpiar</button>
       </div>
       <div id="autoRespContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- ENVIO PERSONAL -->
+    <div class="section" id="sec-enviopersonal">
+      <h2>💬 Envio Personal</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia un mensaje a todos tus chats personales de WhatsApp.</p>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="cargarChatsPersonales()">📋 Cargar Chats</button>
+        <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Cancelar Envio</button>
+      </div>
+      <div class="form-group">
+        <label>Mensaje a enviar</label>
+        <textarea id="epMensaje" rows="4" placeholder="Escribe el mensaje que se enviara a tus contactos..."></textarea>
+      </div>
+      <div style="margin-bottom:15px">
+        <button class="btn btn-success" onclick="enviarPersonal()">📤 Enviar a Todos los Chats</button>
+      </div>
+      <div id="personalContent" class="empty-state"><div class="icon">💬</div><p>Haz click en "Cargar Chats" para ver tus contactos</p></div>
+    </div>
+
+    <!-- ENVIO A MIEMBROS -->
+    <div class="section" id="sec-enviomiembros">
+      <h2>👥 Envio a Miembros de Grupo</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia un DM personalizado a cada miembro de un grupo.</p>
+      <div class="grid" style="grid-template-columns:1fr 1fr;margin-bottom:15px">
+        <div class="form-group">
+          <label>Selecciona un grupo</label>
+          <select id="emGrupo" onchange="cargarMiembros()"><option value="">-- Carga grupos primero --</option></select>
+        </div>
+        <div class="form-group">
+          <label>Grupo destino (para agregar miembros)</label>
+          <select id="emDestino"><option value="">-- Opcional: agregar miembros aqui --</option></select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Mensaje DM (dejar vacio si solo quieres agregar miembros)</label>
+        <textarea id="emMensaje" rows="4" placeholder="Mensaje que se enviara como DM a cada miembro..."></textarea>
+      </div>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-success" onclick="enviarAMiembros()">📤 Enviar DM a Miembros</button>
+        <button class="btn btn-primary" onclick="agregarMiembrosAGrupo()">➕ Agregar Miembros al Grupo Destino</button>
+        <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Cancelar Envio</button>
+      </div>
+      <div id="miembrosContent" class="empty-state"><div class="icon">👥</div><p>Selecciona un grupo para ver sus miembros</p></div>
     </div>
 
     <!-- STATS -->
@@ -493,7 +540,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats};
     if(loaders[sec])loaders[sec]();
   });
 });
@@ -668,6 +715,103 @@ async function crearAR(){const p=$('arP').value.trim(),r=$('arR').value.trim();i
 async function elimAR(id){await api('/api/auto_respuestas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'eliminar',id})});toast('Eliminada','success');loadAutoResp()}
 function limpiarAutoResp(){showModal(`<h3>🗑 Limpiar?</h3><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confLimpAR()">Limpiar</button></div>`)}
 async function confLimpAR(){closeModal();await api('/api/auto_respuestas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'limpiar'})});toast('Limpiadas','success');loadAutoResp()}
+
+// --- AUTO-UNIRSE A GRUPOS ---
+function showAutoJoin(){
+  showModal(`<h3>🔗 Auto-unirse a Grupos</h3>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:12px">Pega los links de invitacion de WhatsApp (uno por linea):</p>
+    <div class="form-group"><textarea id="ajLinks" rows="6" placeholder="https://chat.whatsapp.com/ABC123\nhttps://chat.whatsapp.com/XYZ789"></textarea></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="ejecutarAutoJoin()">🔗 Unirse</button></div>`);
+}
+async function ejecutarAutoJoin(){
+  const raw=$('ajLinks').value.trim();
+  if(!raw){toast('Pega al menos un link','error');return}
+  const links=raw.split('\n').map(l=>l.trim()).filter(l=>l.startsWith('https://chat.whatsapp.com/'));
+  if(!links.length){toast('No se encontraron links validos','error');return}
+  closeModal();toast('Uniendose a '+links.length+' grupo(s)...','success');
+  const r=await api('/api/autojoin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,links})});
+  if(r.ok){
+    const s=r.stats||[];const ok=s.filter(x=>x.ok).length;const err=s.filter(x=>!x.ok).length;
+    toast('Unido a '+ok+' grupo(s), '+err+' error(es)',ok>0?'success':'error');
+    loadGrupos();
+  }else{toast('Error: '+(r.error||''),'error')}
+}
+
+// --- ENVIO PERSONAL ---
+function loadEnvioPersonal(){}
+async function cargarChatsPersonales(){
+  $('personalContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando chats...</div>';
+  const r=await api('/api/chats_personales?u='+userId);
+  if(!r.ok){$('personalContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'sin conexion')+'</p></div>';return}
+  const chats=r.chats||[];
+  if(!chats.length){$('personalContent').innerHTML='<div class="empty-state"><div class="icon">💬</div><p>No se encontraron chats personales</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>💬 '+chats.length+' Chats Personales (cuenta: '+(r.cuenta||'?')+')</h3></div>';
+  h+='<table><thead><tr><th>#</th><th>Nombre</th><th>Numero</th></tr></thead><tbody>';
+  chats.forEach((c,i)=>{h+=`<tr><td>${i+1}</td><td>${c.name||c.id||'?'}</td><td style="font-size:11px;color:var(--text2)">${c.id||''}</td></tr>`});
+  h+='</tbody></table></div>';
+  $('personalContent').innerHTML=h;
+}
+async function enviarPersonal(){
+  const msg=$('epMensaje').value.trim();
+  if(!msg){toast('Escribe un mensaje primero','error');return}
+  if(!confirm('Enviar este mensaje a TODOS tus chats personales?'))return;
+  toast('Iniciando envio personal...','success');
+  const r=await api('/api/enviar_personal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje:msg})});
+  toast(r.ok?'Envio personal iniciado':'Error: '+(r.error||''),r.ok?'success':'error');
+}
+async function cancelarEnvioPersonal(){
+  const r=await api('/api/cancelar_envio_personal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  toast(r.ok?'Envio cancelado':'No hay envio activo',r.ok?'success':'error');
+}
+
+// --- ENVIO A MIEMBROS ---
+async function loadEnvioMiembros(){
+  const r=await api('/api/grupos?u='+userId);
+  const sel=$('emGrupo'),sel2=$('emDestino');
+  sel.innerHTML='<option value="">-- Selecciona grupo origen --</option>';
+  sel2.innerHTML='<option value="">-- Opcional: grupo destino --</option>';
+  if(r.ok){
+    (r.grupos||[]).forEach(g=>{
+      const name=g.nombre||g.link||g.id||'?';
+      const jid=g.jid||g.id||'';
+      sel.innerHTML+=`<option value="${jid}">${name}</option>`;
+      sel2.innerHTML+=`<option value="${jid}">${name}</option>`;
+    });
+  }
+}
+async function cargarMiembros(){
+  const grupoJid=$('emGrupo').value;
+  if(!grupoJid){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>Selecciona un grupo</p></div>';return}
+  $('miembrosContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando miembros...</div>';
+  const r=await api('/api/miembros_grupo?u='+userId+'&grupo='+encodeURIComponent(grupoJid));
+  if(!r.ok){$('miembrosContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
+  const m=r.miembros||[];
+  if(!m.length){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>No se encontraron miembros</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>👥 '+m.length+' Miembros</h3></div>';
+  h+='<table><thead><tr><th>#</th><th>ID</th><th>Admin</th></tr></thead><tbody>';
+  m.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td>${x.id||x}</td><td>${x.admin?'<span class="badge badge-info">Admin</span>':''}</td></tr>`});
+  h+='</tbody></table></div>';
+  $('miembrosContent').innerHTML=h;
+}
+async function enviarAMiembros(){
+  const grupo=$('emGrupo').value,msg=$('emMensaje').value.trim();
+  if(!grupo){toast('Selecciona un grupo','error');return}
+  if(!msg){toast('Escribe un mensaje','error');return}
+  if(!confirm('Enviar DM a todos los miembros del grupo seleccionado?'))return;
+  toast('Iniciando envio a miembros...','success');
+  const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,grupo,mensaje:msg})});
+  toast(r.ok?'Envio a miembros iniciado':'Error: '+(r.error||''),r.ok?'success':'error');
+}
+async function agregarMiembrosAGrupo(){
+  const origen=$('emGrupo').value,destino=$('emDestino').value;
+  if(!origen){toast('Selecciona grupo origen','error');return}
+  if(!destino){toast('Selecciona grupo destino','error');return}
+  if(origen===destino){toast('Origen y destino no pueden ser iguales','error');return}
+  if(!confirm('Agregar los miembros del grupo origen al grupo destino?'))return;
+  toast('Agregando miembros...','success');
+  const r=await api('/api/agregar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,origen,destino})});
+  toast(r.ok?'Miembros agregados: '+(r.agregados||0)+' ok, '+(r.fallidos||0)+' error':'Error: '+(r.error||''),r.ok?'success':'error');
+}
 
 // --- STATS ---
 async function loadStats(){
