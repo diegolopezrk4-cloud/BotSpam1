@@ -4316,6 +4316,7 @@ async def cb_wsp_msg_ver(call: types.CallbackQuery):
     botones = [
         [InlineKeyboardButton(text="📤 Enviar a todos los grupos", callback_data=f"wsp_enviar_msg_{msg_id}")],
         [InlineKeyboardButton(text="⏰ Programar envío", callback_data=f"wsp_prog_msg_{msg_id}")],
+        [InlineKeyboardButton(text="🛑 Detener envío", callback_data="wsp_detener")],
         [InlineKeyboardButton(text="✏ Editar texto", callback_data=f"wsp_msg_edit_{msg_id}"),
          InlineKeyboardButton(text="📋 Duplicar", callback_data=f"wsp_msg_dup_{msg_id}")],
         [InlineKeyboardButton(text="🗑 Eliminar", callback_data=f"wsp_msg_del_{msg_id}")],
