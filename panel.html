@@ -688,21 +688,46 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="section" id="sec-cuentastg">
       <h2>✈️ Cuentas Telegram</h2>
       <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Registra tus cuentas de Telegram para usar en el panel.</p>
-      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-        <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
-          <label>Nombre de la cuenta</label>
-          <input type="text" id="tgCuentaNombre" placeholder="Ej: micuenta1">
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent)">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
+            <label>Nombre de la cuenta</label>
+            <input type="text" id="tgCuentaNombre" placeholder="Ej: micuenta1">
+          </div>
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
+            <label>Telefono (con codigo de pais)</label>
+            <input type="text" id="tgCuentaTel" placeholder="Ej: +51999999999">
+          </div>
+          <button class="btn btn-primary" onclick="iniciarLoginTgPanel()">➕ Vincular Cuenta</button>
         </div>
-        <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
-          <label>Telefono (opcional)</label>
-          <input type="text" id="tgCuentaTel" placeholder="Ej: +51999999999">
+        <div id="tgAuthBox" style="display:none;margin-top:15px;padding:15px;background:var(--bg2);border-radius:10px;border:1px solid var(--accent2)">
+          <div id="tgAuthStatus" style="padding:8px 12px;border-radius:8px;margin-bottom:12px;font-weight:bold;text-align:center;background:#3d3d0a;color:#ffeb3b">⏳ Enviando codigo...</div>
+          <div id="tgAuthCodeBox" style="display:none">
+            <div class="form-group" style="margin-bottom:10px">
+              <label>🔑 Ingresa el codigo que recibiste en Telegram:</label>
+              <input type="text" id="tgAuthCode" placeholder="Ej: 12345" style="font-size:18px;text-align:center;letter-spacing:8px">
+            </div>
+            <button class="btn btn-success" onclick="verificarCodigoTgPanel()">✅ Verificar Codigo</button>
+          </div>
+          <div id="tgAuth2faBox" style="display:none">
+            <div class="form-group" style="margin-bottom:10px">
+              <label>🔐 Esta cuenta tiene 2FA. Ingresa tu contrasena de Telegram:</label>
+              <input type="password" id="tgAuth2fa" placeholder="Tu contrasena 2FA">
+            </div>
+            <button class="btn btn-success" onclick="verificar2faTgPanel()">✅ Verificar 2FA</button>
+          </div>
+          <button class="btn btn-outline" onclick="cancelarAuthTg()" style="margin-top:8px">❌ Cancelar</button>
         </div>
-        <button class="btn btn-primary" onclick="agregarCuentaTg()">➕ Agregar Cuenta</button>
       </div>
       <div style="background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border);font-size:13px;color:var(--text2)">
-        <p>💡 <b>Tambien puedes vincular cuentas desde el bot de Telegram:</b></p>
-        <p style="margin-top:5px">Usa el comando <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">/cuentas +51999999999 Nombre</code> en el bot para vincular con verificacion por codigo.</p>
-        <p style="margin-top:5px">Tu ID de Telegram: <b style="color:var(--accent2)" id="tgIdDisplay"></b></p>
+        <p>📱 <b>Como vincular:</b></p>
+        <ol style="margin:5px 0 0 15px;line-height:1.8">
+          <li>Escribe un nombre y tu numero con codigo de pais (ej: +51999999999)</li>
+          <li>Haz clic en <b>"Vincular Cuenta"</b></li>
+          <li>Te llegara un <b>codigo a tu app de Telegram</b></li>
+          <li>Ingresa el codigo aqui y listo!</li>
+        </ol>
+        <p style="margin-top:8px">Tu ID de Telegram: <b style="color:var(--accent2)" id="tgIdDisplay"></b></p>
       </div>
       <div id="cuentasTgContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
@@ -1666,14 +1691,79 @@ async function loadCuentasTg(){
   h+='</tbody></table></div>';
   $('cuentasTgContent').innerHTML=h;
 }
-async function agregarCuentaTg(){
+let tgAuthToken='';
+async function iniciarLoginTgPanel(){
   if(!requireMembresia())return;
   const nombre=$('tgCuentaNombre').value.trim();
   const tel=$('tgCuentaTel').value.trim();
   if(!nombre){toast('Ingresa un nombre para la cuenta','error');return}
-  const r=await api('/api/sesiones_tg/agregar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre,telefono:tel})});
-  toast(r.ok?'Cuenta TG registrada':'Error: '+(r.error||''),r.ok?'success':'error');
-  if(r.ok){$('tgCuentaNombre').value='';$('tgCuentaTel').value='';loadCuentasTg()}
+  if(!tel){toast('Ingresa tu numero de telefono con codigo de pais (ej: +51999999999)','error');return}
+  $('tgAuthBox').style.display='block';
+  $('tgAuthCodeBox').style.display='none';
+  $('tgAuth2faBox').style.display='none';
+  $('tgAuthStatus').style.background='#3d3d0a';$('tgAuthStatus').style.color='#ffeb3b';
+  $('tgAuthStatus').textContent='⏳ Enviando codigo a '+tel+'...';
+  const r=await api('/api/tg-auth/send-code',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre,telefono:tel})});
+  if(!r.ok){
+    $('tgAuthStatus').style.background='#3d0a0a';$('tgAuthStatus').style.color='#f44336';
+    $('tgAuthStatus').textContent='❌ Error: '+(r.error||'No se pudo enviar codigo');
+    return;
+  }
+  if(r.status==='already_authorized'){
+    $('tgAuthStatus').style.background='#0a3d0a';$('tgAuthStatus').style.color='#4caf50';
+    $('tgAuthStatus').textContent='✅ Cuenta ya estaba autorizada! Vinculada correctamente.';
+    $('tgCuentaNombre').value='';$('tgCuentaTel').value='';
+    setTimeout(()=>{$('tgAuthBox').style.display='none';loadCuentasTg()},2000);
+    return;
+  }
+  tgAuthToken=r.token;
+  $('tgAuthStatus').style.background='#0a3d0a';$('tgAuthStatus').style.color='#4caf50';
+  $('tgAuthStatus').textContent='📨 Codigo enviado a tu app de Telegram. Ingresalo abajo:';
+  $('tgAuthCodeBox').style.display='block';
+  $('tgAuthCode').value='';$('tgAuthCode').focus();
+}
+async function verificarCodigoTgPanel(){
+  const codigo=$('tgAuthCode').value.trim();
+  if(!codigo){toast('Ingresa el codigo','error');return}
+  $('tgAuthStatus').style.background='#3d3d0a';$('tgAuthStatus').style.color='#ffeb3b';
+  $('tgAuthStatus').textContent='⏳ Verificando codigo...';
+  const r=await api('/api/tg-auth/verify-code',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tgAuthToken,codigo})});
+  if(!r.ok){
+    $('tgAuthStatus').style.background='#3d0a0a';$('tgAuthStatus').style.color='#f44336';
+    $('tgAuthStatus').textContent='❌ Error: '+(r.error||'Codigo incorrecto o expirado');
+    return;
+  }
+  if(r.status==='need_2fa'){
+    $('tgAuthStatus').textContent='🔐 Cuenta tiene 2FA. Ingresa tu contrasena:';
+    $('tgAuthCodeBox').style.display='none';
+    $('tgAuth2faBox').style.display='block';
+    $('tgAuth2fa').value='';$('tgAuth2fa').focus();
+    return;
+  }
+  $('tgAuthStatus').style.background='#0a3d0a';$('tgAuthStatus').style.color='#4caf50';
+  $('tgAuthStatus').textContent='✅ Cuenta vinculada correctamente!';
+  $('tgCuentaNombre').value='';$('tgCuentaTel').value='';
+  toast('Cuenta de Telegram vinculada!','success');
+  setTimeout(()=>{$('tgAuthBox').style.display='none';loadCuentasTg()},2000);
+}
+async function verificar2faTgPanel(){
+  const pass=$('tgAuth2fa').value.trim();
+  if(!pass){toast('Ingresa tu contrasena 2FA','error');return}
+  $('tgAuthStatus').textContent='⏳ Verificando 2FA...';
+  const r=await api('/api/tg-auth/verify-2fa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tgAuthToken,password:pass})});
+  if(!r.ok){
+    $('tgAuthStatus').style.background='#3d0a0a';$('tgAuthStatus').style.color='#f44336';
+    $('tgAuthStatus').textContent='❌ Error: '+(r.error||'Contrasena incorrecta');
+    return;
+  }
+  $('tgAuthStatus').style.background='#0a3d0a';$('tgAuthStatus').style.color='#4caf50';
+  $('tgAuthStatus').textContent='✅ Cuenta vinculada con 2FA!';
+  $('tgCuentaNombre').value='';$('tgCuentaTel').value='';
+  toast('Cuenta de Telegram vinculada!','success');
+  setTimeout(()=>{$('tgAuthBox').style.display='none';loadCuentasTg()},2000);
+}
+function cancelarAuthTg(){
+  $('tgAuthBox').style.display='none';tgAuthToken='';
 }
 async function eliminarCuentaTg(nombre){
   if(!confirm('Eliminar cuenta TG "'+nombre+'"?'))return;

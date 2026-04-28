@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import io
+import json
 import base64
 import logging
 from datetime import datetime, timezone, timedelta
@@ -6493,6 +6494,94 @@ async def cmd_grupo_admin(msg: types.Message, command: CommandObject):
 # ╔══════════════════════════════════════╗
 # ║    MAIN                             ║
 # ╚══════════════════════════════════════╝
+# ─── API HTTP para autenticación TG desde el panel web (puerto 3002) ───
+web_auth_sessions = {}  # {token: {client, telefono, nombre, phone_code_hash, user_id}}
+
+async def handle_tg_send_code(request):
+    try:
+        data = await request.json()
+        user_id = str(data.get("u", ""))
+        nombre = data.get("nombre", "").strip()
+        telefono = data.get("telefono", "").strip()
+        if not user_id or not nombre or not telefono:
+            return aiohttp.web.json_response({"ok": False, "error": "falta u, nombre o telefono"})
+        path = get_session_path(int(user_id), nombre)
+        client = TelegramClient(path, API_ID, API_HASH)
+        await client.connect()
+        if await client.is_user_authorized():
+            await db.agregar_sesion(int(user_id), nombre, telefono)
+            await client.disconnect()
+            return aiohttp.web.json_response({"ok": True, "status": "already_authorized"})
+        result = await client.send_code_request(telefono)
+        token = f"{user_id}_{nombre}"
+        web_auth_sessions[token] = {
+            "client": client, "telefono": telefono, "nombre": nombre,
+            "phone_code_hash": result.phone_code_hash, "user_id": int(user_id)
+        }
+        return aiohttp.web.json_response({"ok": True, "status": "code_sent", "token": token})
+    except Exception as e:
+        return aiohttp.web.json_response({"ok": False, "error": str(e)})
+
+async def handle_tg_verify_code(request):
+    try:
+        data = await request.json()
+        token = data.get("token", "")
+        codigo = data.get("codigo", "").strip()
+        if not token or not codigo:
+            return aiohttp.web.json_response({"ok": False, "error": "falta token o codigo"})
+        session = web_auth_sessions.get(token)
+        if not session:
+            return aiohttp.web.json_response({"ok": False, "error": "sesion expirada"})
+        client = session["client"]
+        try:
+            await client.sign_in(session["telefono"], codigo, phone_code_hash=session["phone_code_hash"])
+            await db.agregar_sesion(session["user_id"], session["nombre"], session["telefono"])
+            del web_auth_sessions[token]
+            await client.disconnect()
+            return aiohttp.web.json_response({"ok": True, "status": "authorized"})
+        except SessionPasswordNeededError:
+            return aiohttp.web.json_response({"ok": True, "status": "need_2fa", "token": token})
+    except Exception as e:
+        if token in web_auth_sessions:
+            try: await web_auth_sessions[token]["client"].disconnect()
+            except: pass
+            del web_auth_sessions[token]
+        return aiohttp.web.json_response({"ok": False, "error": str(e)})
+
+async def handle_tg_verify_2fa(request):
+    try:
+        data = await request.json()
+        token = data.get("token", "")
+        password = data.get("password", "").strip()
+        if not token or not password:
+            return aiohttp.web.json_response({"ok": False, "error": "falta token o password"})
+        session = web_auth_sessions.get(token)
+        if not session:
+            return aiohttp.web.json_response({"ok": False, "error": "sesion expirada"})
+        client = session["client"]
+        await client.sign_in(password=password)
+        await db.agregar_sesion(session["user_id"], session["nombre"], session["telefono"])
+        del web_auth_sessions[token]
+        await client.disconnect()
+        return aiohttp.web.json_response({"ok": True, "status": "authorized"})
+    except Exception as e:
+        if token in web_auth_sessions:
+            try: await web_auth_sessions[token]["client"].disconnect()
+            except: pass
+            del web_auth_sessions[token]
+        return aiohttp.web.json_response({"ok": False, "error": str(e)})
+
+async def start_web_auth_server():
+    app = aiohttp.web.Application()
+    app.router.add_post("/api/tg-auth/send-code", handle_tg_send_code)
+    app.router.add_post("/api/tg-auth/verify-code", handle_tg_verify_code)
+    app.router.add_post("/api/tg-auth/verify-2fa", handle_tg_verify_2fa)
+    runner = aiohttp.web.AppRunner(app)
+    await runner.setup()
+    site = aiohttp.web.TCPSite(runner, "127.0.0.1", 3002)
+    await site.start()
+    logger.info("🔑 API auth TG corriendo en http://127.0.0.1:3002")
+
 async def main():
     await db.init_db()
     os.makedirs("sessions", exist_ok=True)
@@ -6506,6 +6595,7 @@ async def main():
             logger.info(f"Reset campaña {cid} (user {uid}) que quedó activa por crash.")
     except Exception:
         pass
+    await start_web_auth_server()
     logger.info("🚀 Bot de Spam J&D v2.0 iniciado correctamente.")
 
     # Scheduler TG: envios programados cada minuto

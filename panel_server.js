@@ -19,6 +19,30 @@ const PANEL_FILE = path.join(__dirname, "panel.html");
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
+    // Proxy TG auth requests to the Python bot auth server (port 3002)
+    if (url.pathname.startsWith("/api/tg-auth/")) {
+        const options = {
+            hostname: "127.0.0.1",
+            port: 3002,
+            path: req.url,
+            method: req.method,
+            headers: { ...req.headers, host: "127.0.0.1:3002" }
+        };
+
+        const proxyReq = http.request(options, (proxyRes) => {
+            res.writeHead(proxyRes.statusCode, proxyRes.headers);
+            proxyRes.pipe(res);
+        });
+
+        proxyReq.on("error", (e) => {
+            res.writeHead(502);
+            res.end(JSON.stringify({ ok: false, error: "Bot TG no disponible: " + e.message }));
+        });
+
+        req.pipe(proxyReq);
+        return;
+    }
+
     // Proxy API requests + QR link pages to the WSP API server
     if (url.pathname.startsWith("/api/") || url.pathname === "/link" || url.pathname === "/link-status") {
         const options = {
