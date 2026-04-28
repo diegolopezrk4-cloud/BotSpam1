@@ -57,8 +57,11 @@ const server = http.createServer(async (req, res) => {
     }
 });
 
+const DOMAIN = process.env.PANEL_DOMAIN || "jdbotspam.duckdns.org";
+
 server.listen(PORT, "0.0.0.0", () => {
     console.log(`\n🌐 Panel Web corriendo en http://0.0.0.0:${PORT}`);
+    console.log(`   🌍 Dominio: http://${DOMAIN}:${PORT}`);
     console.log(`   API proxy → http://${API_HOST}:${API_PORT}`);
     console.log(`   Comparte este link con tus clientes\n`);
 });

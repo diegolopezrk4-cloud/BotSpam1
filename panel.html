@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bot de Spam J&D - Panel de Control</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
 <style>
 :root {
   --bg: #0a0a1a;
@@ -206,16 +207,39 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .status-dot.online { background: var(--success); box-shadow: 0 0 8px var(--success); }
 .status-dot.offline { background: var(--danger); }
+.platform-card:hover { border-color: var(--accent) !important; transform: translateY(-3px); box-shadow: 0 8px 25px rgba(108,92,231,0.3); }
 </style>
 </head>
 <body>
 
-<!-- AUTH: LOGIN -->
-<div class="auth-container" id="authLogin">
+<!-- PLATFORM SELECTOR -->
+<div class="auth-container" id="platformSelector">
   <div class="auth-card">
     <div class="logo">🤖</div>
     <h1>Bot de Spam J&D</h1>
-    <p class="subtitle">Panel de Control</p>
+    <p class="subtitle">Selecciona tu plataforma</p>
+    <div style="display:flex;gap:15px;margin:25px 0;justify-content:center;flex-wrap:wrap">
+      <div onclick="selectPlatform('wsp')" class="platform-card" id="platWsp" style="cursor:pointer;background:var(--bg);border:2px solid var(--border);border-radius:15px;padding:30px 25px;flex:1;min-width:160px;transition:all 0.3s;text-align:center">
+        <div style="font-size:48px;margin-bottom:10px">📱</div>
+        <h3 style="color:var(--success);margin-bottom:5px">WhatsApp</h3>
+        <p style="color:var(--text2);font-size:12px">Spam a grupos y chats de WhatsApp</p>
+      </div>
+      <div onclick="selectPlatform('tg')" class="platform-card" id="platTg" style="cursor:pointer;background:var(--bg);border:2px solid var(--border);border-radius:15px;padding:30px 25px;flex:1;min-width:160px;transition:all 0.3s;text-align:center">
+        <div style="font-size:48px;margin-bottom:10px">✈️</div>
+        <h3 style="color:var(--accent2);margin-bottom:5px">Telegram</h3>
+        <p style="color:var(--text2);font-size:12px">Spam a grupos y chats de Telegram</p>
+      </div>
+    </div>
+    <p style="color:var(--text2);font-size:11px">Puedes vincular ambas plataformas despues</p>
+  </div>
+</div>
+
+<!-- AUTH: LOGIN -->
+<div class="auth-container" id="authLogin" style="display:none">
+  <div class="auth-card">
+    <div class="logo" id="loginLogo">🤖</div>
+    <h1 id="loginTitle">Bot de Spam J&D</h1>
+    <p class="subtitle" id="loginSubtitle">Panel de Control</p>
     <input type="text" id="loginId" placeholder="Tu ID de Telegram" autocomplete="off">
     <input type="password" id="loginPass" placeholder="Contrasena">
     <button class="btn-main" onclick="doLogin()" id="btnLogin">Iniciar Sesion</button>
@@ -225,6 +249,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="divider"></div>
     <p style="color:var(--text2);font-size:13px;margin-bottom:8px">Primera vez?</p>
     <button class="link-btn" onclick="showRegister()">Crear cuenta</button>
+    <div style="margin-top:12px"><button class="link-btn" onclick="showPlatformSelector()" style="font-size:12px">⬅ Cambiar plataforma</button></div>
     <div class="auth-error" id="loginError"></div>
   </div>
 </div>
@@ -246,6 +271,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <button class="btn-main" onclick="doRegister()" id="btnRegister">Registrarse</button>
     <div class="divider"></div>
     <button class="link-btn" onclick="showLogin()">Ya tengo cuenta — Iniciar Sesion</button>
+    <div style="margin-top:12px"><button class="link-btn" onclick="showPlatformSelector()" style="font-size:12px">⬅ Cambiar plataforma</button></div>
     <div class="auth-error" id="regError"></div>
     <div class="auth-success" id="regSuccess"></div>
   </div>
@@ -266,6 +292,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div class="nav-group">Principal</div>
       <a href="#" class="active" data-section="dashboard"><span class="icon">📊</span><span>Dashboard</span></a>
       <a href="#" data-section="cuentas"><span class="icon">👤</span><span>Cuentas WSP</span></a>
+      <a href="#" data-section="cuentastg"><span class="icon">✈️</span><span>Cuentas Telegram</span></a>
       <a href="#" data-section="grupos"><span class="icon">🌐</span><span>Grupos</span></a>
       <div class="nav-group">Mensajeria</div>
       <a href="#" data-section="mensajes"><span class="icon">✉</span><span>Mensajes</span></a>
@@ -455,19 +482,38 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px">
         <h3 style="margin-bottom:10px">💰 Planes de Membresia</h3>
         <div style="display:flex;gap:15px;flex-wrap:wrap">
-          <div style="background:var(--bg2);padding:15px;border-radius:10px;flex:1;min-width:200px;border:1px solid var(--accent)">
+          <div style="background:var(--bg2);padding:15px;border-radius:10px;flex:1;min-width:150px;border:1px solid var(--accent)">
             <h4 style="color:var(--accent)">Semanal</h4>
             <div style="font-size:24px;font-weight:bold;margin:10px 0">S/ 15</div>
-            <div style="color:var(--text2);font-size:13px">7 dias de acceso completo</div>
+            <div style="color:var(--text2);font-size:13px">7 dias de acceso</div>
           </div>
-          <div style="background:var(--bg2);padding:15px;border-radius:10px;flex:1;min-width:200px;border:1px solid var(--accent2)">
+          <div style="background:var(--bg2);padding:15px;border-radius:10px;flex:1;min-width:150px;border:1px solid var(--accent2)">
             <h4 style="color:var(--accent2)">Mensual</h4>
             <div style="font-size:24px;font-weight:bold;margin:10px 0">S/ 30</div>
-            <div style="color:var(--text2);font-size:13px">30 dias de acceso completo</div>
+            <div style="color:var(--text2);font-size:13px">30 dias de acceso</div>
+          </div>
+          <div style="background:var(--bg2);padding:15px;border-radius:10px;flex:1;min-width:150px;border:1px solid var(--success)">
+            <h4 style="color:var(--success)">Permanente</h4>
+            <div style="font-size:24px;font-weight:bold;margin:10px 0">&#8734;</div>
+            <div style="color:var(--text2);font-size:13px">Acceso ilimitado</div>
           </div>
         </div>
       </div>
       <div id="adminContent" class="empty-state"><div class="icon">👑</div><p>Cargando usuarios...</p></div>
+    </div>
+
+    <!-- CUENTAS TELEGRAM -->
+    <div class="section" id="sec-cuentastg">
+      <h2>✈️ Cuentas Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Vincula tu cuenta de Telegram para spam via el bot de TG.</p>
+      <div style="margin-bottom:15px">
+        <p style="color:var(--text2);font-size:13px;line-height:1.8">Para vincular tu cuenta de Telegram:
+        <br>1. Abre el bot de Telegram: <b>@TuBot</b>
+        <br>2. Escribe <code style="background:var(--bg);padding:3px 8px;border-radius:4px">/vincular</code>
+        <br>3. Sigue las instrucciones del bot
+        </p>
+      </div>
+      <div id="cuentasTgContent" class="empty-state"><div class="icon">✈️</div><p>La vinculacion de cuentas de Telegram se gestiona desde el bot de TG.<br>Tu ID de Telegram: <b id="tgIdDisplay"></b></p></div>
     </div>
 
     <!-- MEMBRESIA BLOQUEADA OVERLAY -->
@@ -486,8 +532,12 @@ table tr:hover { background: rgba(108,92,231,0.05); }
             <div style="font-size:22px;font-weight:bold;margin:5px 0">S/ 30</div>
           </div>
         </div>
-        <p style="color:var(--text2);font-size:13px">Contacta al administrador para activar tu membresia.</p>
-        <button class="btn btn-outline" style="margin-top:15px" onclick="doLogout()">Cerrar Sesion</button>
+        <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
+          <p style="color:var(--accent2);font-weight:bold;margin-bottom:8px">📞 Contactar al Creador</p>
+          <p style="color:var(--text);font-size:14px;margin-bottom:5px">📱 WhatsApp: <a href="https://wa.me/51976680776" target="_blank" style="color:var(--success);text-decoration:none;font-weight:bold">+51 976 680 776</a></p>
+          <p style="color:var(--text);font-size:14px">✈️ Telegram: <a href="https://t.me/JhonnyVip05" target="_blank" style="color:var(--accent2);text-decoration:none;font-weight:bold">@JhonnyVip05</a></p>
+        </div>
+        <button class="btn btn-outline" style="margin-top:10px" onclick="doLogout()">Cerrar Sesion</button>
       </div>
     </div>
   </div>
@@ -502,6 +552,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 <script>
 const API='';
 let userId=null;
+let currentPlatform='wsp';
 
 function $(id){return document.getElementById(id)}
 async function api(path,opts){
@@ -517,9 +568,30 @@ function showModal(html){$('modalContent').innerHTML=html;$('modal').classList.a
 function closeModal(){$('modal').classList.remove('show')}
 $('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
 
+// --- PLATFORM SELECTOR ---
+function selectPlatform(p){
+  currentPlatform=p;
+  localStorage.setItem('panel_platform',p);
+  $('platformSelector').style.display='none';
+  if(p==='wsp'){
+    $('loginLogo').textContent='\ud83d\udcf1';
+    $('loginTitle').textContent='Panel WhatsApp';
+    $('loginSubtitle').textContent='Spam a grupos y chats de WhatsApp';
+  }else{
+    $('loginLogo').textContent='\u2708\ufe0f';
+    $('loginTitle').textContent='Panel Telegram';
+    $('loginSubtitle').textContent='Spam a grupos y chats de Telegram';
+  }
+  $('authLogin').style.display='flex';
+}
+function showPlatformSelector(){
+  $('authLogin').style.display='none';$('authRegister').style.display='none';
+  $('platformSelector').style.display='flex';
+}
+
 // --- AUTH ---
-function showLogin(){$('authLogin').style.display='flex';$('authRegister').style.display='none'}
-function showRegister(){$('authLogin').style.display='none';$('authRegister').style.display='flex'}
+function showLogin(){$('authLogin').style.display='flex';$('authRegister').style.display='none';$('platformSelector').style.display='none'}
+function showRegister(){$('authLogin').style.display='none';$('authRegister').style.display='flex';$('platformSelector').style.display='none'}
 function showForgot(){
   showModal(`<h3>🔑 Recuperar Contrasena</h3>
     <p style="color:var(--text2);font-size:14px;line-height:1.6;margin-bottom:15px">
@@ -576,9 +648,10 @@ function showMsg(id,msg){const el=$(id);el.style.display='block';el.textContent=
 function hideMsg(id){$(id).style.display='none'}
 
 async function showApp(){
-  $('authLogin').style.display='none';$('authRegister').style.display='none';
+  $('authLogin').style.display='none';$('authRegister').style.display='none';$('platformSelector').style.display='none';
   $('app').style.display='block';
   $('sideUserId').textContent=userId;
+  if($('tgIdDisplay'))$('tgIdDisplay').textContent=userId;
   // Check admin
   esAdmin=localStorage.getItem('panel_admin')==='1';
   // Verificar membresia
@@ -629,7 +702,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios};
     if(loaders[sec])loaders[sec]();
   });
 });
@@ -971,8 +1044,9 @@ async function agregarMiembrosAGrupo(){
 
 // --- STATS ---
 async function loadStats(){
+  if(!userId){$('statsContent').innerHTML='<div class="empty-state"><p>Inicia sesion primero</p></div>';return}
   const r=await api('/api/grupo_stats?u='+userId);
-  if(!r.ok){$('statsContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
+  if(!r.ok){$('statsContent').innerHTML='<div class="empty-state"><div class="icon">\ud83d\udcca</div><p>Sin estadisticas disponibles.</p></div>';return}
   const s=r.stats||[];
   if(!s.length){$('statsContent').innerHTML='<div class="empty-state"><div class="icon">📈</div><p>Sin stats. Envia mensajes para generar datos.</p></div>';return}
   let h='<div class="table-wrap"><table><thead><tr><th>Grupo</th><th>Enviados</th><th>OK</th><th>Error</th><th>Tasa</th></tr></thead><tbody>';
@@ -985,6 +1059,11 @@ async function loadStats(){
   h+='</tbody></table></div>';$('statsContent').innerHTML=h;
 }
 
+// --- CUENTAS TELEGRAM ---
+function loadCuentasTg(){
+  if($('tgIdDisplay'))$('tgIdDisplay').textContent=userId;
+}
+
 // --- ADMIN ---
 async function loadAdminUsuarios(){
   if(!esAdmin){$('adminContent').innerHTML='<div class="empty-state"><p>No tienes permisos de admin</p></div>';return}
@@ -992,18 +1071,25 @@ async function loadAdminUsuarios(){
   const r=await api('/api/admin/usuarios?u='+userId);
   if(!r.ok){$('adminContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
   const users=r.usuarios||[];
-  if(!users.length){$('adminContent').innerHTML='<div class="empty-state"><div class="icon">👑</div><p>No hay usuarios registrados</p></div>';return}
-  let h='<div class="table-wrap"><div class="table-header"><h3>👤 '+users.length+' Usuarios</h3></div>';
-  h+='<table><thead><tr><th>ID</th><th>Usuario</th><th>Plan</th><th>Expira</th><th>Admin</th><th>Acciones</th></tr></thead><tbody>';
+  if(!users.length){$('adminContent').innerHTML='<div class="empty-state"><div class="icon">\ud83d\udc51</div><p>No hay usuarios registrados</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>\ud83d\udc64 '+users.length+' Usuarios</h3></div>';
+  h+='<table><thead><tr><th>ID</th><th>Usuario</th><th>Plan</th><th>Tipo</th><th>Expira</th><th>Registro</th><th>Admin</th><th>Acciones</th></tr></thead><tbody>';
   users.forEach(u=>{
-    const exp=u.fecha_expira?new Date(u.fecha_expira).toLocaleDateString('es'):'N/A';
-    const activo=u.es_admin||(!u.fecha_expira?false:new Date(u.fecha_expira)>new Date());
-    const planBadge=u.es_admin?'<span class="badge badge-info">Admin</span>':activo?'<span class="badge badge-success">'+u.plan+'</span>':'<span class="badge badge-danger">'+(u.plan||'sin plan')+' (exp)</span>';
-    h+=`<tr><td style="font-size:11px">${u.telegram_id}</td><td>${u.username||'-'}</td><td>${planBadge}</td><td style="font-size:11px">${exp}</td>`;
+    const exp=u.plan==='permanente'?'\u221e':(u.fecha_expira?new Date(u.fecha_expira).toLocaleDateString('es'):'N/A');
+    const reg=u.fecha_registro?new Date(u.fecha_registro).toLocaleDateString('es'):'?';
+    const activo=u.es_admin||u.plan==='permanente'||(!u.fecha_expira?false:new Date(u.fecha_expira)>new Date());
+    const planBadge=u.es_admin?'<span class="badge badge-info">Admin</span>':u.plan==='permanente'?'<span class="badge badge-success">Permanente</span>':activo?'<span class="badge badge-success">'+u.plan+'</span>':'<span class="badge badge-danger">'+(u.plan||'sin plan')+' (exp)</span>';
+    const tipoBadge=(u.tipo_membresia||'wsp+tg');
+    h+=`<tr><td style="font-size:11px">${u.telegram_id}</td><td>${u.username||'-'}</td><td>${planBadge}</td>`;
+    h+=`<td style="font-size:11px">${tipoBadge}</td>`;
+    h+=`<td style="font-size:11px">${exp}</td>`;
+    h+=`<td style="font-size:11px">${reg}</td>`;
     h+=`<td>${u.es_admin?'Si':'No'}</td>`;
-    h+=`<td style="display:flex;gap:5px;flex-wrap:wrap">`;
-    h+=`<button class="btn btn-sm btn-primary" onclick="adminActivar('${u.telegram_id}','semanal',7)">7d</button>`;
-    h+=`<button class="btn btn-sm btn-success" onclick="adminActivar('${u.telegram_id}','mensual',30)">30d</button>`;
+    h+=`<td style="display:flex;gap:4px;flex-wrap:wrap">`;
+    h+=`<button class="btn btn-sm btn-primary" onclick="adminActivar('${u.telegram_id}','semanal',7)" title="Semanal 7 dias">7d</button>`;
+    h+=`<button class="btn btn-sm btn-success" onclick="adminActivar('${u.telegram_id}','mensual',30)" title="Mensual 30 dias">30d</button>`;
+    h+=`<button class="btn btn-sm btn-outline" onclick="adminActivar('${u.telegram_id}','permanente',36500)" title="Permanente" style="border-color:var(--success);color:var(--success)">\u221e</button>`;
+    h+=`<button class="btn btn-sm btn-outline" onclick="showAdminTipo('${u.telegram_id}')" title="Tipo WSP/TG">\ud83d\udcf1</button>`;
     if(!u.es_admin)h+=`<button class="btn btn-sm btn-outline" onclick="adminSetAdmin('${u.telegram_id}',true)">+Admin</button>`;
     else h+=`<button class="btn btn-sm btn-danger" onclick="adminSetAdmin('${u.telegram_id}',false)">-Admin</button>`;
     h+=`</td></tr>`;
@@ -1011,8 +1097,25 @@ async function loadAdminUsuarios(){
   h+='</tbody></table></div>';
   $('adminContent').innerHTML=h;
 }
+function showAdminTipo(tid){
+  showModal(`<h3>\ud83d\udcf1 Tipo de Membresia</h3>
+    <p style="color:var(--text2);margin-bottom:15px">Selecciona para que plataforma(s) activar la membresia del usuario <b>${tid}</b>:</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:15px">
+      <button class="btn btn-success" onclick="adminSetTipo('${tid}','wsp')">\ud83d\udcf1 Solo WhatsApp</button>
+      <button class="btn btn-primary" onclick="adminSetTipo('${tid}','telegram')">\u2708\ufe0f Solo Telegram</button>
+      <button class="btn btn-outline" onclick="adminSetTipo('${tid}','wsp+tg')" style="border-color:var(--accent2);color:var(--accent2)">\ud83d\udcf1\u2708\ufe0f Ambas</button>
+    </div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button></div>`);
+}
+async function adminSetTipo(tid,tipo){
+  closeModal();
+  const r=await api('/api/admin/tipo_membresia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid,tipo})});
+  toast(r.ok?'Tipo actualizado a '+tipo:'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadAdminUsuarios();
+}
 async function adminActivar(tid,plan,dias){
-  if(!confirm('Activar '+plan+' ('+dias+' dias) para '+tid+'?'))return;
+  const label=plan==='permanente'?'permanente':plan+' ('+dias+' dias)';
+  if(!confirm('Activar '+label+' para '+tid+'?'))return;
   const r=await api('/api/admin/membresia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid,plan,dias})});
   toast(r.ok?'Membresia activada':'Error: '+(r.error||''),r.ok?'success':'error');
   if(r.ok)loadAdminUsuarios();
@@ -1027,9 +1130,21 @@ async function adminSetAdmin(tid,val){
 // --- INIT ---
 window.addEventListener('load',()=>{
   const uid=localStorage.getItem('panel_uid'),token=localStorage.getItem('panel_token');
+  const savedPlatform=localStorage.getItem('panel_platform');
   const urlP=new URLSearchParams(window.location.search),urlId=urlP.get('u');
-  if(uid&&token){userId=uid;showApp()}
-  else if(urlId){$('loginId').value=urlId}
+  if(uid&&token){
+    userId=uid;
+    if(savedPlatform)currentPlatform=savedPlatform;
+    showApp();
+  } else if(savedPlatform){
+    currentPlatform=savedPlatform;
+    selectPlatform(savedPlatform);
+    if(urlId)$('loginId').value=urlId;
+  } else if(urlId){
+    $('platformSelector').style.display='none';
+    $('authLogin').style.display='flex';
+    $('loginId').value=urlId;
+  }
 });
 </script>
 </body>

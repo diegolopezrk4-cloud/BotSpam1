@@ -1051,23 +1051,54 @@ async function listarChatsPersonales(sock, userId) {
             }
         }
     }
-    // 2. Fallback: intentar fetchAllContacts si existe (versiones antiguas de Baileys)
-    if (!chats.length) {
+    // 2. Si no hay chats en memoria, esperar un momento por si los eventos aun no han llegado
+    if (!chats.length && sock && sock.user) {
+        await delay(3000);
+        for (const key of Object.keys(clientChats)) {
+            if (!userId || key.startsWith(userId + "_")) {
+                const stored = clientChats[key];
+                for (const jid of Object.keys(stored)) {
+                    const c = stored[jid];
+                    const num = jid.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "");
+                    chats.push({ jid, nombre: c.name || num, numero: num });
+                }
+            }
+        }
+    }
+    // 3. Intentar fetchAllContacts, fetchStatus o store.contacts
+    if (!chats.length && sock) {
         try {
             const contacts = await sock.fetchAllContacts?.() || [];
             for (const c of contacts) {
                 if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
                     const num = c.id.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "");
-                    chats.push({
-                        jid: c.id,
-                        nombre: c.name || c.notify || num,
-                        numero: num,
-                    });
+                    chats.push({ jid: c.id, nombre: c.name || c.notify || num, numero: num });
                 }
             }
-        } catch (e) {
-            console.error(`Error en fetchAllContacts: ${e.message}`);
-        }
+        } catch (e) {}
+    }
+    // 4. Intentar obtener de sock.store.contacts si existe
+    if (!chats.length && sock && sock.store && sock.store.contacts) {
+        try {
+            const storeContacts = sock.store.contacts;
+            for (const jid of Object.keys(storeContacts)) {
+                if (jid.endsWith("@s.whatsapp.net") && jid !== "status@broadcast") {
+                    const c = storeContacts[jid];
+                    const num = jid.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "");
+                    chats.push({ jid, nombre: c.name || c.notify || num, numero: num });
+                }
+            }
+        } catch (e) {}
+    }
+    // 5. Fallback a chats guardados en la base de datos
+    if (!chats.length && userId) {
+        try {
+            const dbChats = db.getChatsPersonales(userId, "");
+            for (const c of dbChats) {
+                const num = c.jid.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "");
+                chats.push({ jid: c.jid, nombre: c.nombre || num, numero: num });
+            }
+        } catch (e) {}
     }
     // Eliminar duplicados por jid
     const seen = new Set();
