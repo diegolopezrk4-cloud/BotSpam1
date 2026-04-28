@@ -31,7 +31,7 @@ logger = logging.getLogger("JDWebPanel")
 
 API_ID = 35451933
 API_HASH = "2070761744260118720b34e6bf20f2eb"
-WEB_PORT = int(os.environ.get("WEB_PORT", 8080))
+WEB_PORT = int(os.environ.get("WEB_PORT", 3001))
 ADMIN_ID = 8001675901
 YAPE_NUM = "9776680776"
 PLANES = {
@@ -1279,7 +1279,7 @@ function toast(msg, type='info') {
 
 async function api(path, opts) {
   try {
-    const r = await fetch('/api/' + path, opts);
+    const r = await fetch('/tg/' + path, opts);
     return await r.json();
   } catch(e) {
     toast('Error de conexion: ' + e.message, 'error');
@@ -2081,54 +2081,54 @@ def create_app():
     app = web.Application(client_max_size=10 * 1024 * 1024)
     app.router.add_get("/", serve_panel)
 
-    app.router.add_get("/api/dashboard", api_dashboard)
+    app.router.add_get("/tg/dashboard", api_dashboard)
 
-    app.router.add_get("/api/cuentas", api_cuentas)
-    app.router.add_post("/api/cuenta/enviar_codigo", api_cuenta_enviar_codigo)
-    app.router.add_post("/api/cuenta/verificar_codigo", api_cuenta_verificar_codigo)
-    app.router.add_post("/api/cuenta/verificar_2fa", api_cuenta_verificar_2fa)
-    app.router.add_post("/api/cuenta/eliminar", api_cuenta_eliminar)
+    app.router.add_get("/tg/cuentas", api_cuentas)
+    app.router.add_post("/tg/cuenta/enviar_codigo", api_cuenta_enviar_codigo)
+    app.router.add_post("/tg/cuenta/verificar_codigo", api_cuenta_verificar_codigo)
+    app.router.add_post("/tg/cuenta/verificar_2fa", api_cuenta_verificar_2fa)
+    app.router.add_post("/tg/cuenta/eliminar", api_cuenta_eliminar)
 
-    app.router.add_get("/api/grupos", api_grupos)
-    app.router.add_post("/api/grupo/agregar", api_grupo_agregar)
-    app.router.add_post("/api/grupo/eliminar", api_grupo_eliminar)
-    app.router.add_post("/api/grupo/eliminar_todos", api_grupo_eliminar_todos)
-    app.router.add_post("/api/grupo/editar", api_grupo_editar)
-    app.router.add_get("/api/grupo/exportar", api_grupo_exportar)
+    app.router.add_get("/tg/grupos", api_grupos)
+    app.router.add_post("/tg/grupo/agregar", api_grupo_agregar)
+    app.router.add_post("/tg/grupo/eliminar", api_grupo_eliminar)
+    app.router.add_post("/tg/grupo/eliminar_todos", api_grupo_eliminar_todos)
+    app.router.add_post("/tg/grupo/editar", api_grupo_editar)
+    app.router.add_get("/tg/grupo/exportar", api_grupo_exportar)
 
-    app.router.add_get("/api/detectar/todos", api_detectar_todos)
-    app.router.add_get("/api/detectar/carpetas", api_detectar_carpetas)
-    app.router.add_get("/api/detectar/carpeta_grupos", api_detectar_carpeta_grupos)
-    app.router.add_get("/api/detectar/estado", api_detectar_estado)
-    app.router.add_post("/api/detectar/agregar", api_detectar_agregar)
-    app.router.add_post("/api/detectar/limpiar", api_detectar_limpiar)
+    app.router.add_get("/tg/detectar/todos", api_detectar_todos)
+    app.router.add_get("/tg/detectar/carpetas", api_detectar_carpetas)
+    app.router.add_get("/tg/detectar/carpeta_grupos", api_detectar_carpeta_grupos)
+    app.router.add_get("/tg/detectar/estado", api_detectar_estado)
+    app.router.add_post("/tg/detectar/agregar", api_detectar_agregar)
+    app.router.add_post("/tg/detectar/limpiar", api_detectar_limpiar)
 
-    app.router.add_get("/api/campanas", api_campanas)
-    app.router.add_post("/api/campana/crear", api_campana_crear)
-    app.router.add_post("/api/campana/editar", api_campana_editar)
-    app.router.add_post("/api/campana/eliminar", api_campana_eliminar)
-    app.router.add_post("/api/campana/config", api_campana_config)
-    app.router.add_post("/api/campana/clonar", api_campana_clonar)
-    app.router.add_post("/api/campana/resetear", api_campana_resetear)
+    app.router.add_get("/tg/campanas", api_campanas)
+    app.router.add_post("/tg/campana/crear", api_campana_crear)
+    app.router.add_post("/tg/campana/editar", api_campana_editar)
+    app.router.add_post("/tg/campana/eliminar", api_campana_eliminar)
+    app.router.add_post("/tg/campana/config", api_campana_config)
+    app.router.add_post("/tg/campana/clonar", api_campana_clonar)
+    app.router.add_post("/tg/campana/resetear", api_campana_resetear)
 
-    app.router.add_post("/api/iniciar", api_iniciar)
-    app.router.add_post("/api/detener", api_detener)
-    app.router.add_post("/api/detener_todas", api_detener_todas)
+    app.router.add_post("/tg/iniciar", api_iniciar)
+    app.router.add_post("/tg/detener", api_detener)
+    app.router.add_post("/tg/detener_todas", api_detener_todas)
 
-    app.router.add_get("/api/responder", api_responder)
-    app.router.add_post("/api/responder/config", api_responder_config)
-    app.router.add_post("/api/responder/toggle", api_responder_toggle)
+    app.router.add_get("/tg/responder", api_responder)
+    app.router.add_post("/tg/responder/config", api_responder_config)
+    app.router.add_post("/tg/responder/toggle", api_responder_toggle)
 
-    app.router.add_get("/api/historial", api_historial)
-    app.router.add_post("/api/historial/limpiar", api_historial_limpiar)
+    app.router.add_get("/tg/historial", api_historial)
+    app.router.add_post("/tg/historial/limpiar", api_historial_limpiar)
 
-    app.router.add_get("/api/perfil", api_perfil)
-    app.router.add_get("/api/planes", api_planes)
+    app.router.add_get("/tg/perfil", api_perfil)
+    app.router.add_get("/tg/planes", api_planes)
 
-    app.router.add_get("/api/admin/stats", api_admin_stats)
-    app.router.add_get("/api/admin/usuarios", api_admin_usuarios)
-    app.router.add_post("/api/admin/activar", api_admin_activar)
-    app.router.add_post("/api/admin/desactivar", api_admin_desactivar)
+    app.router.add_get("/tg/admin/stats", api_admin_stats)
+    app.router.add_get("/tg/admin/usuarios", api_admin_usuarios)
+    app.router.add_post("/tg/admin/activar", api_admin_activar)
+    app.router.add_post("/tg/admin/desactivar", api_admin_desactivar)
 
     os.makedirs("media", exist_ok=True)
     app.router.add_static("/media/", path="media", name="media")
