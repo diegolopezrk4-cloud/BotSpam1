@@ -582,15 +582,24 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- CUENTAS TELEGRAM -->
     <div class="section" id="sec-cuentastg">
       <h2>✈️ Cuentas Telegram</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Vincula tu cuenta de Telegram para spam via el bot de TG.</p>
-      <div style="margin-bottom:15px">
-        <p style="color:var(--text2);font-size:13px;line-height:1.8">Para vincular tu cuenta de Telegram:
-        <br>1. Abre el bot de Telegram: <b>@TuBot</b>
-        <br>2. Escribe <code style="background:var(--bg);padding:3px 8px;border-radius:4px">/vincular</code>
-        <br>3. Sigue las instrucciones del bot
-        </p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Registra tus cuentas de Telegram para usar en el panel.</p>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
+          <label>Nombre de la cuenta</label>
+          <input type="text" id="tgCuentaNombre" placeholder="Ej: micuenta1">
+        </div>
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
+          <label>Telefono (opcional)</label>
+          <input type="text" id="tgCuentaTel" placeholder="Ej: +51999999999">
+        </div>
+        <button class="btn btn-primary" onclick="agregarCuentaTg()">➕ Agregar Cuenta</button>
       </div>
-      <div id="cuentasTgContent" class="empty-state"><div class="icon">✈️</div><p>La vinculacion de cuentas de Telegram se gestiona desde el bot de TG.<br>Tu ID de Telegram: <b id="tgIdDisplay"></b></p></div>
+      <div style="background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border);font-size:13px;color:var(--text2)">
+        <p>💡 <b>Tambien puedes vincular cuentas desde el bot de Telegram:</b></p>
+        <p style="margin-top:5px">Usa el comando <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">/cuentas +51999999999 Nombre</code> en el bot para vincular con verificacion por codigo.</p>
+        <p style="margin-top:5px">Tu ID de Telegram: <b style="color:var(--accent2)" id="tgIdDisplay"></b></p>
+      </div>
+      <div id="cuentasTgContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- PLANTILLAS -->
@@ -1212,8 +1221,36 @@ async function loadStats(){
 }
 
 // --- CUENTAS TELEGRAM ---
-function loadCuentasTg(){
+async function loadCuentasTg(){
   if($('tgIdDisplay'))$('tgIdDisplay').textContent=userId;
+  const r=await api('/api/sesiones_tg?u='+userId);
+  if(!r.ok){$('cuentasTgContent').innerHTML='<div class="empty-state"><p>Error al cargar cuentas</p></div>';return}
+  const s=r.sesiones||[];
+  if(!s.length){$('cuentasTgContent').innerHTML='<div class="empty-state"><div class="icon">✈️</div><p>No tienes cuentas de Telegram registradas.<br>Agrega una usando el formulario de arriba.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>✈️ Cuentas ('+s.length+')</h3></div>';
+  h+='<table><thead><tr><th>#</th><th>Nombre</th><th>Telefono</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>';
+  s.forEach((x,i)=>{
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre)}</b></td><td>${esc(x.telefono||'—')}</td>`;
+    h+=`<td><span class="badge badge-success">Activa</span></td>`;
+    h+=`<td style="font-size:11px">${x.fecha||'—'}</td>`;
+    h+=`<td><button class="btn btn-sm btn-danger" onclick="eliminarCuentaTg('${esc(x.nombre)}')">🗑 Eliminar</button></td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  $('cuentasTgContent').innerHTML=h;
+}
+async function agregarCuentaTg(){
+  const nombre=$('tgCuentaNombre').value.trim();
+  const tel=$('tgCuentaTel').value.trim();
+  if(!nombre){toast('Ingresa un nombre para la cuenta','error');return}
+  const r=await api('/api/sesiones_tg/agregar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre,telefono:tel})});
+  toast(r.ok?'Cuenta TG registrada':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok){$('tgCuentaNombre').value='';$('tgCuentaTel').value='';loadCuentasTg()}
+}
+async function eliminarCuentaTg(nombre){
+  if(!confirm('Eliminar cuenta TG "'+nombre+'"?'))return;
+  const r=await api('/api/sesiones_tg/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre})});
+  toast(r.ok?'Cuenta eliminada':'Error',r.ok?'success':'error');
+  if(r.ok)loadCuentasTg();
 }
 
 // --- ADMIN ---

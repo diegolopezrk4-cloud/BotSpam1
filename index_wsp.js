@@ -1284,6 +1284,35 @@ if(uid())loadAll();
                 return res.end(JSON.stringify({ ok: true, msg: "Tipo de membresia actualizado a " + body.tipo }));
             }
 
+            // GET /api/sesiones_tg?u=ID — List TG sessions
+            if (url.pathname === "/api/sesiones_tg" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const sesiones = db.getSesionesTg(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, sesiones }));
+            }
+
+            // POST /api/sesiones_tg/agregar — Add TG session
+            if (url.pathname === "/api/sesiones_tg/agregar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                db.agregarSesionTg(body.u, body.nombre, body.telefono || '');
+                db.registrarActividad(body.u, 'tg_cuenta_agregada', 'Cuenta TG: ' + body.nombre + (body.telefono ? ' (' + body.telefono + ')' : ''));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Cuenta TG registrada" }));
+            }
+
+            // POST /api/sesiones_tg/eliminar — Delete TG session
+            if (url.pathname === "/api/sesiones_tg/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                db.eliminarSesionTg(body.u, body.nombre);
+                db.registrarActividad(body.u, 'tg_cuenta_eliminada', 'Cuenta TG: ' + body.nombre);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
             // GET /api/actividad?u=ID&limite=50 — Activity logs
             if (url.pathname === "/api/actividad" && req.method === "GET") {
                 const uid = url.searchParams.get("u");

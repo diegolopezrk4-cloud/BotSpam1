@@ -268,6 +268,14 @@ function init() {
             fecha TEXT DEFAULT (datetime('now')),
             PRIMARY KEY(user_id, cuenta, jid)
         );
+        CREATE TABLE IF NOT EXISTS sesiones_tg (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            nombre TEXT NOT NULL,
+            telefono TEXT DEFAULT '',
+            activa INTEGER DEFAULT 1,
+            fecha TEXT DEFAULT (datetime('now'))
+        );
         CREATE TABLE IF NOT EXISTS actividad_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT,
@@ -1366,7 +1374,28 @@ module.exports = {
     getLimitesMembresia,
     // Dashboard chart data
     getEnviosPorDia,
+    // Sesiones Telegram
+    getSesionesTg, agregarSesionTg, eliminarSesionTg, getAllSesionesTg,
 };
+
+// --- Sesiones Telegram ---
+function getSesionesTg(userId) {
+    return db.prepare("SELECT * FROM sesiones_tg WHERE user_id = ? AND activa = 1 ORDER BY id DESC").all(String(userId));
+}
+function agregarSesionTg(userId, nombre, telefono) {
+    const existing = db.prepare("SELECT id FROM sesiones_tg WHERE user_id = ? AND nombre = ? AND activa = 1").get(String(userId), nombre);
+    if (existing) {
+        db.prepare("UPDATE sesiones_tg SET telefono = ? WHERE id = ?").run(telefono || '', existing.id);
+    } else {
+        db.prepare("INSERT INTO sesiones_tg (user_id, nombre, telefono) VALUES (?, ?, ?)").run(String(userId), nombre, telefono || '');
+    }
+}
+function eliminarSesionTg(userId, nombre) {
+    db.prepare("UPDATE sesiones_tg SET activa = 0 WHERE user_id = ? AND nombre = ?").run(String(userId), nombre);
+}
+function getAllSesionesTg() {
+    return db.prepare("SELECT * FROM sesiones_tg WHERE activa = 1 ORDER BY id DESC").all();
+}
 
 // --- Activity Logs ---
 function registrarActividad(userId, accion, detalle) {
