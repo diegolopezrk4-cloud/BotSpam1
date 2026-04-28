@@ -1507,7 +1507,7 @@ function getLimitesMembresia(userId) {
 
 // --- Dashboard chart data ---
 function getEnviosPorDia(userId, dias) {
-    return db.prepare(`SELECT date(fecha) as dia, COUNT(*) as total, SUM(CASE WHEN resultado='enviado' OR resultado='exitoso' THEN exitosos ELSE 0 END) as ok, SUM(fallidos) as err FROM historial_envios_panel WHERE user_id = ? AND fecha >= date('now', '-' || ? || ' days') GROUP BY date(fecha) ORDER BY dia ASC`).all(String(userId), dias || 7);
+    return db.prepare(`SELECT date(fecha) as dia, COUNT(*) as total, SUM(exitosos) as ok, SUM(fallidos) as err FROM historial_envios_panel WHERE user_id = ? AND fecha >= date('now', '-' || ? || ' days') GROUP BY date(fecha) ORDER BY dia ASC`).all(String(userId), dias || 7);
 }
 
 // --- TG Bot data (read from titan.db) ---
