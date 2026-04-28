@@ -255,6 +255,14 @@ function init() {
             fecha TEXT DEFAULT (datetime('now')),
             expira TEXT DEFAULT (datetime('now', '+15 minutes'))
         );
+        CREATE TABLE IF NOT EXISTS chats_personales (
+            user_id TEXT NOT NULL,
+            cuenta TEXT NOT NULL,
+            jid TEXT NOT NULL,
+            nombre TEXT,
+            fecha TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY(user_id, cuenta, jid)
+        );
     `);
 
     // Migraciones
@@ -1040,8 +1048,8 @@ function duplicarMensaje(id) {
 // --- STATS POR GRUPO (MEJORADAS) ---
 function getGrupoStatsResumen(userId) {
     return db.prepare(`
-        SELECT grupo_link, enviados, fallidos, exitos,
-               CASE WHEN enviados > 0 THEN ROUND(exitos * 100.0 / enviados, 1) ELSE 0 END as tasa_exito,
+        SELECT grupo_link, enviados, fallidos, (enviados - fallidos) as exitos,
+               CASE WHEN enviados > 0 THEN ROUND((enviados - fallidos) * 100.0 / enviados, 1) ELSE 0 END as tasa_exito,
                ultima_fecha
         FROM grupo_stats WHERE user_id = ? ORDER BY enviados DESC LIMIT 50
     `).all(userId);
@@ -1173,6 +1181,31 @@ function resetPasswordConCodigo(code, newPasswordHash) {
     return true;
 }
 
+// --- CHATS PERSONALES (persistencia) ---
+function guardarChatsPersonales(userId, cuenta, chats) {
+    const ins = db.prepare("INSERT OR REPLACE INTO chats_personales (user_id, cuenta, jid, nombre) VALUES (?, ?, ?, ?)");
+    const tr = db.transaction(() => {
+        for (const c of chats) {
+            ins.run(String(userId), String(cuenta), c.jid, c.nombre || null);
+        }
+    });
+    tr();
+}
+function getChatsPersonales(userId, cuenta) {
+    if (cuenta) {
+        return db.prepare("SELECT jid, nombre FROM chats_personales WHERE user_id = ? AND cuenta = ?").all(String(userId), String(cuenta));
+    }
+    return db.prepare("SELECT jid, nombre FROM chats_personales WHERE user_id = ?").all(String(userId));
+}
+function eliminarChatPersonal(userId, cuenta, jid) {
+    db.prepare("DELETE FROM chats_personales WHERE user_id = ? AND cuenta = ? AND jid = ?").run(String(userId), String(cuenta), String(jid));
+}
+function agregarChatPersonalManual(userId, cuenta, numero) {
+    const jid = numero.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+    db.prepare("INSERT OR REPLACE INTO chats_personales (user_id, cuenta, jid, nombre) VALUES (?, ?, ?, ?)").run(String(userId), String(cuenta), jid, numero);
+    return jid;
+}
+
 function checkMembresiaTg(telegramId) {
     try {
         const Database = require("better-sqlite3");
@@ -1241,4 +1274,6 @@ module.exports = {
     getPanelUser, registrarPanelUser,
     // Recovery codes
     crearRecoveryCode, validarRecoveryCode, marcarRecoveryCodeUsado, resetPasswordConCodigo,
+    // Chats personales (persistencia)
+    guardarChatsPersonales, getChatsPersonales, eliminarChatPersonal, agregarChatPersonalManual,
 };

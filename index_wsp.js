@@ -714,7 +714,6 @@ poll();
             if (url.pathname === "/api/chats_personales" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 const cuentaParam = url.searchParams.get("cuenta");
-                // Buscar sock: cuenta especifica, botSock, o primera cuenta
                 let sock = null;
                 let cuentaUsada = null;
                 if (cuentaParam && userId) {
@@ -729,7 +728,20 @@ poll();
                 }
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
                 try {
-                    const chats = await motor.listarChatsPersonales(sock, userId);
+                    let chats = await motor.listarChatsPersonales(sock, userId);
+                    // Si obtuvo chats del live, guardar en DB para persistencia
+                    if (chats.length > 0 && cuentaUsada) {
+                        db.guardarChatsPersonales(userId, cuentaUsada, chats.map(c => ({ jid: c.jid, nombre: c.nombre })));
+                    }
+                    // Fallback a DB si live no tiene chats
+                    if (chats.length === 0 && userId) {
+                        const dbChats = db.getChatsPersonales(userId, cuentaUsada);
+                        chats = dbChats.map(c => ({
+                            jid: c.jid,
+                            nombre: c.nombre || c.jid.replace(/@s\.whatsapp\.net$/, ""),
+                            numero: c.jid.replace(/@s\.whatsapp\.net$/, ""),
+                        }));
+                    }
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, total: chats.length, chats, cuenta: cuentaUsada }));
                 } catch (e) {
@@ -769,6 +781,24 @@ poll();
                 });
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, message: "envio iniciado" }));
+            }
+
+            // POST /api/chat_personal_eliminar — Eliminar chat personal de la lista { u, cuenta, jid }
+            if (url.pathname === "/api/chat_personal_eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.jid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o jid" })); }
+                db.eliminarChatPersonal(body.u, body.cuenta || "", body.jid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/chat_personal_agregar — Agregar numero manualmente { u, cuenta, numero }
+            if (url.pathname === "/api/chat_personal_agregar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.numero) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o numero" })); }
+                const jid = db.agregarChatPersonalManual(body.u, body.cuenta || "", body.numero);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, jid }));
             }
 
             // POST /api/cancelar_envio_personal — Cancelar envio personal

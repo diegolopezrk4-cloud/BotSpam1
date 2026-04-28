@@ -382,8 +382,15 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="section" id="sec-enviopersonal">
       <h2>💬 Envio Personal</h2>
       <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia un mensaje a todos tus chats personales de WhatsApp.</p>
+      <div class="form-group" style="margin-bottom:15px">
+        <label>Cuenta WhatsApp</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select id="epCuenta" style="flex:1"><option value="">-- Cargando cuentas... --</option></select>
+          <button class="btn btn-primary" onclick="cargarChatsPersonales()">📋 Cargar Chats</button>
+        </div>
+      </div>
       <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn btn-primary" onclick="cargarChatsPersonales()">📋 Cargar Chats</button>
+        <button class="btn btn-outline" onclick="showAgregarNumero()">➕ Agregar Numero</button>
         <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Cancelar Envio</button>
       </div>
       <div class="form-group">
@@ -393,7 +400,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div style="margin-bottom:15px">
         <button class="btn btn-success" onclick="enviarPersonal()">📤 Enviar a Todos los Chats</button>
       </div>
-      <div id="personalContent" class="empty-state"><div class="icon">💬</div><p>Haz click en "Cargar Chats" para ver tus contactos</p></div>
+      <div id="personalContent" class="empty-state"><div class="icon">💬</div><p>Selecciona una cuenta y carga sus chats</p></div>
     </div>
 
     <!-- ENVIO A MIEMBROS -->
@@ -745,25 +752,69 @@ async function ejecutarAutoJoin(){
 }
 
 // --- ENVIO PERSONAL ---
-function loadEnvioPersonal(){}
+let epCuentaActual='';
+async function loadEnvioPersonal(){
+  const r=await api('/api/sesiones?u='+userId);
+  const sel=$('epCuenta');
+  sel.innerHTML='<option value="">-- Selecciona cuenta --</option>';
+  if(r.ok){
+    (r.sesiones||[]).forEach(s=>{
+      sel.innerHTML+=`<option value="${s.nombre}">${s.nombre} (${s.telefono||'?'})</option>`;
+    });
+  }
+}
 async function cargarChatsPersonales(){
+  const cuenta=$('epCuenta').value;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
+  epCuentaActual=cuenta;
   $('personalContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando chats...</div>';
-  const r=await api('/api/chats_personales?u='+userId);
+  const r=await api('/api/chats_personales?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
   if(!r.ok){$('personalContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'sin conexion')+'</p></div>';return}
   const chats=r.chats||[];
-  if(!chats.length){$('personalContent').innerHTML='<div class="empty-state"><div class="icon">💬</div><p>No se encontraron chats personales</p></div>';return}
-  let h='<div class="table-wrap"><div class="table-header"><h3>💬 '+chats.length+' Chats Personales (cuenta: '+(r.cuenta||'?')+')</h3></div>';
-  h+='<table><thead><tr><th>#</th><th>Nombre</th><th>Numero</th></tr></thead><tbody>';
-  chats.forEach((c,i)=>{h+=`<tr><td>${i+1}</td><td>${c.name||c.id||'?'}</td><td style="font-size:11px;color:var(--text2)">${c.id||''}</td></tr>`});
+  if(!chats.length){$('personalContent').innerHTML='<div class="empty-state"><div class="icon">💬</div><p>No se encontraron chats. Intenta agregar numeros manualmente.</p></div>';return}
+  renderChatsPersonales(chats,r.cuenta);
+}
+function renderChatsPersonales(chats,cuenta){
+  let h='<div class="table-wrap"><div class="table-header"><h3>💬 '+chats.length+' Chats Personales (cuenta: '+(cuenta||'?')+')</h3></div>';
+  h+='<table><thead><tr><th>#</th><th>Nombre</th><th>Numero</th><th>Accion</th></tr></thead><tbody>';
+  chats.forEach((c,i)=>{
+    const nombre=c.nombre||c.name||c.jid||'?';
+    const numero=c.numero||c.jid?.replace(/@s\.whatsapp\.net$/,'')||'';
+    const jid=c.jid||c.id||'';
+    h+=`<tr><td>${i+1}</td><td>${nombre}</td><td style="font-size:11px;color:var(--text2)">${numero}</td>`;
+    h+=`<td><button class="btn btn-sm btn-danger" onclick="eliminarChatPersonal('${jid}')">🗑</button></td></tr>`;
+  });
   h+='</tbody></table></div>';
   $('personalContent').innerHTML=h;
+}
+async function eliminarChatPersonal(jid){
+  if(!confirm('Eliminar este chat de la lista?'))return;
+  await api('/api/chat_personal_eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,cuenta:epCuentaActual,jid})});
+  toast('Chat eliminado','success');
+  cargarChatsPersonales();
+}
+function showAgregarNumero(){
+  showModal(`<h3>➕ Agregar Numero</h3>
+    <div class="form-group"><label>Numero de telefono (con codigo de pais)</label><input type="text" id="nuevoNumero" placeholder="51987654321"></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="agregarNumeroManual()">Agregar</button></div>`);
+}
+async function agregarNumeroManual(){
+  const num=$('nuevoNumero').value.trim();
+  if(!num){toast('Escribe un numero','error');return}
+  const cuenta=$('epCuenta').value||epCuentaActual;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
+  const r=await api('/api/chat_personal_agregar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,cuenta,numero:num})});
+  if(r.ok){closeModal();toast('Numero agregado','success');cargarChatsPersonales();}
+  else{toast('Error','error')}
 }
 async function enviarPersonal(){
   const msg=$('epMensaje').value.trim();
   if(!msg){toast('Escribe un mensaje primero','error');return}
+  const cuenta=$('epCuenta').value;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
   if(!confirm('Enviar este mensaje a TODOS tus chats personales?'))return;
   toast('Iniciando envio personal...','success');
-  const r=await api('/api/enviar_personal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje:msg})});
+  const r=await api('/api/enviar_personal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje:msg,cuenta})});
   toast(r.ok?'Envio personal iniciado':'Error: '+(r.error||''),r.ok?'success':'error');
 }
 async function cancelarEnvioPersonal(){
