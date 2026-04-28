@@ -1050,6 +1050,8 @@ function editarNombreMensaje(id, nombre) {
 }
 
 function eliminarMensaje(id) {
+    db.prepare("DELETE FROM envios_programados WHERE mensaje_id = ?").run(id);
+    db.prepare("DELETE FROM envios_unicos WHERE mensaje_id = ?").run(id);
     db.prepare("DELETE FROM mensajes WHERE id = ?").run(id);
 }
 
@@ -1103,8 +1105,8 @@ function duplicarMensaje(id) {
 // --- STATS POR GRUPO (MEJORADAS) ---
 function getGrupoStatsResumen(userId) {
     return db.prepare(`
-        SELECT grupo_link, enviados, fallidos, (enviados - fallidos) as exitos,
-               CASE WHEN enviados > 0 THEN ROUND((enviados - fallidos) * 100.0 / enviados, 1) ELSE 0 END as tasa_exito,
+        SELECT grupo_link, enviados, fallidos, enviados as exitos,
+               CASE WHEN (enviados + fallidos) > 0 THEN ROUND(enviados * 100.0 / (enviados + fallidos), 1) ELSE 0 END as tasa_exito,
                ultima_fecha
         FROM grupo_stats WHERE user_id = ? ORDER BY enviados DESC LIMIT 50
     `).all(userId);
