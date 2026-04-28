@@ -3669,6 +3669,44 @@ async def cb_wsp_cancelar_personal(call: types.CallbackQuery):
 
 
 # --- ENVIO A MIEMBROS DE GRUPO WSP ---
+# Cache de grupos detectados por usuario para paginacion y seleccion
+_miembros_grupos_cache = {}
+GRUPOS_POR_PAGINA = 10
+
+def _render_miembros_page(grupos, page):
+    total_grupos = len(grupos)
+    start = page * GRUPOS_POR_PAGINA
+    end = min(start + GRUPOS_POR_PAGINA, total_grupos)
+    total_pages = (total_grupos + GRUPOS_POR_PAGINA - 1) // GRUPOS_POR_PAGINA
+
+    texto = f"👥 *ENVIO A MIEMBROS* (pag {page+1}/{total_pages})\n\nSelecciona un grupo:\n\n"
+    botones = []
+    for i in range(start, end):
+        g = grupos[i]
+        nombre = g.get("subject", "Sin nombre")[:28]
+        size = g.get("size", "?")
+        texto += f"  {i+1}. {nombre} ({size})\n"
+        botones.append([InlineKeyboardButton(
+            text=f"{i+1}. {nombre} ({size})",
+            callback_data=f"wsp_msel_{i}"
+        )])
+    texto += f"\nTotal: {total_grupos} grupo(s)"
+    texto += "\nDelay: 10 seg entre cada DM (anti-ban)"
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅ Anterior", callback_data=f"wsp_mpag_{page-1}"))
+    if end < total_grupos:
+        nav.append(InlineKeyboardButton(text="Siguiente ➡", callback_data=f"wsp_mpag_{page+1}"))
+    if nav:
+        botones.append(nav)
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    return texto, InlineKeyboardMarkup(inline_keyboard=botones)
+
+
 @dp.callback_query(F.data == "wsp_miembros")
 async def cb_wsp_miembros(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
@@ -3688,63 +3726,64 @@ async def cb_wsp_miembros(call: types.CallbackQuery):
         await safe_edit(call.message, "No se encontraron grupos.", reply_markup=kb_back)
         return
 
-    texto = f"👥 *ENVIO A MIEMBROS*\n\nSelecciona un grupo para extraer sus miembros y enviarles DM:\n\n"
-    botones = []
-    for i, g in enumerate(grupos[:20], 1):
-        nombre = g.get("subject", "Sin nombre")[:30]
-        size = g.get("size", "?")
-        texto += f"  {i}. {nombre} ({size} miembros)\n"
-        botones.append([InlineKeyboardButton(
-            text=f"{i}. {nombre} ({size})",
-            callback_data=f"wsp_mgrp_{g['jid'][:40]}"
-        )])
-    if len(grupos) > 20:
-        texto += f"  ... y {len(grupos) - 20} grupos mas\n"
-    texto += "\nDelay: 10 seg entre cada DM (anti-ban)"
-    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
-    kb = InlineKeyboardMarkup(inline_keyboard=botones)
-    if len(texto) > 4000:
-        texto = texto[:4000] + "\n(truncado)"
+    _miembros_grupos_cache[call.from_user.id] = grupos
+    texto, kb = _render_miembros_page(grupos, 0)
+    await safe_edit(call.message, texto, reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("wsp_mpag_"))
+async def cb_wsp_miembros_pag(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    page = int(call.data.replace("wsp_mpag_", ""))
+    grupos = _miembros_grupos_cache.get(call.from_user.id, [])
+    if not grupos:
+        await call.answer("Vuelve a cargar los grupos")
+        return
+    texto, kb = _render_miembros_page(grupos, page)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
 
 
-@dp.callback_query(F.data.startswith("wsp_mgrp_"))
-async def cb_wsp_miembros_grupo(call: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data.startswith("wsp_msel_"))
+async def cb_wsp_miembros_grupo(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
-    grupo_jid = call.data.replace("wsp_mgrp_", "")
-    # Si el JID fue truncado, intentar completarlo
-    if not grupo_jid.endswith("@g.us"):
-        grupo_jid += "@g.us"
+    idx = int(call.data.replace("wsp_msel_", ""))
+    grupos = _miembros_grupos_cache.get(call.from_user.id, [])
+    if not grupos or idx >= len(grupos):
+        await call.answer("Grupo no encontrado, vuelve a cargar")
+        return
+    grupo = grupos[idx]
+    grupo_jid = grupo.get("jid", "")
+    grupo_nombre = grupo.get("subject", "Sin nombre")
+
     import wsp_bridge as wsp
+    await safe_edit(call.message, f"🔍 Buscando miembros de '{grupo_nombre}'...")
+    await call.answer()
     r = await wsp.wsp_miembros_grupo(call.from_user.id, grupo_jid)
-    botones_back = [[InlineKeyboardButton(text="🔙 Volver a grupos", callback_data="wsp_miembros")]]
+    botones_back = [
+        [InlineKeyboardButton(text="🔙 Volver a grupos", callback_data="wsp_miembros")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
     kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
     if not r.get("ok"):
         await safe_edit(call.message, f"Error: {r.get('error')}", reply_markup=kb_back)
-        await call.answer()
         return
 
     total = r.get("total", 0)
     miembros = r.get("miembros", [])
-    texto = f"👥 *Miembros del grupo: {total}*\n\n"
+    texto = f"👥 *Miembros de {grupo_nombre}: {total}*\n\n"
     for i, m in enumerate(miembros[:30], 1):
         admin_tag = " (admin)" if m.get("admin") else ""
         texto += f"  {i}. {m.get('numero', '?')}{admin_tag}\n"
     if total > 30:
         texto += f"  ... y {total - 30} mas\n"
 
-    texto += f"\nPara enviar DM a todos los miembros:\n/wspmiembros {grupo_jid} Tu mensaje aqui\n\nDelay: 10 seg entre cada envio (anti-ban)"
-    botones = [
-        [InlineKeyboardButton(text="🔙 Volver a grupos", callback_data="wsp_miembros")],
-        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
-    ]
-    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    texto += f"\nPara enviar DM a todos:\n/wspmiembros {grupo_jid} Tu mensaje aqui\n\nDelay: 10 seg entre cada envio (anti-ban)"
     if len(texto) > 4000:
         texto = texto[:4000] + "\n(truncado)"
-    await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_edit(call.message, texto, reply_markup=kb_back)
 
 
 @dp.message(Command("wspmiembros"))

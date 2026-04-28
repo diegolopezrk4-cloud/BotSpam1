@@ -735,7 +735,7 @@ poll();
                 try {
                     const started = await motor.enviarAPersonales(userId, mensaje, null, sock);
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
+                    return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo o no hay chats" }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
