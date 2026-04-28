@@ -1180,6 +1180,7 @@ if(uid())loadAll();
                 const crypto = require("crypto");
                 const hash = crypto.createHash("sha256").update(body.password).digest("hex");
                 db.registrarPanelUserCompleto(body.telegram_id, hash, body.username);
+                db.registrarActividad(body.telegram_id, 'registro', 'Usuario registrado: ' + body.username);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, msg: "Registro exitoso. Demo de 1 dia activado." }));
             }
@@ -1195,6 +1196,7 @@ if(uid())loadAll();
                 if (user.password !== hash) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "password_incorrecta" })); }
                 const token = crypto.randomBytes(32).toString("hex");
                 const membresia = db.checkMembresiPanel(body.telegram_id);
+                db.registrarActividad(body.telegram_id, 'login', 'Inicio de sesion');
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, token, telegram_id: body.telegram_id, es_admin: user.es_admin ? true : false, membresia }));
             }
@@ -1255,6 +1257,7 @@ if(uid())loadAll();
                 const admin = db.getPanelUser(body.admin_id);
                 if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
                 db.activarMembresiPanel(body.telegram_id, body.plan, parseInt(body.dias));
+                db.registrarActividad(body.admin_id, 'admin_membresia', 'Activar ' + body.plan + ' para ' + body.telegram_id);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, msg: "Membresia actualizada" }));
             }
@@ -1279,6 +1282,90 @@ if(uid())loadAll();
                 db.setTipoMembresia(body.telegram_id, body.tipo);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, msg: "Tipo de membresia actualizado a " + body.tipo }));
+            }
+
+            // GET /api/actividad?u=ID&limite=50 — Activity logs
+            if (url.pathname === "/api/actividad" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const limite = parseInt(url.searchParams.get("limite")) || 50;
+                const logs = db.getActividadUsuario(uid, limite);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs }));
+            }
+
+            // GET /api/actividad_admin?u=ADMIN_ID — All activity logs (admin only)
+            if (url.pathname === "/api/actividad_admin" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!adminId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const admin = db.getPanelUser(adminId);
+                if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
+                const logs = db.getActividadTodos(parseInt(url.searchParams.get("limite")) || 100);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs }));
+            }
+
+            // GET /api/plantillas?u=ID — Get message templates
+            if (url.pathname === "/api/plantillas" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const plantillas = db.getPlantillas(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, plantillas }));
+            }
+
+            // POST /api/plantillas/crear — Create a template
+            if (url.pathname === "/api/plantillas/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                db.crearPlantilla(body.u, body.nombre, body.mensaje);
+                db.registrarActividad(body.u, 'plantilla_creada', 'Plantilla: ' + body.nombre);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/plantillas/del — Delete a template
+            if (url.pathname === "/api/plantillas/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                db.eliminarPlantilla(body.u, body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/historial_panel?u=ID — Send history with filters
+            if (url.pathname === "/api/historial_panel" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const filtros = {
+                    tipo: url.searchParams.get("tipo") || null,
+                    resultado: url.searchParams.get("resultado") || null,
+                    desde: url.searchParams.get("desde") || null,
+                    hasta: url.searchParams.get("hasta") || null,
+                    limite: parseInt(url.searchParams.get("limite")) || 100
+                };
+                const historial = db.getHistorialEnvios(uid, filtros);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, historial }));
+            }
+
+            // GET /api/limites?u=ID — Membership limits
+            if (url.pathname === "/api/limites" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const limites = db.getLimitesMembresia(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, limites }));
+            }
+
+            // GET /api/envios_chart?u=ID&dias=7 — Chart data for dashboard
+            if (url.pathname === "/api/envios_chart" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const dias = parseInt(url.searchParams.get("dias")) || 7;
+                const data = db.getEnviosPorDia(uid, dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
             }
 
             // Endpoint no encontrado

@@ -268,6 +268,33 @@ function init() {
             fecha TEXT DEFAULT (datetime('now')),
             PRIMARY KEY(user_id, cuenta, jid)
         );
+        CREATE TABLE IF NOT EXISTS actividad_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            accion TEXT,
+            detalle TEXT DEFAULT '',
+            fecha TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS plantillas_msg (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            nombre TEXT,
+            mensaje TEXT,
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES panel_users(telegram_id)
+        );
+        CREATE TABLE IF NOT EXISTS historial_envios_panel (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            tipo TEXT DEFAULT 'grupo',
+            destino TEXT DEFAULT '',
+            mensaje_preview TEXT DEFAULT '',
+            resultado TEXT DEFAULT 'enviado',
+            total INTEGER DEFAULT 0,
+            exitosos INTEGER DEFAULT 0,
+            fallidos INTEGER DEFAULT 0,
+            fecha TEXT DEFAULT (datetime('now'))
+        );
     `);
 
     // Migraciones
@@ -1329,4 +1356,67 @@ module.exports = {
     crearRecoveryCode, validarRecoveryCode, marcarRecoveryCodeUsado, resetPasswordConCodigo,
     // Chats personales (persistencia)
     guardarChatsPersonales, getChatsPersonales, eliminarChatPersonal, agregarChatPersonalManual,
+    // Activity logs
+    registrarActividad, getActividadUsuario, getActividadTodos,
+    // Message templates
+    getPlantillas, crearPlantilla, eliminarPlantilla,
+    // Send history with filters
+    getHistorialEnvios, registrarHistorialEnvio,
+    // Membership sending limits
+    getLimitesMembresia,
+    // Dashboard chart data
+    getEnviosPorDia,
 };
+
+// --- Activity Logs ---
+function registrarActividad(userId, accion, detalle) {
+    db.prepare("INSERT INTO actividad_log (user_id, accion, detalle, fecha) VALUES (?, ?, ?, datetime('now'))").run(String(userId), accion, detalle || '');
+}
+function getActividadUsuario(userId, limite) {
+    return db.prepare("SELECT * FROM actividad_log WHERE user_id = ? ORDER BY id DESC LIMIT ?").all(String(userId), limite || 50);
+}
+function getActividadTodos(limite) {
+    return db.prepare("SELECT * FROM actividad_log ORDER BY id DESC LIMIT ?").all(limite || 100);
+}
+
+// --- Message Templates ---
+function getPlantillas(userId) {
+    return db.prepare("SELECT * FROM plantillas_msg WHERE user_id = ? ORDER BY id DESC").all(String(userId));
+}
+function crearPlantilla(userId, nombre, mensaje) {
+    db.prepare("INSERT INTO plantillas_msg (user_id, nombre, mensaje) VALUES (?, ?, ?)").run(String(userId), nombre, mensaje);
+}
+function eliminarPlantilla(userId, id) {
+    db.prepare("DELETE FROM plantillas_msg WHERE id = ? AND user_id = ?").run(id, String(userId));
+}
+
+// --- Send History ---
+function getHistorialEnvios(userId, filtros) {
+    let sql = "SELECT * FROM historial_envios_panel WHERE user_id = ?";
+    const params = [String(userId)];
+    if (filtros && filtros.tipo) { sql += " AND tipo = ?"; params.push(filtros.tipo); }
+    if (filtros && filtros.resultado) { sql += " AND resultado = ?"; params.push(filtros.resultado); }
+    if (filtros && filtros.desde) { sql += " AND fecha >= ?"; params.push(filtros.desde); }
+    if (filtros && filtros.hasta) { sql += " AND fecha <= ?"; params.push(filtros.hasta); }
+    sql += " ORDER BY id DESC LIMIT ?";
+    params.push(filtros && filtros.limite ? filtros.limite : 100);
+    return db.prepare(sql).all(...params);
+}
+function registrarHistorialEnvio(userId, tipo, destino, msgPreview, resultado, total, exitosos, fallidos) {
+    db.prepare("INSERT INTO historial_envios_panel (user_id, tipo, destino, mensaje_preview, resultado, total, exitosos, fallidos) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(String(userId), tipo, destino, (msgPreview || '').slice(0, 100), resultado, total || 0, exitosos || 0, fallidos || 0);
+}
+
+// --- Membership Limits ---
+function getLimitesMembresia(userId) {
+    const user = getPanelUser(userId);
+    if (!user) return { max_envios_dia: 10, max_grupos: 5 };
+    if (user.es_admin || user.plan === 'permanente') return { max_envios_dia: 999999, max_grupos: 999999 };
+    if (user.plan === 'mensual') return { max_envios_dia: 500, max_grupos: 50 };
+    if (user.plan === 'semanal') return { max_envios_dia: 200, max_grupos: 25 };
+    return { max_envios_dia: 10, max_grupos: 5 };
+}
+
+// --- Dashboard chart data ---
+function getEnviosPorDia(userId, dias) {
+    return db.prepare(`SELECT date(fecha) as dia, COUNT(*) as total, SUM(CASE WHEN resultado='enviado' OR resultado='exitoso' THEN exitosos ELSE 0 END) as ok, SUM(fallidos) as err FROM historial_envios_panel WHERE user_id = ? AND fecha >= date('now', '-' || ? || ' days') GROUP BY date(fecha) ORDER BY dia ASC`).all(String(userId), dias || 7);
+}

@@ -20,6 +20,23 @@
   --border: #2d2d5e;
   --radius: 12px;
 }
+[data-theme="light"] {
+  --bg: #f0f2f5;
+  --bg2: #ffffff;
+  --bg3: #e8eaf0;
+  --accent: #6c5ce7;
+  --accent2: #5a4bd1;
+  --danger: #e94560;
+  --success: #00b894;
+  --warn: #e67e22;
+  --text: #1a1a2e;
+  --text2: #555770;
+  --border: #d1d5db;
+}
+[data-theme="light"] .auth-container { background: linear-gradient(135deg, #e8eaf0 0%, #d1d5e8 50%, #e8eaf0 100%); }
+[data-theme="light"] .auth-card .btn-main { color: white; }
+[data-theme="light"] table tr:hover { background: rgba(108,92,231,0.08); }
+[data-theme="light"] .toast { background: #fff; }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
 
@@ -208,9 +225,33 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 .status-dot.online { background: var(--success); box-shadow: 0 0 8px var(--success); }
 .status-dot.offline { background: var(--danger); }
 .platform-card:hover { border-color: var(--accent) !important; transform: translateY(-3px); box-shadow: 0 8px 25px rgba(108,92,231,0.3); }
+.theme-toggle { position: fixed; top: 15px; right: 15px; z-index: 9998; background: var(--bg2); border: 1px solid var(--border); border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; transition: all 0.3s; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.theme-toggle:hover { transform: scale(1.1); border-color: var(--accent); }
+.lang-toggle { position: fixed; top: 15px; right: 65px; z-index: 9998; background: var(--bg2); border: 1px solid var(--border); border-radius: 20px; padding: 5px 12px; cursor: pointer; font-size: 13px; font-weight: 700; color: var(--text); transition: all 0.3s; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.lang-toggle:hover { border-color: var(--accent); color: var(--accent2); }
+.notif-bell { position: fixed; top: 15px; right: 115px; z-index: 9998; background: var(--bg2); border: 1px solid var(--border); border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; transition: all 0.3s; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.notif-bell:hover { transform: scale(1.1); border-color: var(--accent); }
+.notif-bell .notif-count { position: absolute; top: -4px; right: -4px; background: var(--danger); color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+.notif-panel { display: none; position: fixed; top: 60px; right: 15px; width: 320px; max-height: 400px; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; z-index: 9998; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+.notif-panel.show { display: block; }
+.notif-item { padding: 12px 15px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.notif-item:last-child { border-bottom: none; }
+.notif-item .notif-time { color: var(--text2); font-size: 11px; margin-top: 4px; }
+.tg-id-help { background: var(--bg); border: 1px solid var(--accent); border-radius: 12px; padding: 18px; margin: 15px 0; text-align: left; }
+.tg-id-help h4 { color: var(--accent2); margin-bottom: 10px; font-size: 15px; }
+.tg-id-help ol { padding-left: 20px; font-size: 13px; color: var(--text2); line-height: 2; }
+.tg-id-help a { color: var(--accent2); font-weight: bold; text-decoration: none; }
+.tg-id-help a:hover { text-decoration: underline; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
+
+<!-- GLOBAL CONTROLS -->
+<div class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Modo oscuro/claro">🌙</div>
+<div class="lang-toggle" id="langToggle" onclick="toggleLang()" title="Idioma">ES</div>
+<div class="notif-bell" id="notifBell" onclick="toggleNotifs()" style="display:none" title="Notificaciones">🔔<span class="notif-count" id="notifCount" style="display:none">0</span></div>
+<div class="notif-panel" id="notifPanel"><div style="padding:12px 15px;border-bottom:1px solid var(--border);font-weight:700;color:var(--accent2)">Notificaciones</div><div id="notifList"><div class="notif-item" style="color:var(--text2)">Sin notificaciones</div></div></div>
 
 <!-- PLATFORM SELECTOR -->
 <div class="auth-container" id="platformSelector">
@@ -256,11 +297,20 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 
 <!-- AUTH: REGISTER -->
 <div class="auth-container" id="authRegister" style="display:none">
-  <div class="auth-card">
+  <div class="auth-card" style="max-width:500px">
     <div class="logo">📝</div>
     <h1>Crear Cuenta</h1>
     <p class="subtitle">Registrate para acceder al panel — Demo 1 dia gratis</p>
-    <input type="text" id="regId" placeholder="Tu ID de Telegram" autocomplete="off">
+    <div class="tg-id-help" id="tgIdHelp">
+      <h4>📌 Como obtener tu ID de Telegram</h4>
+      <ol>
+        <li>Abre Telegram y busca el bot: <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a></li>
+        <li>Inicia el bot y te dara tu <b>ID numerico</b></li>
+        <li>Copia ese numero y pegalo aqui abajo</li>
+      </ol>
+      <p style="margin-top:10px;font-size:12px;color:var(--text2)">Tambien puedes contactar al creador para ayuda: <a href="https://t.me/JhonnyVip05" target="_blank">@JhonnyVip05</a></p>
+    </div>
+    <input type="text" id="regId" placeholder="Tu ID de Telegram (numerico)" autocomplete="off">
     <input type="text" id="regUsername" placeholder="Nombre de usuario" autocomplete="off">
     <input type="password" id="regPass" placeholder="Crear contrasena">
     <input type="password" id="regPass2" placeholder="Confirmar contrasena">
@@ -301,13 +351,18 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="enviomiembros"><span class="icon">👥</span><span>Envio a Miembros</span></a>
       <a href="#" data-section="programados"><span class="icon">⏰</span><span>Programados</span></a>
       <a href="#" data-section="campanas"><span class="icon">📋</span><span>Campanas</span></a>
+      <div class="nav-group">Herramientas</div>
+      <a href="#" data-section="plantillas"><span class="icon">📋</span><span>Plantillas</span></a>
+      <a href="#" data-section="historial"><span class="icon">📜</span><span>Historial</span></a>
       <div class="nav-group">Configuracion</div>
       <a href="#" data-section="config"><span class="icon">⚙</span><span>Config Envio</span></a>
       <a href="#" data-section="listanegra"><span class="icon">🚫</span><span>Lista Negra</span></a>
       <a href="#" data-section="autoresp"><span class="icon">🤖</span><span>Auto-Responder</span></a>
       <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas</span></a>
+      <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
       <div class="nav-group admin-only" style="display:none">Admin</div>
       <a href="#" data-section="admin" class="admin-only" style="display:none"><span class="icon">👑</span><span>Admin Panel</span></a>
+      <a href="#" data-section="adminlogs" class="admin-only" style="display:none"><span class="icon">📋</span><span>Logs Global</span></a>
     </nav>
     <div class="bottom-actions">
       <button onclick="showCambiarPass()">🔑 <span>Cambiar Contrasena</span></button>
@@ -328,6 +383,22 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <div class="table-wrap">
           <div class="table-header"><h3>📨 Tasa de Entrega</h3></div>
           <div id="dashTasa" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-top:15px">
+        <div class="table-header"><h3>📊 Envios por Dia (ultimos 7 dias)</h3>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm btn-outline" onclick="loadChart(7)">7d</button>
+            <button class="btn btn-sm btn-outline" onclick="loadChart(14)">14d</button>
+            <button class="btn btn-sm btn-outline" onclick="loadChart(30)">30d</button>
+          </div>
+        </div>
+        <div style="padding:15px;height:250px"><canvas id="enviosChart"></canvas></div>
+      </div>
+      <div class="grid" style="margin-top:15px">
+        <div class="card" id="limitesCard">
+          <div class="card-title">📦 Limites de tu Plan</div>
+          <div id="limitesInfo" style="margin-top:10px;font-size:14px;color:var(--text2)">Cargando...</div>
         </div>
       </div>
     </div>
@@ -469,6 +540,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- STATS -->
     <div class="section" id="sec-stats">
       <h2>📈 Estadisticas por Grupo</h2>
+      <div style="margin-bottom:15px"><button class="btn btn-success" onclick="exportarStatsCSV()">📥 Exportar CSV</button></div>
       <div id="statsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
@@ -499,6 +571,11 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           </div>
         </div>
       </div>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--success)">
+        <h3 style="margin-bottom:10px;color:var(--success)">💳 Pagos con Yape</h3>
+        <p style="color:var(--text2);font-size:13px">Los clientes pagan por Yape al numero: <b style="color:var(--success);font-size:16px">9776680776</b></p>
+        <p style="color:var(--text2);font-size:12px;margin-top:5px">Recibe el comprobante y activa la membresia manualmente desde esta tabla.</p>
+      </div>
       <div id="adminContent" class="empty-state"><div class="icon">👑</div><p>Cargando usuarios...</p></div>
     </div>
 
@@ -516,6 +593,70 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div id="cuentasTgContent" class="empty-state"><div class="icon">✈️</div><p>La vinculacion de cuentas de Telegram se gestiona desde el bot de TG.<br>Tu ID de Telegram: <b id="tgIdDisplay"></b></p></div>
     </div>
 
+    <!-- PLANTILLAS -->
+    <div class="section" id="sec-plantillas">
+      <h2>📋 Plantillas de Mensajes</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Guarda mensajes frecuentes para reutilizarlos rapido.</p>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearPlantilla()">➕ Nueva Plantilla</button></div>
+      <div id="plantillasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- HISTORIAL -->
+    <div class="section" id="sec-historial">
+      <h2>📜 Historial de Envios</h2>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-group" style="margin-bottom:0;min-width:120px">
+          <label>Tipo</label>
+          <select id="histFiltroTipo" style="padding:6px 10px;font-size:13px">
+            <option value="">Todos</option>
+            <option value="grupo">Grupo</option>
+            <option value="personal">Personal</option>
+            <option value="miembros">Miembros</option>
+            <option value="campana">Campana</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;min-width:120px">
+          <label>Resultado</label>
+          <select id="histFiltroRes" style="padding:6px 10px;font-size:13px">
+            <option value="">Todos</option>
+            <option value="enviado">Enviado</option>
+            <option value="exitoso">Exitoso</option>
+            <option value="fallido">Fallido</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;min-width:130px">
+          <label>Desde</label>
+          <input type="date" id="histDesde" style="padding:6px 10px;font-size:13px">
+        </div>
+        <div class="form-group" style="margin-bottom:0;min-width:130px">
+          <label>Hasta</label>
+          <input type="date" id="histHasta" style="padding:6px 10px;font-size:13px">
+        </div>
+        <button class="btn btn-primary" onclick="loadHistorial()">🔍 Filtrar</button>
+        <button class="btn btn-success" onclick="exportarHistorialCSV()">📥 CSV</button>
+      </div>
+      <div id="historialContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- ACTIVIDAD -->
+    <div class="section" id="sec-actividad">
+      <h2>📝 Registro de Actividad</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Tu historial de acciones recientes en el panel.</p>
+      <div style="margin-bottom:15px"><button class="btn btn-success" onclick="exportarActividadCSV()">📥 Exportar CSV</button></div>
+      <div id="actividadContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- ADMIN LOGS -->
+    <div class="section" id="sec-adminlogs">
+      <h2>📋 Logs de Actividad Global</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Toda la actividad de todos los usuarios (solo admin).</p>
+      <div style="margin-bottom:15px">
+        <button class="btn btn-primary" onclick="loadAdminLogs()">🔄 Actualizar</button>
+        <button class="btn btn-success" onclick="exportarAdminLogsCSV()">📥 Exportar CSV</button>
+      </div>
+      <div id="adminLogsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
     <!-- MEMBRESIA BLOQUEADA OVERLAY -->
     <div id="membresiaOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:9999;display:none;align-items:center;justify-content:center">
       <div style="background:var(--bg2);padding:40px;border-radius:15px;text-align:center;max-width:500px;margin:20px">
@@ -531,6 +672,12 @@ table tr:hover { background: rgba(108,92,231,0.05); }
             <div style="color:var(--accent2);font-weight:bold">Mensual</div>
             <div style="font-size:22px;font-weight:bold;margin:5px 0">S/ 30</div>
           </div>
+        </div>
+        <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--success)">
+          <p style="color:var(--success);font-weight:bold;margin-bottom:8px">💳 Pagar con Yape</p>
+          <p style="color:var(--text);font-size:14px;margin-bottom:5px">Envia el monto al numero Yape:</p>
+          <p style="font-size:22px;font-weight:bold;color:var(--success);margin:8px 0">9776680776</p>
+          <p style="color:var(--text2);font-size:12px">Luego envia el comprobante al creador para activar tu cuenta.</p>
         </div>
         <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
           <p style="color:var(--accent2);font-weight:bold;margin-bottom:8px">📞 Contactar al Creador</p>
@@ -674,6 +821,10 @@ async function showApp(){
     localStorage.setItem('panel_admin','1');
   }
   loadDashboard();
+  loadLimites();
+  loadChart(7);
+  startNotifPolling();
+  if(currentLang!=='es')applyLang();
 }
 
 function showCambiarPass(){
@@ -702,7 +853,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs};
     if(loaders[sec])loaders[sec]();
   });
 });
@@ -1125,6 +1276,257 @@ async function adminSetAdmin(tid,val){
   const r=await api('/api/admin/set_admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid,es_admin:val})});
   toast(r.ok?'Admin actualizado':'Error: '+(r.error||''),r.ok?'success':'error');
   if(r.ok)loadAdminUsuarios();
+}
+
+// --- THEME TOGGLE ---
+function toggleTheme(){
+  const cur=document.documentElement.getAttribute('data-theme');
+  const next=cur==='light'?'dark':'light';
+  document.documentElement.setAttribute('data-theme',next==='dark'?'':'light');
+  localStorage.setItem('panel_theme',next);
+  $('themeToggle').textContent=next==='light'?'☀️':'🌙';
+  if(window._chartInstance)loadChart();
+}
+(function(){
+  const t=localStorage.getItem('panel_theme');
+  if(t==='light'){document.documentElement.setAttribute('data-theme','light');document.getElementById('themeToggle').textContent='☀️'}
+})();
+
+// --- MULTI-LANGUAGE ---
+let currentLang='es';
+const LANG={
+  es:{dashboard:'Dashboard',cuentas:'Cuentas WSP',grupos:'Grupos',mensajes:'Mensajes',envios:'Envio Unico',enviopersonal:'Envio Personal',campanas:'Campanas',config:'Config Envio',stats:'Estadisticas',admin:'Admin Panel',plantillas:'Plantillas',historial:'Historial',actividad:'Actividad',logout:'Cerrar Sesion',login:'Iniciar Sesion',register:'Registrarse',send:'Enviar',cancel:'Cancelar',delete:'Eliminar',save:'Guardar',create:'Crear',loading:'Cargando...',nodata:'Sin datos'},
+  en:{dashboard:'Dashboard',cuentas:'WSP Accounts',grupos:'Groups',mensajes:'Messages',envios:'Single Send',enviopersonal:'Personal Send',campanas:'Campaigns',config:'Send Config',stats:'Statistics',admin:'Admin Panel',plantillas:'Templates',historial:'History',actividad:'Activity',logout:'Logout',login:'Login',register:'Register',send:'Send',cancel:'Cancel',delete:'Delete',save:'Save',create:'Create',loading:'Loading...',nodata:'No data'}
+};
+function toggleLang(){
+  currentLang=currentLang==='es'?'en':'es';
+  localStorage.setItem('panel_lang',currentLang);
+  $('langToggle').textContent=currentLang.toUpperCase();
+  applyLang();
+}
+function applyLang(){
+  const L=LANG[currentLang];
+  document.querySelectorAll('.sidebar nav a[data-section]').forEach(a=>{
+    const sec=a.dataset.section;
+    const key={dashboard:'dashboard',cuentas:'cuentas',cuentastg:'cuentas',grupos:'grupos',mensajes:'mensajes',envios:'envios',enviopersonal:'enviopersonal',enviomiembros:'enviopersonal',programados:'envios',campanas:'campanas',config:'config',listanegra:'config',autoresp:'config',stats:'stats',admin:'admin',adminlogs:'admin',plantillas:'plantillas',historial:'historial',actividad:'actividad'}[sec];
+    if(key&&L[key]){const sp=a.querySelectorAll('span');if(sp.length>1)sp[1].textContent=L[key]}
+  });
+}
+(function(){const l=localStorage.getItem('panel_lang');if(l){currentLang=l;document.getElementById('langToggle').textContent=l.toUpperCase()}})();
+
+// --- NOTIFICATIONS ---
+let notifications=[];
+let notifUnread=0;
+function toggleNotifs(){
+  const p=$('notifPanel');
+  p.classList.toggle('show');
+  if(p.classList.contains('show')){notifUnread=0;updateNotifBadge()}
+}
+function addNotification(msg,type){
+  notifications.unshift({msg,type:type||'info',time:new Date().toLocaleTimeString()});
+  if(notifications.length>50)notifications.pop();
+  notifUnread++;
+  updateNotifBadge();
+  renderNotifs();
+}
+function updateNotifBadge(){
+  const c=$('notifCount');
+  if(notifUnread>0){c.style.display='flex';c.textContent=notifUnread}
+  else{c.style.display='none'}
+}
+function renderNotifs(){
+  if(!notifications.length){$('notifList').innerHTML='<div class="notif-item" style="color:var(--text2)">Sin notificaciones</div>';return}
+  let h='';notifications.slice(0,20).forEach(n=>{
+    const icon=n.type==='error'?'❌':n.type==='success'?'✅':'ℹ️';
+    h+=`<div class="notif-item">${icon} ${n.msg}<div class="notif-time">${n.time}</div></div>`;
+  });
+  $('notifList').innerHTML=h;
+}
+let _notifInterval=null;
+function startNotifPolling(){
+  $('notifBell').style.display='flex';
+  _notifInterval=setInterval(async()=>{
+    const r=await api('/api/reporte_diario?u='+userId);
+    if(r.ok&&r.totalEnvios>0){
+      const last=notifications[0];
+      if(!last||!last.msg.includes('envios hoy')){
+        addNotification(r.totalEnvios+' envios hoy ('+r.exitosos+' ok, '+r.fallidos+' error)','info');
+      }
+    }
+  },30000);
+}
+
+// --- CSV EXPORT ---
+function downloadCSV(filename,rows){
+  if(!rows.length)return toast('No hay datos para exportar','error');
+  const headers=Object.keys(rows[0]);
+  let csv=headers.join(',')+'\n';
+  rows.forEach(r=>{csv+=headers.map(h=>{let v=String(r[h]||'');if(v.includes(',')||v.includes('"'))v='"'+v.replace(/"/g,'""')+'"';return v}).join(',')+'\n'});
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=filename;link.click();
+  toast('CSV descargado','success');
+}
+function exportarStatsCSV(){
+  api('/api/grupo_stats?u='+userId).then(r=>{if(r.ok&&r.stats)downloadCSV('stats_'+userId+'.csv',r.stats);else toast('Sin datos','error')});
+}
+
+// --- CHART ---
+let _chartInstance=null;
+async function loadChart(dias){
+  dias=dias||7;
+  const r=await api('/api/envios_chart?u='+userId+'&dias='+dias);
+  const canvas=$('enviosChart');
+  if(!canvas)return;
+  if(_chartInstance){_chartInstance.destroy();_chartInstance=null}
+  if(!r.ok||!r.data||!r.data.length){
+    canvas.parentElement.innerHTML='<div class="empty-state"><p>Sin datos de envios</p></div>';
+    return;
+  }
+  const isDark=!document.documentElement.getAttribute('data-theme');
+  const textColor=isDark?'#94a3b8':'#555770';
+  const gridColor=isDark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.08)';
+  _chartInstance=new Chart(canvas,{
+    type:'bar',
+    data:{
+      labels:r.data.map(d=>d.dia),
+      datasets:[
+        {label:'Exitosos',data:r.data.map(d=>d.ok||0),backgroundColor:'rgba(0,184,148,0.7)',borderRadius:4},
+        {label:'Fallidos',data:r.data.map(d=>d.err||0),backgroundColor:'rgba(233,69,96,0.7)',borderRadius:4}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:textColor}}},
+      scales:{x:{ticks:{color:textColor},grid:{color:gridColor}},y:{ticks:{color:textColor},grid:{color:gridColor},beginAtZero:true}}
+    }
+  });
+}
+
+// --- LIMITS ---
+async function loadLimites(){
+  const r=await api('/api/limites?u='+userId);
+  if(r.ok&&r.limites){
+    const l=r.limites;
+    const maxE=l.max_envios_dia>=999999?'Ilimitado':l.max_envios_dia;
+    const maxG=l.max_grupos>=999999?'Ilimitado':l.max_grupos;
+    $('limitesInfo').innerHTML=`<p>📤 Max envios/dia: <b style="color:var(--accent2)">${maxE}</b></p><p style="margin-top:5px">🌐 Max grupos: <b style="color:var(--accent2)">${maxG}</b></p>`;
+  }
+}
+
+// --- PLANTILLAS ---
+async function loadPlantillas(){
+  const r=await api('/api/plantillas?u='+userId);
+  if(!r.ok){$('plantillasContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const p=r.plantillas||[];
+  if(!p.length){$('plantillasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay plantillas. Crea una.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre</th><th>Mensaje</th><th>Acciones</th></tr></thead><tbody>';
+  p.forEach((x,i)=>{
+    h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${(x.mensaje||'').slice(0,60)}</td>`;
+    h+=`<td style="white-space:nowrap"><button class="btn btn-sm btn-primary" onclick="usarPlantilla(${x.id})">📤 Usar</button> <button class="btn btn-sm btn-danger" onclick="eliminarPlantilla(${x.id})">🗑</button></td></tr>`;
+  });
+  h+='</tbody></table></div>';$('plantillasContent').innerHTML=h;
+}
+function showCrearPlantilla(){
+  showModal(`<h3>➕ Nueva Plantilla</h3>
+    <div class="form-group"><label>Nombre</label><input id="ptN" placeholder="Ej: Promo semanal"></div>
+    <div class="form-group"><label>Mensaje</label><textarea id="ptM" rows="5" placeholder="Tu mensaje reutilizable..."></textarea></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearPlantilla()">Guardar</button></div>`);
+}
+async function crearPlantilla(){
+  const n=$('ptN').value.trim(),m=$('ptM').value.trim();
+  if(!n||!m){toast('Completa los campos','error');return}
+  closeModal();
+  const r=await api('/api/plantillas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,mensaje:m})});
+  toast(r.ok?'Plantilla guardada':'Error',r.ok?'success':'error');
+  if(r.ok)loadPlantillas();
+}
+async function eliminarPlantilla(id){
+  if(!confirm('Eliminar esta plantilla?'))return;
+  await api('/api/plantillas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});
+  toast('Eliminada','success');loadPlantillas();
+}
+async function usarPlantilla(id){
+  const r=await api('/api/plantillas?u='+userId);
+  const p=(r.plantillas||[]).find(x=>x.id===id);
+  if(!p)return;
+  showModal(`<h3>📤 Usar Plantilla: ${p.nombre}</h3>
+    <div style="background:var(--bg);padding:15px;border-radius:8px;margin-bottom:15px;font-size:14px;white-space:pre-wrap">${p.mensaje}</div>
+    <p style="color:var(--text2);font-size:13px">Texto copiado. Pegalo en la seccion de envio que necesites.</p>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="copyPlantilla('${p.mensaje.replace(/'/g,"\\'")}')">📋 Copiar</button><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
+}
+function copyPlantilla(text){try{navigator.clipboard.writeText(text);toast('Copiado!','success')}catch(e){toast('Error al copiar','error')}closeModal()}
+
+// --- HISTORIAL ---
+async function loadHistorial(){
+  let url='/api/historial_panel?u='+userId;
+  const tipo=$('histFiltroTipo')?.value;
+  const res=$('histFiltroRes')?.value;
+  const desde=$('histDesde')?.value;
+  const hasta=$('histHasta')?.value;
+  if(tipo)url+='&tipo='+tipo;
+  if(res)url+='&resultado='+res;
+  if(desde)url+='&desde='+desde;
+  if(hasta)url+='&hasta='+hasta;
+  const r=await api(url);
+  if(!r.ok){$('historialContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const h_data=r.historial||[];
+  if(!h_data.length){$('historialContent').innerHTML='<div class="empty-state"><div class="icon">📜</div><p>Sin historial de envios</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>📜 '+h_data.length+' registros</h3></div>';
+  h+='<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Destino</th><th>Mensaje</th><th>Total</th><th>OK</th><th>Error</th><th>Estado</th></tr></thead><tbody>';
+  h_data.forEach(x=>{
+    const badge=x.resultado==='exitoso'||x.resultado==='enviado'?'badge-success':x.resultado==='fallido'?'badge-danger':'badge-warn';
+    h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.tipo||'?'}</td><td style="font-size:11px">${(x.destino||'').slice(0,30)}</td><td style="font-size:11px;color:var(--text2)">${(x.mensaje_preview||'').slice(0,30)}</td>`;
+    h+=`<td>${x.total||0}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td>`;
+    h+=`<td><span class="badge ${badge}">${x.resultado||'?'}</span></td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  $('historialContent').innerHTML=h;
+  window._historialData=h_data;
+}
+function exportarHistorialCSV(){
+  const data=window._historialData||[];
+  if(!data.length){toast('Carga historial primero','error');return}
+  downloadCSV('historial_envios_'+userId+'.csv',data);
+}
+
+// --- ACTIVIDAD ---
+async function loadActividad(){
+  const r=await api('/api/actividad?u='+userId);
+  if(!r.ok){$('actividadContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const logs=r.logs||[];
+  if(!logs.length){$('actividadContent').innerHTML='<div class="empty-state"><div class="icon">📝</div><p>Sin actividad registrada</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Accion</th><th>Detalle</th></tr></thead><tbody>';
+  logs.forEach(l=>{
+    h+=`<tr><td style="font-size:11px">${l.fecha||'?'}</td><td><b>${l.accion||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${l.detalle||''}</td></tr>`;
+  });
+  h+='</tbody></table></div>';$('actividadContent').innerHTML=h;
+  window._actividadData=logs;
+}
+function exportarActividadCSV(){
+  const data=window._actividadData||[];
+  if(!data.length){toast('Carga actividad primero','error');return}
+  downloadCSV('actividad_'+userId+'.csv',data);
+}
+
+// --- ADMIN LOGS ---
+async function loadAdminLogs(){
+  if(!esAdmin)return;
+  const r=await api('/api/actividad_admin?u='+userId);
+  if(!r.ok){$('adminLogsContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
+  const logs=r.logs||[];
+  if(!logs.length){$('adminLogsContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>Sin logs</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>📋 '+logs.length+' registros</h3></div>';
+  h+='<table><thead><tr><th>Fecha</th><th>Usuario</th><th>Accion</th><th>Detalle</th></tr></thead><tbody>';
+  logs.forEach(l=>{
+    h+=`<tr><td style="font-size:11px">${l.fecha||'?'}</td><td style="font-size:11px">${l.user_id||'?'}</td><td><b>${l.accion||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${l.detalle||''}</td></tr>`;
+  });
+  h+='</tbody></table></div>';$('adminLogsContent').innerHTML=h;
+  window._adminLogsData=logs;
+}
+function exportarAdminLogsCSV(){
+  const data=window._adminLogsData||[];
+  if(!data.length){toast('Carga logs primero','error');return}
+  downloadCSV('admin_logs.csv',data);
 }
 
 // --- INIT ---
