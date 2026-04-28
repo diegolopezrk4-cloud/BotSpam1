@@ -338,11 +338,15 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div class="label">Telegram ID</div>
       <div class="uid" id="sideUserId"></div>
     </div>
+    <div id="platformSwitch" style="display:flex;margin:10px 15px;border-radius:10px;overflow:hidden;border:1px solid var(--border);background:var(--bg)">
+      <button id="platBtnWsp" onclick="switchPlatform('wsp')" style="flex:1;padding:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.3s;background:var(--accent);color:#fff">📱 WSP</button>
+      <button id="platBtnTg" onclick="switchPlatform('tg')" style="flex:1;padding:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.3s;background:transparent;color:var(--text2)">✈️ TG</button>
+    </div>
     <nav>
       <div class="nav-group">Principal</div>
       <a href="#" class="active" data-section="dashboard"><span class="icon">📊</span><span>Dashboard</span></a>
-      <a href="#" data-section="cuentas"><span class="icon">👤</span><span>Cuentas WSP</span></a>
-      <a href="#" data-section="cuentastg"><span class="icon">✈️</span><span>Cuentas Telegram</span></a>
+      <a href="#" data-section="cuentas" data-plat="wsp"><span class="icon">👤</span><span>Cuentas WSP</span></a>
+      <a href="#" data-section="cuentastg" data-plat="tg"><span class="icon">✈️</span><span>Cuentas Telegram</span></a>
       <a href="#" data-section="grupos"><span class="icon">🌐</span><span>Grupos</span></a>
       <div class="nav-group">Mensajeria</div>
       <a href="#" data-section="mensajes"><span class="icon">✉</span><span>Mensajes</span></a>
@@ -406,6 +410,22 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- CUENTAS -->
     <div class="section" id="sec-cuentas">
       <h2>👤 Cuentas WhatsApp</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Registra tus cuentas de WhatsApp para usar en el panel.</p>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
+          <label>Nombre de la cuenta</label>
+          <input type="text" id="wspCuentaNombre" placeholder="Ej: micuenta1">
+        </div>
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
+          <label>Telefono</label>
+          <input type="text" id="wspCuentaTel" placeholder="Ej: +51999999999">
+        </div>
+        <button class="btn btn-primary" onclick="agregarCuentaWsp()">➕ Agregar Cuenta</button>
+      </div>
+      <div style="background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border);font-size:13px;color:var(--text2)">
+        <p>💡 <b>Tambien puedes vincular cuentas desde el bot de Telegram:</b></p>
+        <p style="margin-top:5px">Usa el comando <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">/vincularwsp nombre_cuenta</code> en el bot para vincular con codigo QR.</p>
+      </div>
       <div id="cuentasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
@@ -746,6 +766,40 @@ function showPlatformSelector(){
   $('platformSelector').style.display='flex';
 }
 
+// --- PLATFORM SWITCH (inside panel) ---
+function switchPlatform(p){
+  currentPlatform=p;
+  localStorage.setItem('panel_platform',p);
+  if(p==='wsp'){
+    $('platBtnWsp').style.background='var(--accent)';$('platBtnWsp').style.color='#fff';
+    $('platBtnTg').style.background='transparent';$('platBtnTg').style.color='var(--text2)';
+  }else{
+    $('platBtnTg').style.background='var(--accent)';$('platBtnTg').style.color='#fff';
+    $('platBtnWsp').style.background='transparent';$('platBtnWsp').style.color='var(--text2)';
+  }
+  document.querySelectorAll('.sidebar nav a[data-plat]').forEach(a=>{
+    a.style.display=a.dataset.plat===p?'':'none';
+  });
+  // Navigate to the corresponding accounts section
+  const sec=p==='wsp'?'cuentas':'cuentastg';
+  document.querySelectorAll('.sidebar nav a').forEach(x=>x.classList.remove('active'));
+  const link=document.querySelector('.sidebar nav a[data-section="'+sec+'"]');
+  if(link)link.classList.add('active');
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  $('sec-'+sec).classList.add('active');
+  if(p==='wsp')loadCuentas();else loadCuentasTg();
+}
+function initPlatformSwitch(){
+  const p=currentPlatform||'wsp';
+  if(p==='tg'){
+    $('platBtnTg').style.background='var(--accent)';$('platBtnTg').style.color='#fff';
+    $('platBtnWsp').style.background='transparent';$('platBtnWsp').style.color='var(--text2)';
+  }
+  document.querySelectorAll('.sidebar nav a[data-plat]').forEach(a=>{
+    a.style.display=a.dataset.plat===p?'':'none';
+  });
+}
+
 // --- AUTH ---
 function showLogin(){$('authLogin').style.display='flex';$('authRegister').style.display='none';$('platformSelector').style.display='none'}
 function showRegister(){$('authLogin').style.display='none';$('authRegister').style.display='flex';$('platformSelector').style.display='none'}
@@ -830,6 +884,7 @@ async function showApp(){
     document.querySelectorAll('.admin-only').forEach(el=>el.style.display='');
     localStorage.setItem('panel_admin','1');
   }
+  initPlatformSwitch();
   loadDashboard();
   loadLimites();
   loadChart(7);
@@ -897,7 +952,7 @@ async function loadCuentas(){
   const r=await api('/api/sesiones?u='+userId);
   if(!r.ok){$('cuentasContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
   const s=r.sesiones||[],ban=(r.baneadas||[]).map(b=>b.nombre);
-  if(!s.length){$('cuentasContent').innerHTML='<div class="empty-state"><div class="icon">👤</div><p>No hay cuentas vinculadas.<br>Usa <b>/vincularwsp nombre</b> en Telegram.</p></div>';return}
+  if(!s.length){$('cuentasContent').innerHTML='<div class="empty-state"><div class="icon">👤</div><p>No hay cuentas vinculadas.<br>Agrega una usando el formulario de arriba.</p></div>';return}
   let h='<div class="table-wrap"><div class="table-header"><h3>Cuentas ('+s.length+')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Telefono</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
   s.forEach((x,i)=>{
     const b=ban.includes(x.nombre);
@@ -907,6 +962,14 @@ async function loadCuentas(){
 }
 function eliminarCuenta(n){showModal(`<h3>⚠ Eliminar Cuenta</h3><p>Eliminar <b>'${n}'</b>?<br>Se desconectara y borrara.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarElimCuenta('${n}')">Eliminar</button></div>`)}
 async function confirmarElimCuenta(n){closeModal();const r=await api('/api/desvincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n})});toast(r.ok?'Cuenta eliminada':'Error','success');loadCuentas()}
+async function agregarCuentaWsp(){
+  const nombre=$('wspCuentaNombre').value.trim();
+  const tel=$('wspCuentaTel').value.trim();
+  if(!nombre){toast('Ingresa un nombre para la cuenta','error');return}
+  const r=await api('/api/vincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre,telefono:tel})});
+  toast(r.ok?'Cuenta WSP registrada':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok){$('wspCuentaNombre').value='';$('wspCuentaTel').value='';loadCuentas()}
+}
 
 // --- GRUPOS ---
 async function loadGrupos(){
