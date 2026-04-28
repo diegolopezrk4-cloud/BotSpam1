@@ -370,6 +370,8 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="autoresp" data-plat="wsp"><span class="icon">🤖</span><span>Auto-Responder</span></a>
       <div class="nav-group" data-plat="tg">Config TG</div>
       <a href="#" data-section="tgautoresp" data-plat="tg"><span class="icon">🤖</span><span>Auto-Responder TG</span></a>
+      <a href="#" data-section="tgconfig" data-plat="tg"><span class="icon">⚙</span><span>Config Envio TG</span></a>
+      <a href="#" data-section="tglistanegra" data-plat="tg"><span class="icon">🚫</span><span>Lista Negra TG</span></a>
       <div class="nav-group">General</div>
       <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas</span></a>
       <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
@@ -444,21 +446,23 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- CUENTAS -->
     <div class="section" id="sec-cuentas">
       <h2>👤 Cuentas WhatsApp</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Registra tus cuentas de WhatsApp para usar en el panel.</p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Vincula tus cuentas de WhatsApp escaneando el codigo QR.</p>
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-        <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
           <label>Nombre de la cuenta</label>
           <input type="text" id="wspCuentaNombre" placeholder="Ej: micuenta1">
         </div>
-        <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
-          <label>Telefono</label>
-          <input type="text" id="wspCuentaTel" placeholder="Ej: +51999999999">
-        </div>
-        <button class="btn btn-primary" onclick="agregarCuentaWsp()">➕ Agregar Cuenta</button>
+        <button class="btn btn-primary" onclick="vincularCuentaWspQR()">📱 Vincular con QR</button>
       </div>
       <div style="background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border);font-size:13px;color:var(--text2)">
-        <p>💡 <b>Tambien puedes vincular cuentas desde el bot de Telegram:</b></p>
-        <p style="margin-top:5px">Usa el comando <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">/vincularwsp nombre_cuenta</code> en el bot para vincular con codigo QR.</p>
+        <p>📱 <b>Como vincular:</b></p>
+        <ol style="margin:8px 0 0 15px;line-height:1.8">
+          <li>Escribe un nombre para tu cuenta (ej: "mi_wsp")</li>
+          <li>Haz clic en <b>"Vincular con QR"</b></li>
+          <li>Se abrira una pagina con el codigo QR</li>
+          <li>Abre WhatsApp > Ajustes > Dispositivos vinculados > Vincular dispositivo</li>
+          <li>Escanea el QR y listo!</li>
+        </ol>
       </div>
       <div id="cuentasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
@@ -659,28 +663,39 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- GRUPOS TG -->
     <div class="section" id="sec-tggrupos">
       <h2>🌐 Grupos Telegram</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Grupos registrados en tu bot de Telegram.</p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Grupos registrados para envio por Telegram.</p>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+          <label>Link del grupo (t.me/...)</label>
+          <input type="text" id="tgGrupoLink" placeholder="Ej: https://t.me/migrupo">
+        </div>
+        <button class="btn btn-primary" onclick="addTgGrupoPanel()">➕ Agregar</button>
+        <button class="btn btn-danger btn-sm" onclick="delAllTgGruposPanel()">🗑 Borrar Todos</button>
+      </div>
       <div id="tgGruposContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- MENSAJES TG -->
     <div class="section" id="sec-tgmensajes">
       <h2>✉ Mensajes Telegram</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Mensajes creados para enviar a grupos de Telegram.</p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Crea y gestiona mensajes para enviar a grupos de Telegram.</p>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearTgMensaje()">➕ Crear Mensaje</button></div>
       <div id="tgMensajesContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- CAMPANAS TG -->
     <div class="section" id="sec-tgcampanas">
       <h2>📋 Campanas Telegram</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Campanas de spam activas y configuradas para Telegram.</p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Crea y gestiona campanas de envio para Telegram.</p>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearTgCampana()">➕ Nueva Campana</button></div>
       <div id="tgCampanasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- PROGRAMADOS TG -->
     <div class="section" id="sec-tgprogramados">
       <h2>⏰ Programados Telegram</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envios programados automaticos para Telegram.</p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Programa envios automaticos para Telegram.</p>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearTgProgramado()">➕ Nuevo Programado</button></div>
       <div id="tgProgramadosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
@@ -694,8 +709,30 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- AUTO-RESPONDER TG -->
     <div class="section" id="sec-tgautoresp">
       <h2>🤖 Auto-Responder Telegram</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Configuracion del auto-responder para grupos de Telegram.</p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Configura respuestas automaticas por palabras clave.</p>
       <div id="tgAutoRespContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- CONFIG ENVIO TG -->
+    <div class="section" id="sec-tgconfig">
+      <h2>⚙ Config Envio Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Configura delay, lotes y pausas para envios de Telegram.</p>
+      <div id="tgConfigContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- LISTA NEGRA TG -->
+    <div class="section" id="sec-tglistanegra">
+      <h2>🚫 Lista Negra Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Grupos bloqueados que no recibiran envios.</p>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+          <label>Grupo a bloquear</label>
+          <input type="text" id="tgListaNegraInput" placeholder="Ej: https://t.me/grupo">
+        </div>
+        <button class="btn btn-primary" onclick="addTgListaNegraPanel()">🚫 Bloquear</button>
+        <button class="btn btn-danger btn-sm" onclick="limpiarTgListaNegraPanel()">🗑 Limpiar Todo</button>
+      </div>
+      <div id="tgListaNegraContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- PLANTILLAS -->
@@ -975,7 +1012,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra};
     if(loaders[sec])loaders[sec]();
   });
 });
@@ -1019,49 +1056,76 @@ async function loadCuentas(){
 }
 function eliminarCuenta(n){showModal(`<h3>⚠ Eliminar Cuenta</h3><p>Eliminar <b>'${n}'</b>?<br>Se desconectara y borrara.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarElimCuenta('${n}')">Eliminar</button></div>`)}
 async function confirmarElimCuenta(n){if(!requireMembresia())return;closeModal();const r=await api('/api/desvincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n})});toast(r.ok?'Cuenta eliminada':'Error','success');loadCuentas()}
-async function agregarCuentaWsp(){
+function vincularCuentaWspQR(){
   if(!requireMembresia())return;
   const nombre=$('wspCuentaNombre').value.trim();
-  const tel=$('wspCuentaTel').value.trim();
   if(!nombre){toast('Ingresa un nombre para la cuenta','error');return}
-  const r=await api('/api/vincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre,telefono:tel})});
-  toast(r.ok?'Cuenta WSP registrada':'Error: '+(r.error||''),r.ok?'success':'error');
-  if(r.ok){$('wspCuentaNombre').value='';$('wspCuentaTel').value='';loadCuentas()}
+  const linkUrl='/link?u='+encodeURIComponent(userId)+'&n='+encodeURIComponent(nombre);
+  window.open(linkUrl,'_blank');
+  toast('Se abrio la pagina del QR. Escanea con tu celular.','success');
+  $('wspCuentaNombre').value='';
+  setTimeout(()=>loadCuentas(),15000);
 }
 
-// --- TG BOT DATA LOADERS ---
+// --- TG BOT DATA LOADERS (FULL CRUD) ---
 async function loadTgGrupos(){
   const r=await api('/api/tg/grupos?u='+userId);
   if(!r.ok){$('tgGruposContent').innerHTML='<div class="empty-state"><p>Error al cargar grupos</p></div>';return}
   const g=r.grupos||[];
-  if(!g.length){$('tgGruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos registrados.<br>Usa el bot de Telegram para agregar grupos.</p></div>';return}
-  let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+')</h3></div><table><thead><tr><th>#</th><th>Link del Grupo</th></tr></thead><tbody>';
-  g.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><a href="${esc(x.link)}" target="_blank" style="color:var(--accent2)">${esc(x.link)}</a></td></tr>`});
+  if(!g.length){$('tgGruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos registrados.<br>Usa el formulario de arriba para agregar.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+')</h3></div><table><thead><tr><th>#</th><th>Link del Grupo</th><th>Acciones</th></tr></thead><tbody>';
+  g.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><a href="${esc(x.link)}" target="_blank" style="color:var(--accent2)">${esc(x.link)}</a></td><td><button class="btn btn-danger btn-sm" onclick="delTgGrupoPanel('${encodeURIComponent(x.link)}')">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('tgGruposContent').innerHTML=h;
 }
+async function addTgGrupoPanel(){
+  if(!requireMembresia())return;
+  const link=$('tgGrupoLink').value.trim();
+  if(!link){toast('Ingresa el link del grupo','error');return}
+  const r=await api('/api/tg/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link})});
+  toast(r.ok?'Grupo agregado':'Error o ya existe',r.ok?'success':'error');
+  if(r.ok){$('tgGrupoLink').value='';loadTgGrupos()}
+}
+async function delTgGrupoPanel(link){if(!requireMembresia())return;const r=await api('/api/tg/grupos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:decodeURIComponent(link)})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadTgGrupos()}
+async function delAllTgGruposPanel(){if(!requireMembresia())return;showModal('<h3>Borrar TODOS los grupos TG?</h3><p>Esta accion no se puede deshacer.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarDelAllTgGrupos()">Borrar Todos</button></div>')}
+async function confirmarDelAllTgGrupos(){closeModal();const r=await api('/api/tg/grupos/delall',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});toast(r.ok?'Todos eliminados':'Error',r.ok?'success':'error');loadTgGrupos()}
 
 async function loadTgMensajes(){
   const r=await api('/api/tg/mensajes?u='+userId);
   if(!r.ok){$('tgMensajesContent').innerHTML='<div class="empty-state"><p>Error al cargar mensajes</p></div>';return}
   const m=r.mensajes||[];
-  if(!m.length){$('tgMensajesContent').innerHTML='<div class="empty-state"><div class="icon">✉</div><p>No hay mensajes creados.<br>Usa el bot de Telegram para crear mensajes.</p></div>';return}
-  let h='<div class="table-wrap"><div class="table-header"><h3>Mensajes ('+m.length+')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Texto</th><th>Foto</th><th>Fecha</th></tr></thead><tbody>';
+  if(!m.length){$('tgMensajesContent').innerHTML='<div class="empty-state"><div class="icon">✉</div><p>No hay mensajes creados.<br>Crea uno con el boton de arriba.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Mensajes ('+m.length+')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Texto</th><th>Foto</th><th>Acciones</th></tr></thead><tbody>';
   m.forEach((x,i)=>{
-    h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre||'?')}</b></td><td style="font-size:12px;color:var(--text2);max-width:300px;overflow:hidden;text-overflow:ellipsis">${esc((x.texto||'').slice(0,80))}</td><td>${x.foto_path?'<span class="badge badge-success">Si</span>':'<span class="badge" style="background:var(--bg3)">No</span>'}</td><td style="font-size:11px">${esc(x.fecha_creacion||'—')}</td></tr>`;
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre||'?')}</b></td><td style="font-size:12px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc((x.texto||'').slice(0,60))}</td><td>${x.foto_path?'<span class="badge badge-success">Si</span>':'<span class="badge" style="background:var(--bg3)">No</span>'}</td><td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="showEditTgMsg(${x.id},${JSON.stringify(esc(x.nombre||''))},${JSON.stringify(esc(x.texto||''))})">✏</button> <button class="btn btn-sm" style="background:var(--accent2);color:#fff" onclick="dupTgMsg(${x.id})">📋</button> <button class="btn btn-danger btn-sm" onclick="delTgMsg(${x.id})">🗑</button></td></tr>`;
   });
   h+='</tbody></table></div>';$('tgMensajesContent').innerHTML=h;
 }
+function showCrearTgMensaje(){if(!requireMembresia())return;showModal('<h3>Crear Mensaje TG</h3><div class="form-group"><label>Nombre</label><input type="text" id="tgMsgNombre" placeholder="Ej: promo1"></div><div class="form-group"><label>Texto del mensaje</label><textarea id="tgMsgTexto" rows="5" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px" placeholder="Escribe tu mensaje aqui..."></textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearTgMsgPanel()">Crear</button></div>')}
+async function crearTgMsgPanel(){
+  const nombre=$('tgMsgNombre').value.trim(),texto=$('tgMsgTexto').value.trim();
+  if(!nombre||!texto){toast('Nombre y texto son requeridos','error');return}
+  closeModal();const r=await api('/api/tg/mensajes/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre,texto})});
+  toast(r.ok?'Mensaje creado':'Error',r.ok?'success':'error');loadTgMensajes();
+}
+function showEditTgMsg(id,nombre,texto){if(!requireMembresia())return;showModal('<h3>Editar Mensaje TG</h3><div class="form-group"><label>Nombre</label><input type="text" id="tgMsgEditNombre" value="'+nombre+'"></div><div class="form-group"><label>Texto</label><textarea id="tgMsgEditTexto" rows="5" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">'+texto+'</textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="editTgMsgPanel('+id+')">Guardar</button></div>')}
+async function editTgMsgPanel(id){
+  const nombre=$('tgMsgEditNombre').value.trim(),texto=$('tgMsgEditTexto').value.trim();
+  closeModal();const r=await api('/api/tg/mensajes/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id,nombre,texto})});
+  toast(r.ok?'Mensaje editado':'Error',r.ok?'success':'error');loadTgMensajes();
+}
+async function delTgMsg(id){if(!requireMembresia())return;const r=await api('/api/tg/mensajes/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadTgMensajes()}
+async function dupTgMsg(id){if(!requireMembresia())return;const r=await api('/api/tg/mensajes/duplicar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Duplicado':'Error',r.ok?'success':'error');loadTgMensajes()}
 
 async function loadTgCampanas(){
   const r=await api('/api/tg/campanas?u='+userId);
   if(!r.ok){$('tgCampanasContent').innerHTML='<div class="empty-state"><p>Error al cargar campanas</p></div>';return}
   const c=r.campanas||[];
-  if(!c.length){$('tgCampanasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay campanas creadas.<br>Usa el bot de Telegram para crear campanas.</p></div>';return}
+  if(!c.length){$('tgCampanasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay campanas creadas.<br>Crea una con el boton de arriba.</p></div>';return}
   let h='';
   c.forEach(x=>{
     const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
     h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
-    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3>${estado}</div>`;
+    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div>${estado} <button class="btn btn-danger btn-sm" onclick="delTgCampanaPanel(${x.id})" style="margin-left:8px">🗑 Eliminar</button></div></div>`;
     h+=`<p style="font-size:12px;color:var(--text2);margin-bottom:5px">${esc((x.mensaje||'').slice(0,100))}</p>`;
     h+=`<div style="display:flex;gap:15px;font-size:12px;color:var(--text2)"><span>📤 Enviados: <b style="color:var(--success)">${x.enviados||0}</b></span><span>❌ Errores: <b style="color:var(--danger)">${x.errores||0}</b></span>`;
     h+=`<span>⏱ Intervalo: ${x.intervalo_min||30}s - ${x.intervalo_max||60}s</span></div>`;
@@ -1071,19 +1135,37 @@ async function loadTgCampanas(){
   });
   $('tgCampanasContent').innerHTML=h;
 }
+function showCrearTgCampana(){if(!requireMembresia())return;showModal('<h3>Nueva Campana TG</h3><div class="form-group"><label>Nombre de la campana</label><input type="text" id="tgCampNombre" placeholder="Ej: campana1"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearTgCampanaPanel()">Crear</button></div>')}
+async function crearTgCampanaPanel(){
+  const nombre=$('tgCampNombre').value.trim();
+  if(!nombre){toast('Nombre requerido','error');return}
+  closeModal();const r=await api('/api/tg/campanas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre})});
+  toast(r.ok?'Campana creada':'Error',r.ok?'success':'error');loadTgCampanas();
+}
+async function delTgCampanaPanel(id){if(!requireMembresia())return;showModal('<h3>Eliminar Campana?</h3><p>Se eliminara la campana y sus configuraciones.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarDelTgCamp('+id+')">Eliminar</button></div>')}
+async function confirmarDelTgCamp(id){closeModal();const r=await api('/api/tg/campanas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Eliminada':'Error',r.ok?'success':'error');loadTgCampanas()}
 
 async function loadTgProgramados(){
   const r=await api('/api/tg/programados?u='+userId);
   if(!r.ok){$('tgProgramadosContent').innerHTML='<div class="empty-state"><p>Error al cargar programados</p></div>';return}
   const p=r.programados||[];
-  if(!p.length){$('tgProgramadosContent').innerHTML='<div class="empty-state"><div class="icon">⏰</div><p>No hay envios programados.<br>Usa el bot de Telegram para programar envios.</p></div>';return}
-  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Mensaje</th><th>Hora</th><th>Repetir</th><th>Estado</th></tr></thead><tbody>';
+  if(!p.length){$('tgProgramadosContent').innerHTML='<div class="empty-state"><div class="icon">⏰</div><p>No hay envios programados.<br>Crea uno con el boton de arriba.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Mensaje</th><th>Hora</th><th>Repetir</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
   p.forEach((x,i)=>{
     const hora=String(x.hora||0).padStart(2,'0')+':'+String(x.minuto||0).padStart(2,'0');
-    h+=`<tr><td>${i+1}</td><td><b>${esc(x.msg_nombre||'Mensaje #'+x.mensaje_id)}</b></td><td>${hora}</td><td>${x.repetir?'<span class="badge badge-success">Si</span>':'<span class="badge" style="background:var(--bg3)">No</span>'}</td><td>${x.activo?'<span class="badge badge-success">Activo</span>':'<span class="badge badge-danger">Pausado</span>'}</td></tr>`;
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.msg_nombre||'Mensaje #'+x.mensaje_id)}</b></td><td>${hora}</td><td>${x.repetir?'<span class="badge badge-success">Si</span>':'<span class="badge" style="background:var(--bg3)">No</span>'}</td><td>${x.activo?'<span class="badge badge-success">Activo</span>':'<span class="badge badge-danger">Pausado</span>'}</td><td><button class="btn btn-sm btn-primary" onclick="toggleTgProgPanel(${x.id})">${x.activo?'Pausar':'Activar'}</button> <button class="btn btn-danger btn-sm" onclick="delTgProgPanel(${x.id})">🗑</button></td></tr>`;
   });
   h+='</tbody></table></div>';$('tgProgramadosContent').innerHTML=h;
 }
+function showCrearTgProgramado(){if(!requireMembresia())return;showModal('<h3>Nuevo Envio Programado TG</h3><div class="form-group"><label>ID del Mensaje</label><input type="number" id="tgProgMsgId" placeholder="ID del mensaje"></div><div class="form-group"><label>Hora (0-23)</label><input type="number" id="tgProgHora" min="0" max="23" value="8"></div><div class="form-group"><label>Minuto (0-59)</label><input type="number" id="tgProgMin" min="0" max="59" value="0"></div><div class="form-group"><label>Repetir</label><select id="tgProgRepetir" style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px"><option value="diario">Diario</option><option value="unico">Una vez</option></select></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearTgProgPanel()">Crear</button></div>')}
+async function crearTgProgPanel(){
+  const msgId=$('tgProgMsgId').value,hora=$('tgProgHora').value,min=$('tgProgMin').value,rep=$('tgProgRepetir').value;
+  if(!msgId){toast('ID de mensaje requerido','error');return}
+  closeModal();const r=await api('/api/tg/programados/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje_id:parseInt(msgId),hora:parseInt(hora),minuto:parseInt(min),repetir:rep})});
+  toast(r.ok?'Programado creado':'Error',r.ok?'success':'error');loadTgProgramados();
+}
+async function toggleTgProgPanel(id){if(!requireMembresia())return;const r=await api('/api/tg/programados/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Estado cambiado':'Error',r.ok?'success':'error');loadTgProgramados()}
+async function delTgProgPanel(id){if(!requireMembresia())return;const r=await api('/api/tg/programados/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadTgProgramados()}
 
 async function loadTgHistorial(){
   const r=await api('/api/tg/historial?u='+userId);
@@ -1102,22 +1184,59 @@ async function loadTgAutoResp(){
   const r=await api('/api/tg/autoresponder?u='+userId);
   if(!r.ok){$('tgAutoRespContent').innerHTML='<div class="empty-state"><p>Error al cargar auto-responder</p></div>';return}
   let h='';
-  if(r.config){
-    h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">`;
-    h+=`<h3 style="margin:0 0 10px">Estado: ${r.config.activo?'<span class="badge badge-success">Activo</span>':'<span class="badge badge-danger">Desactivado</span>'}</h3>`;
-    if(r.config.contacto)h+=`<p style="font-size:13px;color:var(--text2)">Contacto: <b>${esc(r.config.contacto)}</b></p>`;
-    h+=`</div>`;
-  }else{
-    h+=`<div class="empty-state"><div class="icon">🤖</div><p>Auto-responder no configurado.<br>Usa el bot de Telegram para configurarlo.</p></div>`;
-  }
+  const isActive=r.config&&r.config.activo;
+  h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">`;
+  h+=`<div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">Estado: ${isActive?'<span class="badge badge-success">Activo</span>':'<span class="badge badge-danger">Desactivado</span>'}</h3>`;
+  h+=`<button class="btn ${isActive?'btn-danger':'btn-primary'} btn-sm" onclick="toggleTgAutoResp(${isActive?'false':'true'})">${isActive?'Desactivar':'Activar'}</button></div>`;
+  if(r.config&&r.config.contacto)h+=`<p style="font-size:13px;color:var(--text2);margin-top:8px">Contacto: <b>${esc(r.config.contacto)}</b></p>`;
+  h+=`</div>`;
+  h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">`;
+  h+=`<div class="form-group" style="margin-bottom:0;flex:1;min-width:120px"><label>Palabra clave</label><input type="text" id="tgKwInput" placeholder="Ej: precio"></div>`;
+  h+=`<div class="form-group" style="margin-bottom:0;flex:2;min-width:200px"><label>Respuesta</label><input type="text" id="tgKwResp" placeholder="Respuesta automatica"></div>`;
+  h+=`<button class="btn btn-primary" onclick="addTgKwPanel()">➕ Agregar</button>`;
+  h+=`<button class="btn btn-danger btn-sm" onclick="delAllTgKwPanel()">🗑 Limpiar</button></div>`;
   if(r.keywords&&r.keywords.length){
-    h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;border:1px solid var(--border)"><h3 style="margin:0 0 10px">Palabras Clave (${r.keywords.length})</h3>`;
-    h+=`<div style="display:flex;flex-wrap:wrap;gap:8px">`;
-    r.keywords.forEach(k=>{h+=`<span style="background:var(--bg3);padding:4px 10px;border-radius:6px;font-size:13px">${esc(k.palabra)}</span>`});
-    h+=`</div></div>`;
+    h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;border:1px solid var(--border)"><h3 style="margin:0 0 10px">Palabras Clave (${r.keywords.length})</h3><table><thead><tr><th>Palabra</th><th>Respuesta</th><th></th></tr></thead><tbody>`;
+    r.keywords.forEach(k=>{h+=`<tr><td><b>${esc(k.palabra||k.keyword)}</b></td><td style="font-size:12px;color:var(--text2)">${esc((k.respuesta||'').slice(0,80))}</td><td><button class="btn btn-danger btn-sm" onclick="delTgKwPanel(${k.id})">🗑</button></td></tr>`});
+    h+=`</tbody></table></div>`;
   }
-  $('tgAutoRespContent').innerHTML=h||'<div class="empty-state"><div class="icon">🤖</div><p>Sin configuracion de auto-responder.</p></div>';
+  $('tgAutoRespContent').innerHTML=h;
 }
+async function toggleTgAutoResp(activo){if(!requireMembresia())return;const r=await api('/api/tg/autoresponder/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,activo})});toast(r.ok?'Estado cambiado':'Error',r.ok?'success':'error');loadTgAutoResp()}
+async function addTgKwPanel(){if(!requireMembresia())return;const kw=$('tgKwInput').value.trim(),resp=$('tgKwResp').value.trim();if(!kw||!resp){toast('Palabra y respuesta requeridas','error');return}const r=await api('/api/tg/autoresponder/keyword/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,keyword:kw,respuesta:resp})});toast(r.ok?'Agregada':'Error',r.ok?'success':'error');loadTgAutoResp()}
+async function delTgKwPanel(id){if(!requireMembresia())return;const r=await api('/api/tg/autoresponder/keyword/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Eliminada':'Error',r.ok?'success':'error');loadTgAutoResp()}
+async function delAllTgKwPanel(){if(!requireMembresia())return;const r=await api('/api/tg/autoresponder/keyword/delall',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});toast(r.ok?'Limpiado':'Error',r.ok?'success':'error');loadTgAutoResp()}
+
+async function loadTgConfig(){
+  const r=await api('/api/tg/config?u='+userId);
+  if(!r.ok){$('tgConfigContent').innerHTML='<div class="empty-state"><p>Error al cargar config</p></div>';return}
+  const c=r.config||{};
+  let h=`<div style="background:var(--bg);padding:20px;border-radius:10px;border:1px solid var(--border)">`;
+  h+=`<div class="form-group"><label>Delay entre envios (segundos)</label><input type="number" id="tgCfgDelay" value="${c.delay_seg||10}" min="1" max="300"></div>`;
+  h+=`<div class="form-group"><label>Tamano de lote (0 = sin lotes)</label><input type="number" id="tgCfgLote" value="${c.lote_tamano||0}" min="0" max="100"></div>`;
+  h+=`<div class="form-group"><label>Pausa entre lotes (segundos)</label><input type="number" id="tgCfgPausa" value="${c.lote_pausa_seg||30}" min="0" max="600"></div>`;
+  h+=`<button class="btn btn-primary" onclick="saveTgConfigPanel()">💾 Guardar Config</button></div>`;
+  $('tgConfigContent').innerHTML=h;
+}
+async function saveTgConfigPanel(){
+  if(!requireMembresia())return;
+  const delay=parseInt($('tgCfgDelay').value)||10,lote=parseInt($('tgCfgLote').value)||0,pausa=parseInt($('tgCfgPausa').value)||30;
+  const r=await api('/api/tg/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,delay_seg:delay,lote_tamano:lote,lote_pausa_seg:pausa})});
+  toast(r.ok?'Config guardada':'Error',r.ok?'success':'error');
+}
+
+async function loadTgListaNegra(){
+  const r=await api('/api/tg/listanegra?u='+userId);
+  if(!r.ok){$('tgListaNegraContent').innerHTML='<div class="empty-state"><p>Error al cargar lista negra</p></div>';return}
+  const l=r.lista||[];
+  if(!l.length){$('tgListaNegraContent').innerHTML='<div class="empty-state"><div class="icon">🚫</div><p>Lista negra vacia.<br>Agrega grupos que no quieres que reciban envios.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Grupo</th><th>Acciones</th></tr></thead><tbody>';
+  l.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td>${esc(x.grupo)}</td><td><button class="btn btn-danger btn-sm" onclick="delTgLnPanel('${encodeURIComponent(x.grupo)}')">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('tgListaNegraContent').innerHTML=h;
+}
+async function addTgListaNegraPanel(){if(!requireMembresia())return;const g=$('tgListaNegraInput').value.trim();if(!g){toast('Ingresa el grupo','error');return}const r=await api('/api/tg/listanegra/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,grupo:g})});toast(r.ok?'Bloqueado':'Error',r.ok?'success':'error');if(r.ok){$('tgListaNegraInput').value='';loadTgListaNegra()}}
+async function delTgLnPanel(g){if(!requireMembresia())return;const r=await api('/api/tg/listanegra/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,grupo:decodeURIComponent(g)})});toast(r.ok?'Desbloqueado':'Error',r.ok?'success':'error');loadTgListaNegra()}
+async function limpiarTgListaNegraPanel(){if(!requireMembresia())return;const r=await api('/api/tg/listanegra/limpiar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});toast(r.ok?'Limpiado':'Error',r.ok?'success':'error');loadTgListaNegra()}
 
 // --- GRUPOS ---
 async function loadGrupos(){

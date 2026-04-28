@@ -1401,6 +1401,14 @@ module.exports = {
     getSesionesTg, agregarSesionTg, eliminarSesionTg, getAllSesionesTg,
     // TG Bot data (read from titan.db)
     getTgGrupos, getTgMensajes, getTgCampanas, getTgHistorialEnvios, getTgProgramados, getTgAutoResponder, getTgStats,
+    // TG Bot data (write to titan.db)
+    addTgGrupo, delTgGrupo, delAllTgGrupos,
+    crearTgMensaje, editarTgMensaje, eliminarTgMensaje, duplicarTgMensaje,
+    crearTgCampana, eliminarTgCampana,
+    crearTgProgramado, toggleTgProgramado, eliminarTgProgramado,
+    setTgAutoResponder, addTgKeyword, delTgKeyword, delAllTgKeywords,
+    getTgListaNegra, addTgListaNegra, delTgListaNegra, limpiarTgListaNegra,
+    getTgConfigEnvio, setTgConfigEnvio,
 };
 
 // --- Sesiones Telegram ---
@@ -1597,5 +1605,241 @@ function getTgStats(userId) {
             campanas_activas: campanasActivas ? campanasActivas.total : 0,
         };
     } catch (e) { return {}; }
+    finally { if (botDb) botDb.close(); }
+}
+
+// --- TG Bot data (write to titan.db) ---
+function openBotDbWrite() {
+    const botDbPath = path.resolve(__dirname, "titan.db");
+    const fs = require("fs");
+    if (!fs.existsSync(botDbPath)) return null;
+    return new Database(botDbPath);
+}
+
+function addTgGrupo(userId, link) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        const existing = botDb.prepare("SELECT id FROM grupos WHERE user_id = ? AND link = ?").get(Number(userId), link);
+        if (existing) return false;
+        botDb.prepare("INSERT INTO grupos (user_id, link) VALUES (?, ?)").run(Number(userId), link);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function delTgGrupo(userId, link) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM grupos WHERE user_id = ? AND link = ?").run(Number(userId), link);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function delAllTgGrupos(userId) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM grupos WHERE user_id = ?").run(Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function crearTgMensaje(userId, nombre, texto, foto) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return null;
+        const r = botDb.prepare("INSERT INTO tg_mensajes (user_id, nombre, texto, foto_path) VALUES (?, ?, ?, ?)").run(Number(userId), nombre, texto, foto || null);
+        return r.lastInsertRowid;
+    } catch (e) { return null; }
+    finally { if (botDb) botDb.close(); }
+}
+function editarTgMensaje(userId, id, nombre, texto) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("UPDATE tg_mensajes SET nombre = ?, texto = ? WHERE id = ? AND user_id = ?").run(nombre, texto, id, Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function eliminarTgMensaje(userId, id) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM tg_mensajes WHERE id = ? AND user_id = ?").run(id, Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function duplicarTgMensaje(userId, id) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        const orig = botDb.prepare("SELECT * FROM tg_mensajes WHERE id = ? AND user_id = ?").get(id, Number(userId));
+        if (!orig) return false;
+        botDb.prepare("INSERT INTO tg_mensajes (user_id, nombre, texto, foto_path) VALUES (?, ?, ?, ?)").run(Number(userId), (orig.nombre || '') + ' (copia)', orig.texto, orig.foto_path);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function crearTgCampana(userId, nombre, mensajeId) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return null;
+        const r = botDb.prepare("INSERT INTO campanas (user_id, nombre, mensaje_id, activa) VALUES (?, ?, ?, 0)").run(Number(userId), nombre, mensajeId);
+        return r.lastInsertRowid;
+    } catch (e) { return null; }
+    finally { if (botDb) botDb.close(); }
+}
+function eliminarTgCampana(userId, id) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM campana_sesiones WHERE campana_id = ?").run(id);
+        botDb.prepare("DELETE FROM campana_grupos WHERE campana_id = ?").run(id);
+        botDb.prepare("DELETE FROM campana_config WHERE campana_id = ?").run(id);
+        botDb.prepare("DELETE FROM campanas WHERE id = ? AND user_id = ?").run(id, Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function crearTgProgramado(userId, mensajeId, hora, minuto, repetir) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return null;
+        const rep = (repetir === 'diario' || repetir === true || repetir === 1) ? 1 : 0;
+        const r = botDb.prepare("INSERT INTO tg_envios_programados (user_id, mensaje_id, hora, minuto, repetir, activo) VALUES (?, ?, ?, ?, ?, 1)").run(Number(userId), mensajeId, hora, minuto, rep);
+        return r.lastInsertRowid;
+    } catch (e) { return null; }
+    finally { if (botDb) botDb.close(); }
+}
+function toggleTgProgramado(userId, id) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        const row = botDb.prepare("SELECT activo FROM tg_envios_programados WHERE id = ? AND user_id = ?").get(id, Number(userId));
+        if (!row) return false;
+        botDb.prepare("UPDATE tg_envios_programados SET activo = ? WHERE id = ?").run(row.activo ? 0 : 1, id);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function eliminarTgProgramado(userId, id) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM tg_envios_programados WHERE id = ? AND user_id = ?").run(id, Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function setTgAutoResponder(userId, activo) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        const existing = botDb.prepare("SELECT id FROM responder_config WHERE user_id = ?").get(Number(userId));
+        if (existing) botDb.prepare("UPDATE responder_config SET activo = ? WHERE user_id = ?").run(activo ? 1 : 0, Number(userId));
+        else botDb.prepare("INSERT INTO responder_config (user_id, activo) VALUES (?, ?)").run(Number(userId), activo ? 1 : 0);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function _ensureRespuestaCol(db) {
+    try { db.prepare("ALTER TABLE responder_keywords ADD COLUMN respuesta TEXT DEFAULT ''").run(); } catch (e) { /* column already exists */ }
+}
+function addTgKeyword(userId, keyword, respuesta) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        _ensureRespuestaCol(botDb);
+        botDb.prepare("INSERT INTO responder_keywords (user_id, palabra, respuesta) VALUES (?, ?, ?)").run(Number(userId), keyword, respuesta || '');
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function delTgKeyword(userId, id) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM responder_keywords WHERE id = ? AND user_id = ?").run(id, Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function delAllTgKeywords(userId) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("DELETE FROM responder_keywords WHERE user_id = ?").run(Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function _ensureTgListaNegra(db) {
+    db.prepare("CREATE TABLE IF NOT EXISTS tg_lista_negra (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, grupo TEXT, UNIQUE(user_id, grupo))").run();
+}
+function getTgListaNegra(userId) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return [];
+        _ensureTgListaNegra(botDb);
+        return botDb.prepare("SELECT * FROM tg_lista_negra WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
+    } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
+}
+function addTgListaNegra(userId, grupo) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        _ensureTgListaNegra(botDb);
+        botDb.prepare("INSERT OR IGNORE INTO tg_lista_negra (user_id, grupo) VALUES (?, ?)").run(Number(userId), grupo);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function delTgListaNegra(userId, grupo) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        _ensureTgListaNegra(botDb);
+        botDb.prepare("DELETE FROM tg_lista_negra WHERE user_id = ? AND grupo = ?").run(Number(userId), grupo);
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+function limpiarTgListaNegra(userId) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        _ensureTgListaNegra(botDb);
+        botDb.prepare("DELETE FROM tg_lista_negra WHERE user_id = ?").run(Number(userId));
+        return true;
+    } catch (e) { return false; }
+    finally { if (botDb) botDb.close(); }
+}
+
+function getTgConfigEnvio(userId) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return { delay_seg: 10, lote_tamano: 0, lote_pausa_seg: 30 };
+        botDb.prepare("CREATE TABLE IF NOT EXISTS tg_config_envio (user_id INTEGER PRIMARY KEY, delay_seg INTEGER DEFAULT 10, lote_tamano INTEGER DEFAULT 0, lote_pausa_seg INTEGER DEFAULT 30)").run();
+        return botDb.prepare("SELECT * FROM tg_config_envio WHERE user_id = ?").get(Number(userId)) || { delay_seg: 10, lote_tamano: 0, lote_pausa_seg: 30 };
+    } catch (e) { return { delay_seg: 10, lote_tamano: 0, lote_pausa_seg: 30 }; }
+    finally { if (botDb) botDb.close(); }
+}
+function setTgConfigEnvio(userId, delay, lote, pausa) {
+    let botDb;
+    try {
+        botDb = openBotDbWrite(); if (!botDb) return false;
+        botDb.prepare("CREATE TABLE IF NOT EXISTS tg_config_envio (user_id INTEGER PRIMARY KEY, delay_seg INTEGER DEFAULT 10, lote_tamano INTEGER DEFAULT 0, lote_pausa_seg INTEGER DEFAULT 30)").run();
+        botDb.prepare("INSERT OR REPLACE INTO tg_config_envio (user_id, delay_seg, lote_tamano, lote_pausa_seg) VALUES (?, ?, ?, ?)").run(Number(userId), delay || 10, lote || 0, pausa || 30);
+        return true;
+    } catch (e) { return false; }
     finally { if (botDb) botDb.close(); }
 }
