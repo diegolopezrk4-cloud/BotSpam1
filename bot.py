@@ -275,6 +275,15 @@ async def cmd_start(msg: types.Message, state: FSMContext):
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await msg.answer(texto, reply_markup=kb, parse_mode="Markdown")
 
+@dp.message(Command("miid"))
+async def cmd_miid(msg: types.Message):
+    await msg.answer(
+        f"🆔 Tu ID de Telegram es:\n\n"
+        f"`{msg.from_user.id}`\n\n"
+        f"Copia este número para registrarte en el panel web.",
+        parse_mode="Markdown"
+    )
+
 @dp.callback_query(F.data == "main_menu")
 async def cb_main_menu(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
