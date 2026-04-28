@@ -4319,6 +4319,70 @@ async def cmd_wsp_lista(msg: types.Message, command: CommandObject):
         await msg.answer(f"Error: {r.get('error', 'error desconocido')}")
 
 
+@dp.message(Command("wsptasa"))
+async def cmd_wsp_tasa(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_tasa_entrega(msg.from_user.id)
+    if r.get("ok"):
+        texto = (
+            f"📈 *TASA DE ENTREGA*\n\n"
+            f"📨 Total enviados: {r.get('total', 0)}\n"
+            f"✅ Entregados: {r.get('entregados', 0)} ({r.get('tasa_entrega', 0)}%)\n"
+            f"👁 Leidos: {r.get('leidos', 0)} ({r.get('tasa_lectura', 0)}%)\n"
+        )
+        await msg.answer(texto)
+    else:
+        await msg.answer("No hay datos de entrega todavia.")
+
+
+@dp.message(Command("wspbuscargrupos"))
+async def cmd_wsp_buscar_grupos(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args:
+        return await msg.answer(
+            "🔍 *Buscar grupos publicos de WhatsApp*\n\n"
+            "Uso: `/wspbuscargrupos PALABRA_CLAVE`\n\n"
+            "Ejemplo: `/wspbuscargrupos marketing digital`\n\n"
+            "Busca grupos publicos por palabra clave."
+        )
+    import aiohttp
+    await msg.answer(f"🔍 Buscando grupos sobre '{args}'...")
+    try:
+        # Buscar en sitios conocidos de grupos publicos de WhatsApp
+        links_encontrados = []
+        async with aiohttp.ClientSession() as session:
+            urls_busqueda = [
+                f"https://www.google.com/search?q=site:chat.whatsapp.com+{args.replace(' ', '+')}&num=20",
+            ]
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            for url_busqueda in urls_busqueda:
+                try:
+                    async with session.get(url_busqueda, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        html = await resp.text()
+                        import re
+                        links = re.findall(r'https://chat\.whatsapp\.com/[A-Za-z0-9]{15,25}', html)
+                        links_encontrados.extend(links)
+                except Exception:
+                    pass
+        links_encontrados = list(set(links_encontrados))
+        if links_encontrados:
+            texto = f"🔍 *Grupos encontrados para '{args}':* ({len(links_encontrados)})\n\n"
+            for i, link in enumerate(links_encontrados[:20], 1):
+                texto += f"  {i}. {link}\n"
+            texto += "\nUsa estos links para unirte desde el bot (opcion Unirse a Grupo)."
+            if len(texto) > 4000:
+                texto = texto[:4000] + "\n(truncado)"
+            await msg.answer(texto)
+        else:
+            await msg.answer(f"No se encontraron grupos para '{args}'. Intenta con otras palabras clave.")
+    except Exception as e:
+        await msg.answer(f"Error en la busqueda: {str(e)[:200]}")
+
+
 @dp.message(Command("wspreporte"))
 async def cmd_wsp_reporte(msg: types.Message, command: CommandObject):
     if not await verificar_membresia(msg):

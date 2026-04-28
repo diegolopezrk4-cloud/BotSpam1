@@ -200,6 +200,17 @@ function init() {
             FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
             FOREIGN KEY(mensaje_id) REFERENCES mensajes(id)
         );
+        CREATE TABLE IF NOT EXISTS tasa_entrega (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            jid TEXT,
+            msg_id TEXT,
+            estado TEXT DEFAULT 'enviado',
+            fecha_enviado TEXT DEFAULT (datetime('now')),
+            fecha_entregado TEXT,
+            fecha_leido TEXT,
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
         CREATE TABLE IF NOT EXISTS auto_respuestas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT,
@@ -1024,6 +1035,30 @@ function getGrupoStatsResumen(userId) {
     `).all(userId);
 }
 
+// --- TASA DE ENTREGA ---
+function registrarMsgEnviado(userId, jid, msgId) {
+    try {
+        db.prepare("INSERT INTO tasa_entrega (user_id, jid, msg_id) VALUES (?, ?, ?)").run(userId, jid, msgId);
+    } catch (e) {}
+}
+function actualizarEstadoMsg(msgId, estado) {
+    const campo = estado === "delivered" ? "fecha_entregado" : estado === "read" ? "fecha_leido" : null;
+    if (!campo) return;
+    db.prepare(`UPDATE tasa_entrega SET estado = ?, ${campo} = datetime('now') WHERE msg_id = ?`).run(estado, msgId);
+}
+function getTasaEntrega(userId) {
+    const total = db.prepare("SELECT COUNT(*) as c FROM tasa_entrega WHERE user_id = ?").get(userId)?.c || 0;
+    const entregados = db.prepare("SELECT COUNT(*) as c FROM tasa_entrega WHERE user_id = ? AND fecha_entregado IS NOT NULL").get(userId)?.c || 0;
+    const leidos = db.prepare("SELECT COUNT(*) as c FROM tasa_entrega WHERE user_id = ? AND fecha_leido IS NOT NULL").get(userId)?.c || 0;
+    return {
+        total,
+        entregados,
+        leidos,
+        tasa_entrega: total > 0 ? Math.round((entregados / total) * 100) : 0,
+        tasa_lectura: total > 0 ? Math.round((leidos / total) * 100) : 0,
+    };
+}
+
 // --- AUTO RESPUESTAS INTELIGENTES ---
 function getAutoRespuestas(userId) {
     return db.prepare("SELECT * FROM auto_respuestas WHERE user_id = ? ORDER BY id").all(userId);
@@ -1138,4 +1173,6 @@ module.exports = {
     getHorarioEnvio, setHorarioEnvio,
     // Auto respuestas inteligentes
     getAutoRespuestas, agregarAutoRespuesta, eliminarAutoRespuesta, buscarAutoRespuesta, limpiarAutoRespuestas,
+    // Tasa de entrega
+    registrarMsgEnviado, actualizarEstadoMsg, getTasaEntrega,
 };

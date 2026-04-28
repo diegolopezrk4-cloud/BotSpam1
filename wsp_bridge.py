@@ -145,6 +145,10 @@ async def wsp_enviar_a_lista(user_id, numeros, mensaje, media_path=None):
     if media_path: data["media_path"] = media_path
     return await _post("/api/enviar_a_lista", data)
 
+# --- TASA DE ENTREGA ---
+async def wsp_tasa_entrega(user_id):
+    return await _get("/api/tasa_entrega", {"u": str(user_id)})
+
 # --- REPORTE DIARIO ---
 async def wsp_reporte_diario(user_id):
     return await _get("/api/reporte_diario", {"u": str(user_id)})

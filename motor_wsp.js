@@ -24,6 +24,15 @@ function buildMediaPayload(filePath, caption) {
     return { document: fileBuffer, fileName: path.basename(filePath), caption: caption || "" };
 }
 
+// Helper: enviar mensaje y registrar para tasa de entrega
+async function sendAndTrack(sock, jid, payload, userId) {
+    const result = await sock.sendMessage(jid, payload);
+    if (result?.key?.id && userId) {
+        db.registrarMsgEnviado(userId, jid, result.key.id);
+    }
+    return result;
+}
+
 const tareasActivas = {};    // { campanaId: { running, cancel } }
 const responderActivos = {}; // { userId: { running, cancel } }
 const clientSessions = {};   // { "userId_nombre": socket }
@@ -74,6 +83,19 @@ function setupChatCapture(sock, key) {
                 } else if (m.pushName && !clientChats[key][jid].name) {
                     clientChats[key][jid].name = m.pushName;
                 }
+            }
+        }
+    });
+    // Capturar receipts para tasa de entrega
+    sock.ev.on("message-receipt.update", (updates) => {
+        for (const update of updates) {
+            const msgId = update.key?.id;
+            if (!msgId) continue;
+            if (update.receipt?.receiptTimestamp) {
+                db.actualizarEstadoMsg(msgId, "delivered");
+            }
+            if (update.receipt?.readTimestamp) {
+                db.actualizarEstadoMsg(msgId, "read");
             }
         }
     });
@@ -1096,7 +1118,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
                 let textoFinal = reemplazarVariables(mensaje, chat);
                 textoFinal = addInvisibleChars(variarMensaje(textoFinal, userId));
                 const payload = buildMediaPayload(imagenPath, textoFinal) || { text: textoFinal };
-                await botSock.sendMessage(chat.jid, payload);
+                await sendAndTrack(botSock, chat.jid, payload, userId);
                 enviados++;
                 db.registrarEnvio(userId, 0, chat.jid, "enviado_personal");
             } catch (e) {
@@ -1156,7 +1178,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock) 
                 let textoFinal = reemplazarVariables(mensaje, contacto);
                 textoFinal = addInvisibleChars(variarMensaje(textoFinal, userId));
                 const payload = buildMediaPayload(imagenPath, textoFinal) || { text: textoFinal };
-                await botSock.sendMessage(jid, payload);
+                await sendAndTrack(botSock, jid, payload, userId);
                 enviados++;
                 db.registrarEnvio(userId, 0, jid, "enviado_personal");
             } catch (e) {
@@ -1262,7 +1284,7 @@ async function enviarAMiembrosGrupo(userId, groupJid, mensaje, imagenPath, sock)
                 let textoFinal = reemplazarVariables(mensaje, m);
                 textoFinal = addInvisibleChars(variarMensaje(textoFinal, userId));
                 const payload = buildMediaPayload(imagenPath, textoFinal) || { text: textoFinal };
-                await sock.sendMessage(m.jid, payload);
+                await sendAndTrack(sock, m.jid, payload, userId);
                 enviados++;
                 db.registrarEnvio(userId, 0, m.jid, "enviado_miembro");
             } catch (e) {

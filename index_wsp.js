@@ -922,6 +922,128 @@ poll();
                 return res.end(JSON.stringify({ ok: true, message: `envio iniciado a ${jids.length} numero(s)` }));
             }
 
+            // GET /panel — Dashboard web
+            if (url.pathname === "/panel" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bot de Spam J&D - Panel</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',sans-serif;background:#0f0f23;color:#e0e0e0;min-height:100vh}
+.header{background:linear-gradient(135deg,#1a1a2e,#16213e);padding:20px;text-align:center;border-bottom:2px solid #0f3460}
+.header h1{color:#e94560;font-size:24px}
+.container{max-width:1200px;margin:20px auto;padding:0 20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-top:20px}
+.card{background:#16213e;border-radius:12px;padding:20px;border:1px solid #0f3460;transition:transform 0.2s}
+.card:hover{transform:translateY(-2px)}
+.card h3{color:#e94560;margin-bottom:10px;font-size:16px}
+.stat{font-size:32px;font-weight:bold;color:#4ade80}
+.stat.warn{color:#fbbf24}
+.stat.danger{color:#ef4444}
+.input-group{margin:10px 0}
+.input-group label{display:block;margin-bottom:5px;color:#94a3b8}
+.input-group input,.input-group select{width:100%;padding:8px 12px;border:1px solid #0f3460;border-radius:6px;background:#1a1a2e;color:#e0e0e0}
+.btn{padding:10px 20px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;margin:5px}
+.btn-primary{background:#e94560;color:white}
+.btn-secondary{background:#0f3460;color:white}
+.btn:hover{opacity:0.8}
+.table{width:100%;border-collapse:collapse;margin-top:10px}
+.table th,.table td{padding:8px 12px;text-align:left;border-bottom:1px solid #0f3460}
+.table th{color:#e94560}
+.status-bar{display:flex;gap:20px;margin:15px 0;flex-wrap:wrap}
+.status-item{display:flex;align-items:center;gap:8px}
+.dot{width:10px;height:10px;border-radius:50%}
+.dot.green{background:#4ade80}
+.dot.red{background:#ef4444}
+.dot.yellow{background:#fbbf24}
+#userId{padding:10px;border:1px solid #0f3460;border-radius:6px;background:#1a1a2e;color:white;width:250px;margin:10px}
+.section{margin:30px 0}
+.section h2{color:#e94560;border-bottom:1px solid #0f3460;padding-bottom:10px;margin-bottom:15px}
+</style>
+</head>
+<body>
+<div class="header"><h1>🤖 Bot de Spam J&D v2.0 — Panel de Control</h1></div>
+<div class="container">
+<div style="text-align:center;margin:20px 0">
+<label style="color:#94a3b8">Tu User ID: </label>
+<input id="userId" placeholder="Ingresa tu User ID" value="${userId || ""}">
+<button class="btn btn-primary" onclick="loadAll()">Cargar</button>
+</div>
+<div class="grid">
+<div class="card"><h3>📊 Reporte del Dia</h3><div id="reporte">Cargando...</div></div>
+<div class="card"><h3>📈 Tasa de Entrega</h3><div id="tasa">Cargando...</div></div>
+<div class="card"><h3>⚙ Config de Envio</h3><div id="config">Cargando...</div></div>
+<div class="card"><h3>🚫 Lista Negra</h3><div id="listaNegra">Cargando...</div></div>
+<div class="card"><h3>🤖 Auto-Respuestas</h3><div id="autoResp">Cargando...</div></div>
+<div class="card"><h3>📱 Estado del Sistema</h3><div id="status">Cargando...</div></div>
+</div>
+</div>
+<script>
+const API='';
+function uid(){return document.getElementById('userId').value}
+async function api(path){
+  try{const r=await fetch(API+path);return await r.json()}catch(e){return{ok:false,error:e.message}}
+}
+async function loadAll(){
+  const u=uid();if(!u){alert('Ingresa tu User ID');return}
+  loadReporte(u);loadTasa(u);loadConfig(u);loadListaNegra(u);loadAutoResp(u);loadStatus();
+}
+async function loadReporte(u){
+  const r=await api('/api/reporte_diario?u='+u);
+  document.getElementById('reporte').innerHTML=r.ok?
+    '<div class="stat">'+r.totalEnvios+'</div>Total envios<br>✅ '+r.exitosos+' exitosos | ❌ '+r.fallidos+' fallidos<br>💬 '+r.respuestas+' respuestas':'Sin datos';
+}
+async function loadTasa(u){
+  const r=await api('/api/tasa_entrega?u='+u);
+  document.getElementById('tasa').innerHTML=r.ok?
+    '<div class="stat">'+r.tasa_entrega+'%</div>Tasa entrega<br>📨 '+r.total+' enviados | ✅ '+r.entregados+' entregados<br>👁 '+r.leidos+' leidos ('+r.tasa_lectura+'%)':'Sin datos';
+}
+async function loadConfig(u){
+  const r=await api('/api/envio_config?u='+u);
+  if(!r.ok){document.getElementById('config').innerHTML='Error';return}
+  const c=r.config||{},h=r.horario||{};
+  document.getElementById('config').innerHTML=
+    '⏱ Delay: <b>'+c.delay_seg+'s</b><br>'+
+    '📦 Lotes: <b>'+(c.lote_tamano>0?c.lote_tamano+' envios, pausa '+c.lote_pausa_seg+'s':'Desactivado')+'</b><br>'+
+    '🕐 Horario: <b>'+(h.hora_inicio===0&&h.hora_fin===24?'24h':h.hora_inicio+':00-'+h.hora_fin+':00')+'</b>';
+}
+async function loadListaNegra(u){
+  const r=await api('/api/lista_negra?u='+u);
+  document.getElementById('listaNegra').innerHTML=r.ok?
+    '<div class="stat'+(r.total>0?' warn':'')+'">'+ r.total+'</div>numeros bloqueados':'Sin datos';
+}
+async function loadAutoResp(u){
+  const r=await api('/api/auto_respuestas?u='+u);
+  document.getElementById('autoResp').innerHTML=r.ok?
+    '<div class="stat">'+r.total+'</div>reglas activas':'Sin datos';
+}
+async function loadStatus(){
+  const r=await api('/api/status');
+  const s=r.ok?r:{};
+  document.getElementById('status').innerHTML=
+    '<div class="status-bar">'+
+    '<div class="status-item"><div class="dot '+(s.botOnline?'green':'red')+'"></div>Bot '+(s.botOnline?'Online':'Offline')+'</div>'+
+    '</div>Cuentas: '+(s.sesiones||0);
+}
+if(uid())loadAll();
+</script>
+</body></html>`;
+                res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                return res.end(html);
+            }
+
+            // GET /api/tasa_entrega?u=USER_ID — Tasa de entrega/lectura
+            if (url.pathname === "/api/tasa_entrega" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const tasa = db.getTasaEntrega(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...tasa }));
+            }
+
             // GET /api/reporte_diario?u=USER_ID — Reporte del dia
             if (url.pathname === "/api/reporte_diario" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
