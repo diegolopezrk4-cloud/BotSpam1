@@ -48,6 +48,9 @@ async def wsp_sesiones(user_id):
 async def wsp_vincular(user_id, nombre):
     return await _post("/api/vincular", {"u": str(user_id), "nombre": nombre})
 
+async def wsp_desvincular(user_id, nombre):
+    return await _post("/api/desvincular", {"u": str(user_id), "nombre": nombre})
+
 # --- CAMPANAS ---
 async def wsp_campanas(user_id):
     return await _get("/api/campanas", {"u": str(user_id)})
@@ -92,18 +95,24 @@ async def wsp_desactivar(wsp_id):
     return await _post("/api/desactivar", {"wsp_id": str(wsp_id)})
 
 # --- ENVIO PERSONAL ---
-async def wsp_chats_personales(user_id):
-    return await _get("/api/chats_personales", {"u": str(user_id)})
+async def wsp_chats_personales(user_id, cuenta=None):
+    params = {"u": str(user_id)}
+    if cuenta: params["cuenta"] = cuenta
+    return await _get("/api/chats_personales", params)
 
-async def wsp_enviar_personal(user_id, mensaje):
-    return await _post("/api/enviar_personal", {"u": str(user_id), "mensaje": mensaje})
+async def wsp_enviar_personal(user_id, mensaje, cuenta=None):
+    data = {"u": str(user_id), "mensaje": mensaje}
+    if cuenta: data["cuenta"] = cuenta
+    return await _post("/api/enviar_personal", data)
 
 async def wsp_cancelar_envio_personal(user_id):
     return await _post("/api/cancelar_envio_personal", {"u": str(user_id)})
 
 # --- ENVIO A MIEMBROS DE GRUPO ---
-async def wsp_miembros_grupo(user_id, grupo_jid):
-    return await _get("/api/miembros_grupo", {"u": str(user_id), "grupo": grupo_jid})
+async def wsp_miembros_grupo(user_id, grupo_jid, cuenta=None):
+    params = {"u": str(user_id), "grupo": grupo_jid}
+    if cuenta: params["cuenta"] = cuenta
+    return await _get("/api/miembros_grupo", params)
 
 async def wsp_enviar_miembros(user_id, grupo_jid, mensaje):
     return await _post("/api/enviar_miembros", {"u": str(user_id), "grupo": grupo_jid, "mensaje": mensaje})

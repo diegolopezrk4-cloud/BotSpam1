@@ -3354,12 +3354,47 @@ async def cb_sec_wsp(call: types.CallbackQuery):
         [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial"),
          InlineKeyboardButton(text="📈 Stats Grupos", callback_data="wsp_grupo_stats")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="wsp_panelweb")],
         [InlineKeyboardButton(text="👑 Membresía WSP", callback_data="wsp_membresia")],
         kb_volver(),
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
+
+
+@dp.callback_query(F.data == "wsp_panelweb")
+async def cb_wsp_panelweb(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    link = f"http://{WSP_IP}:3000/panel?u={call.from_user.id}"
+    texto = (
+        f"🌐 PANEL WEB\n\n"
+        f"Abre este enlace en tu navegador:\n\n"
+        f"{link}\n\n"
+        f"Desde el panel puedes ver:\n"
+        f"• Reporte del día\n"
+        f"• Tasa de entrega\n"
+        f"• Config de envío\n"
+        f"• Lista negra\n"
+        f"• Auto-respuestas"
+    )
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(Command("panelweb"))
+async def cmd_panelweb(msg: types.Message):
+    if not await verificar_membresia(msg):
+        return
+    link = f"http://{WSP_IP}:3000/panel?u={msg.from_user.id}"
+    await msg.answer(
+        f"🌐 PANEL WEB\n\n"
+        f"Abre en tu navegador:\n{link}\n\n"
+        f"Dashboard completo con reporte, tasa de entrega, config, lista negra y auto-respuestas."
+    )
 
 
 # --- CUENTAS WSP ---
@@ -3390,10 +3425,45 @@ async def cb_wsp_cuentas(call: types.CallbackQuery):
 
     texto += f"\nPara vincular una cuenta WSP, envía:\n/vincularwsp nombre_cuenta"
 
-    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    botones = []
+    if sesiones:
+        for s in sesiones:
+            botones.append([InlineKeyboardButton(text=f"🗑 Eliminar {s.get('nombre', '?')}", callback_data=f"wsp_del_cuenta_{s.get('nombre', '')}")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wsp_del_cuenta_"))
+async def cb_wsp_del_cuenta(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    nombre = call.data.replace("wsp_del_cuenta_", "")
+    botones = [
+        [InlineKeyboardButton(text=f"✅ Sí, eliminar '{nombre}'", callback_data=f"wsp_del_ok_{nombre}")],
+        [InlineKeyboardButton(text="❌ Cancelar", callback_data="wsp_cuentas")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, f"⚠ ¿Seguro que quieres eliminar la cuenta '{nombre}'?\n\nSe desconectará y eliminará del sistema.", reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wsp_del_ok_"))
+async def cb_wsp_del_ok(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    nombre = call.data.replace("wsp_del_ok_", "")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_desvincular(call.from_user.id, nombre)
+    if r.get("ok"):
+        await safe_edit(call.message, f"✅ Cuenta '{nombre}' eliminada correctamente.")
+    else:
+        await safe_edit(call.message, f"❌ Error: {r.get('error', 'desconocido')}")
+    await call.answer()
+    # Volver a mostrar lista
+    call.data = "wsp_cuentas"
+    await cb_wsp_cuentas(call)
 
 
 @dp.message(Command("vincularwsp"))
@@ -3506,11 +3576,28 @@ async def cb_wsp_grupos_delall(call: types.CallbackQuery):
 async def cb_wsp_autojoin(call: types.CallbackQuery, state: FSMContext):
     if not await verificar_membresia_cb(call):
         return
+    if await _mostrar_selector_cuenta(call, "wsp_autojoin_c_", "auto-unirse a grupos"):
+        return
+    await _ejecutar_autojoin_prompt(call, state, None)
+
+
+@dp.callback_query(F.data.startswith("wsp_autojoin_c_"))
+async def cb_wsp_autojoin_cuenta(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    cuenta = call.data.replace("wsp_autojoin_c_", "")
+    await _ejecutar_autojoin_prompt(call, state, cuenta)
+
+
+async def _ejecutar_autojoin_prompt(call, state, cuenta):
     await state.set_state(AutoJoinState.esperando_links_wsp)
+    if cuenta:
+        await state.update_data(autojoin_cuenta=cuenta)
     botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data="wsp_grupos")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    cuenta_txt = f" (cuenta: {cuenta})" if cuenta else ""
     await safe_edit(call.message,
-        "🔗 AUTO-UNIRSE A GRUPOS WHATSAPP\n\n"
+        f"🔗 AUTO-UNIRSE A GRUPOS WHATSAPP{cuenta_txt}\n\n"
         "Envía los links de invitación (uno por línea):\n\n"
         "Ejemplo:\nhttps://chat.whatsapp.com/abc123\nhttps://chat.whatsapp.com/xyz456\n\n"
         "El bot usará tu cuenta WSP para unirse automáticamente.",
@@ -3521,6 +3608,8 @@ async def cb_wsp_autojoin(call: types.CallbackQuery, state: FSMContext):
 
 @dp.message(AutoJoinState.esperando_links_wsp)
 async def msg_autojoin_wsp(msg: types.Message, state: FSMContext):
+    data = await state.get_data()
+    cuenta = data.get("autojoin_cuenta")
     await state.clear()
     links = [l.strip() for l in msg.text.strip().split("\n") if l.strip()]
     if not links:
@@ -3528,7 +3617,7 @@ async def msg_autojoin_wsp(msg: types.Message, state: FSMContext):
         return
     await msg.answer(f"🔗 Intentando unirse a {len(links)} grupo(s) WSP...\nTe notificaré cuando termine.")
     import wsp_bridge as wsp
-    r = await wsp.wsp_autojoin(msg.from_user.id, links)
+    r = await wsp.wsp_autojoin(msg.from_user.id, links, cuenta)
     if not r.get("ok"):
         await msg.answer(f"❌ Error: {r.get('error')}")
         return
@@ -3895,8 +3984,22 @@ async def cmd_wsp_auto_limpiar(msg: types.Message, command: CommandObject):
 async def cb_wsp_personal(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
+    if await _mostrar_selector_cuenta(call, "wsp_personal_c_", "envío personal"):
+        return
+    await _ejecutar_personal(call, None)
+
+
+@dp.callback_query(F.data.startswith("wsp_personal_c_"))
+async def cb_wsp_personal_cuenta(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    cuenta = call.data.replace("wsp_personal_c_", "")
+    await _ejecutar_personal(call, cuenta)
+
+
+async def _ejecutar_personal(call, cuenta):
     import wsp_bridge as wsp
-    r = await wsp.wsp_chats_personales(call.from_user.id)
+    r = await wsp.wsp_chats_personales(call.from_user.id, cuenta)
     botones_back = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
     if not r.get("ok"):
@@ -3927,10 +4030,24 @@ async def cb_wsp_personal(call: types.CallbackQuery):
 async def cb_wsp_detectar_chats(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
+    if await _mostrar_selector_cuenta(call, "wsp_detchats_c_", "detectar chats personales"):
+        return
+    await _ejecutar_detectar_chats(call, None)
+
+
+@dp.callback_query(F.data.startswith("wsp_detchats_c_"))
+async def cb_wsp_detectar_chats_cuenta(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    cuenta = call.data.replace("wsp_detchats_c_", "")
+    await _ejecutar_detectar_chats(call, cuenta)
+
+
+async def _ejecutar_detectar_chats(call, cuenta):
     import wsp_bridge as wsp
     await safe_edit(call.message, "🔍 Detectando todos los chats personales...")
     await call.answer()
-    r = await wsp.wsp_chats_personales(call.from_user.id)
+    r = await wsp.wsp_chats_personales(call.from_user.id, cuenta)
     botones_back = [
         [InlineKeyboardButton(text="🔙 Volver a Envio Personal", callback_data="wsp_personal")],
         [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
@@ -4051,10 +4168,24 @@ def _render_miembros_page(grupos, page):
 async def cb_wsp_miembros(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
+    if await _mostrar_selector_cuenta(call, "wsp_miembros_c_", "envío a miembros"):
+        return
+    await _ejecutar_miembros(call, None)
+
+
+@dp.callback_query(F.data.startswith("wsp_miembros_c_"))
+async def cb_wsp_miembros_cuenta(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    cuenta = call.data.replace("wsp_miembros_c_", "")
+    await _ejecutar_miembros(call, cuenta)
+
+
+async def _ejecutar_miembros(call, cuenta):
     import wsp_bridge as wsp
     await safe_edit(call.message, "🔍 Buscando grupos desde tus cuentas WSP...")
     await call.answer()
-    r = await wsp.wsp_detectar_cliente(call.from_user.id)
+    r = await wsp.wsp_detectar_cliente(call.from_user.id, cuenta)
     botones_back = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
     if not r.get("ok"):
@@ -4681,9 +4812,16 @@ async def cmd_wsp(msg: types.Message):
         [InlineKeyboardButton(text="📋 Campañas WSP", callback_data="wsp_campanas")],
         [InlineKeyboardButton(text="🚀 Iniciar campaña", callback_data="wsp_iniciar"),
          InlineKeyboardButton(text="🛑 Detener", callback_data="wsp_detener")],
+        [InlineKeyboardButton(text="📨 Envio Personal", callback_data="wsp_personal"),
+         InlineKeyboardButton(text="👥 Envio a Miembros", callback_data="wsp_miembros")],
+        [InlineKeyboardButton(text="⚙ Config Envio", callback_data="wsp_config_envio"),
+         InlineKeyboardButton(text="🚫 Lista Negra", callback_data="wsp_lista_negra")],
+        [InlineKeyboardButton(text="🤖 Auto-Responder", callback_data="wsp_auto_resp")],
         [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial"),
          InlineKeyboardButton(text="📈 Stats Grupos", callback_data="wsp_grupo_stats")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="👑 Membresía WSP", callback_data="wsp_membresia")],
         kb_volver(),
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
@@ -4876,27 +5014,62 @@ async def cb_wsp_check_link(call: types.CallbackQuery):
 # ║    DETECTAR GRUPOS VIA CUENTA       ║
 # ╚══════════════════════════════════════╝
 
+async def _mostrar_selector_cuenta(call, prefijo_callback, texto_accion="esta acción"):
+    """Muestra selector de cuenta WSP si hay más de una. Retorna True si se mostró selector."""
+    import wsp_bridge as wsp
+    r = await wsp.wsp_sesiones(call.from_user.id)
+    if not r.get("ok"):
+        return False
+    sesiones = r.get("sesiones", [])
+    if len(sesiones) <= 1:
+        return False
+    texto = f"👤 Selecciona la cuenta WSP para {texto_accion}:\n\n"
+    botones = []
+    for i, s in enumerate(sesiones, 1):
+        texto += f"{i}. {s.get('nombre', '?')} — {s.get('telefono', '?')}\n"
+        botones.append([InlineKeyboardButton(text=f"📱 {s.get('nombre', '?')}", callback_data=f"{prefijo_callback}{s.get('nombre', '')}")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+    return True
+
+
 @dp.callback_query(F.data == "wsp_detectar")
 async def cb_wsp_detectar(call: types.CallbackQuery, state: FSMContext):
     if not await verificar_membresia_cb(call):
         return
+    if await _mostrar_selector_cuenta(call, "wsp_detectar_c_", "detectar grupos"):
+        return
+    await _ejecutar_detectar(call, state, None)
+
+
+@dp.callback_query(F.data.startswith("wsp_detectar_c_"))
+async def cb_wsp_detectar_cuenta(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    cuenta = call.data.replace("wsp_detectar_c_", "")
+    await _ejecutar_detectar(call, state, cuenta)
+
+
+async def _ejecutar_detectar(call, state, cuenta):
     import wsp_bridge as wsp
     await safe_edit(call.message, "🔍 Detectando grupos desde tus cuentas WSP...\nEsto puede tardar unos segundos.")
     await call.answer()
-    r = await wsp.wsp_detectar_cliente(call.from_user.id)
+    r = await wsp.wsp_detectar_cliente(call.from_user.id, cuenta)
     if not r.get("ok"):
         botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, f"❌ Error: {r.get('error', 'sin conexión')}", reply_markup=kb)
         return
     grupos = r.get("grupos", [])
-    cuenta = r.get("cuenta", "?")
+    cuenta_nombre = r.get("cuenta", "?")
     if not grupos:
         botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
-        await safe_edit(call.message, f"📭 La cuenta '{cuenta}' no está en ningún grupo.", reply_markup=kb)
+        await safe_edit(call.message, f"📭 La cuenta '{cuenta_nombre}' no está en ningún grupo.", reply_markup=kb)
         return
-    texto = f"🔍 GRUPOS DETECTADOS (cuenta: {cuenta})\n\n"
+    texto = f"🔍 GRUPOS DETECTADOS (cuenta: {cuenta_nombre})\n\n"
     for i, g in enumerate(grupos[:50], 1):
         texto += f"{i}. {g['subject']} ({g['size']} miembros)\n"
     if len(grupos) > 50:

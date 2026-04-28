@@ -1379,6 +1379,19 @@ async function agregarMiembrosAGrupo(sock, grupoOrigen, grupoDestino, userId) {
     }
 }
 
+function disconnectClient(userId, nombre) {
+    const key = `${userId}_${nombre}`;
+    if (clientSessions[key]) {
+        try { clientSessions[key].end(); } catch (e) {}
+        delete clientSessions[key];
+    }
+    if (clientChats[key]) delete clientChats[key];
+    clearLink(userId, nombre);
+    const sessionDir = getSessionDir(userId, nombre);
+    const fs = require("fs");
+    try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
+}
+
 module.exports = {
     tareasActivas,
     getCampanasActivas,
@@ -1395,6 +1408,7 @@ module.exports = {
     connectClientAccount,
     getOrConnectClient,
     reconectarCuenta,
+    disconnectClient,
     linkAccount,
     getLinkStatus,
     clearLink,

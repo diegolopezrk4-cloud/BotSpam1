@@ -1130,6 +1130,23 @@ function setHorarioEnvio(userId, hora_inicio, hora_fin) {
     `).run(userId, hora_inicio, hora_fin, hora_inicio, hora_fin);
 }
 
+function checkMembresiaTg(telegramId) {
+    try {
+        const Database = require("better-sqlite3");
+        const tgDb = new Database("./titan.db", { readonly: true });
+        const user = tgDb.prepare("SELECT activo, fecha_expira FROM usuarios WHERE telegram_id = ?").get(String(telegramId));
+        tgDb.close();
+        if (!user || !user.activo) return false;
+        if (user.fecha_expira) {
+            const expira = new Date(user.fecha_expira);
+            if (Date.now() > expira.getTime()) return false;
+        }
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -1175,4 +1192,6 @@ module.exports = {
     getAutoRespuestas, agregarAutoRespuesta, eliminarAutoRespuesta, buscarAutoRespuesta, limpiarAutoRespuestas,
     // Tasa de entrega
     registrarMsgEnviado, actualizarEstadoMsg, getTasaEntrega,
+    // Membresia TG
+    checkMembresiaTg,
 };

@@ -396,6 +396,21 @@ poll();
                 return res.end(JSON.stringify({ ok: true, link_url: `/link?u=${encodeURIComponent(body.u)}&n=${encodeURIComponent(body.nombre)}` }));
             }
 
+            // POST /api/desvincular — Eliminar cuenta WSP
+            if (url.pathname === "/api/desvincular" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                try {
+                    motor.disconnectClient(body.u, body.nombre);
+                    db.eliminarSesion(body.u, body.nombre);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, msg: `Cuenta '${body.nombre}' eliminada` }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
             // GET /api/usuarios?u=USER_ID — Info de usuario WSP
             if (url.pathname === "/api/usuarios" && req.method === "GET") {
                 const wspId = url.searchParams.get("u");
@@ -695,22 +710,28 @@ poll();
                 }
             }
 
-            // GET /api/chats_personales?u=USER_ID — Listar chats personales
+            // GET /api/chats_personales?u=USER_ID&cuenta=NOMBRE — Listar chats personales
             if (url.pathname === "/api/chats_personales" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
-                // Buscar sock: botSock o cuenta cliente
-                let sock = botSock;
+                const cuentaParam = url.searchParams.get("cuenta");
+                // Buscar sock: cuenta especifica, botSock, o primera cuenta
+                let sock = null;
+                let cuentaUsada = null;
+                if (cuentaParam && userId) {
+                    try { sock = await motor.getOrConnectClient(userId, cuentaParam); cuentaUsada = cuentaParam; } catch (e) {}
+                }
+                if (!sock) sock = botSock;
                 if (!sock && userId) {
                     const sesiones = db.getSesiones(userId);
                     for (const s of sesiones) {
-                        try { sock = await motor.getOrConnectClient(userId, s.nombre); break; } catch (e) {}
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); cuentaUsada = s.nombre; break; } catch (e) {}
                     }
                 }
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
                 try {
                     const chats = await motor.listarChatsPersonales(sock, userId);
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, total: chats.length, chats }));
+                    return res.end(JSON.stringify({ ok: true, total: chats.length, chats, cuenta: cuentaUsada }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -722,9 +743,14 @@ poll();
                 const body = await readBody();
                 const userId = body.u;
                 const mensaje = body.mensaje;
+                const cuentaParam = body.cuenta;
                 if (!userId || !mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje" })); }
-                // Buscar sock: botSock o cuenta cliente
-                let sock = botSock;
+                // Buscar sock: cuenta especifica, botSock, o primera cuenta
+                let sock = null;
+                if (cuentaParam && userId) {
+                    try { sock = await motor.getOrConnectClient(userId, cuentaParam); } catch (e) {}
+                }
+                if (!sock) sock = botSock;
                 if (!sock) {
                     const sesiones = db.getSesiones(userId);
                     for (const s of sesiones) {
@@ -755,12 +781,17 @@ poll();
                 return res.end(JSON.stringify({ ok: stopped }));
             }
 
-            // GET /api/miembros_grupo?u=USER_ID&grupo=GROUP_JID — Listar miembros de un grupo
+            // GET /api/miembros_grupo?u=USER_ID&grupo=GROUP_JID&cuenta=NOMBRE — Listar miembros de un grupo
             if (url.pathname === "/api/miembros_grupo" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 const grupoJid = url.searchParams.get("grupo");
+                const cuentaParam = url.searchParams.get("cuenta");
                 if (!userId || !grupoJid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
-                let sock = botSock;
+                let sock = null;
+                if (cuentaParam) {
+                    try { sock = await motor.getOrConnectClient(userId, cuentaParam); } catch (e) {}
+                }
+                if (!sock) sock = botSock;
                 if (!sock) {
                     const sesiones = db.getSesiones(userId);
                     for (const s of sesiones) {
@@ -989,6 +1020,8 @@ async function api(path){
 }
 async function loadAll(){
   const u=uid();if(!u){alert('Ingresa tu User ID');return}
+  const m=await api('/api/check_membresia?u='+u);
+  if(!m.ok||!m.activa){document.body.innerHTML='<div style="text-align:center;padding:100px;font-family:sans-serif;background:#0f0f23;color:#e94560;min-height:100vh"><h1>⛔ Membresía expirada</h1><p style="color:#e0e0e0;margin-top:20px">Tu membresía ha expirado o no está activa.<br>Contacta al administrador para renovar.</p></div>';return}
   loadReporte(u);loadTasa(u);loadConfig(u);loadListaNegra(u);loadAutoResp(u);loadStatus();
 }
 async function loadReporte(u){
@@ -1076,6 +1109,15 @@ if(uid())loadAll();
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
                 }
+            }
+
+            // GET /api/check_membresia?u=TELEGRAM_ID — Verificar membresía
+            if (url.pathname === "/api/check_membresia" && req.method === "GET") {
+                const telegramId = url.searchParams.get("u");
+                if (!telegramId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const activa = db.checkMembresiaTg(telegramId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, activa }));
             }
 
             // Endpoint no encontrado
