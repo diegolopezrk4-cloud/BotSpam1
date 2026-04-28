@@ -200,6 +200,28 @@ function init() {
             FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
             FOREIGN KEY(mensaje_id) REFERENCES mensajes(id)
         );
+        CREATE TABLE IF NOT EXISTS envio_config (
+            user_id TEXT PRIMARY KEY,
+            delay_seg INTEGER DEFAULT 10,
+            lote_tamano INTEGER DEFAULT 0,
+            lote_pausa_seg INTEGER DEFAULT 300,
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+        CREATE TABLE IF NOT EXISTS lista_negra_numeros (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            numero TEXT,
+            razon TEXT DEFAULT '',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            UNIQUE(user_id, numero)
+        );
+        CREATE TABLE IF NOT EXISTS horarios_envio (
+            user_id TEXT PRIMARY KEY,
+            hora_inicio INTEGER DEFAULT 0,
+            hora_fin INTEGER DEFAULT 24,
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
     `);
 
     // Migraciones
@@ -992,6 +1014,49 @@ function getGrupoStatsResumen(userId) {
     `).all(userId);
 }
 
+// --- ENVIO CONFIG (delay, lotes) ---
+function getEnvioConfig(userId) {
+    return db.prepare("SELECT * FROM envio_config WHERE user_id = ?").get(userId) || { delay_seg: 10, lote_tamano: 0, lote_pausa_seg: 300 };
+}
+function setEnvioConfig(userId, delay_seg, lote_tamano, lote_pausa_seg) {
+    db.prepare(`INSERT INTO envio_config (user_id, delay_seg, lote_tamano, lote_pausa_seg)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET delay_seg = ?, lote_tamano = ?, lote_pausa_seg = ?
+    `).run(userId, delay_seg, lote_tamano, lote_pausa_seg, delay_seg, lote_tamano, lote_pausa_seg);
+}
+
+// --- LISTA NEGRA DE NUMEROS ---
+function getListaNegra(userId) {
+    return db.prepare("SELECT * FROM lista_negra_numeros WHERE user_id = ? ORDER BY fecha DESC").all(userId);
+}
+function agregarListaNegra(userId, numero, razon) {
+    try {
+        db.prepare("INSERT INTO lista_negra_numeros (user_id, numero, razon) VALUES (?, ?, ?)").run(userId, numero, razon || "");
+        return true;
+    } catch (e) { return false; }
+}
+function eliminarListaNegra(userId, numero) {
+    return db.prepare("DELETE FROM lista_negra_numeros WHERE user_id = ? AND numero = ?").run(userId, numero).changes > 0;
+}
+function estaEnListaNegra(userId, numero) {
+    const clean = numero.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+    return !!db.prepare("SELECT 1 FROM lista_negra_numeros WHERE user_id = ? AND numero = ?").get(userId, clean);
+}
+function limpiarListaNegra(userId) {
+    return db.prepare("DELETE FROM lista_negra_numeros WHERE user_id = ?").run(userId).changes;
+}
+
+// --- HORARIOS DE ENVIO ---
+function getHorarioEnvio(userId) {
+    return db.prepare("SELECT * FROM horarios_envio WHERE user_id = ?").get(userId) || { hora_inicio: 0, hora_fin: 24 };
+}
+function setHorarioEnvio(userId, hora_inicio, hora_fin) {
+    db.prepare(`INSERT INTO horarios_envio (user_id, hora_inicio, hora_fin)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET hora_inicio = ?, hora_fin = ?
+    `).run(userId, hora_inicio, hora_fin, hora_inicio, hora_fin);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -1027,4 +1092,10 @@ module.exports = {
     actualizarUltimoEnvio, toggleEnvioProgramado, eliminarEnvioProgramado,
     // Duplicar y stats
     duplicarMensaje, getGrupoStatsResumen,
+    // Envio config (delay, lotes)
+    getEnvioConfig, setEnvioConfig,
+    // Lista negra numeros
+    getListaNegra, agregarListaNegra, eliminarListaNegra, estaEnListaNegra, limpiarListaNegra,
+    // Horarios envio
+    getHorarioEnvio, setHorarioEnvio,
 };

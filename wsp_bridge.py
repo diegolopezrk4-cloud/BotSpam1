@@ -111,6 +111,35 @@ async def wsp_enviar_miembros(user_id, grupo_jid, mensaje):
 async def wsp_agregar_miembros(user_id, grupo_origen, grupo_destino):
     return await _post("/api/agregar_miembros", {"u": str(user_id), "origen": grupo_origen, "destino": grupo_destino})
 
+# --- CONFIG DE ENVIO ---
+async def wsp_get_envio_config(user_id):
+    return await _get("/api/envio_config", {"u": str(user_id)})
+
+async def wsp_set_envio_config(user_id, **kwargs):
+    data = {"u": str(user_id)}
+    data.update(kwargs)
+    return await _post("/api/envio_config", data)
+
+# --- LISTA NEGRA ---
+async def wsp_get_lista_negra(user_id):
+    return await _get("/api/lista_negra", {"u": str(user_id)})
+
+async def wsp_lista_negra_accion(user_id, accion, numero=None, razon=None):
+    data = {"u": str(user_id), "accion": accion}
+    if numero: data["numero"] = numero
+    if razon: data["razon"] = razon
+    return await _post("/api/lista_negra", data)
+
+# --- ENVIAR A LISTA DE NUMEROS ---
+async def wsp_enviar_a_lista(user_id, numeros, mensaje, media_path=None):
+    data = {"u": str(user_id), "numeros": numeros, "mensaje": mensaje}
+    if media_path: data["media_path"] = media_path
+    return await _post("/api/enviar_a_lista", data)
+
+# --- REPORTE DIARIO ---
+async def wsp_reporte_diario(user_id):
+    return await _get("/api/reporte_diario", {"u": str(user_id)})
+
 # --- DETECTAR GRUPOS (VIA CUENTA CLIENTE) ---
 async def wsp_detectar_cliente(user_id, cuenta=None):
     params = {"u": str(user_id)}

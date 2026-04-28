@@ -3348,6 +3348,8 @@ async def cb_sec_wsp(call: types.CallbackQuery):
          InlineKeyboardButton(text="🛑 Detener", callback_data="wsp_detener")],
         [InlineKeyboardButton(text="📨 Envio Personal", callback_data="wsp_personal"),
          InlineKeyboardButton(text="👥 Envio a Miembros", callback_data="wsp_miembros")],
+        [InlineKeyboardButton(text="⚙ Config Envio", callback_data="wsp_config_envio"),
+         InlineKeyboardButton(text="🚫 Lista Negra", callback_data="wsp_lista_negra")],
         [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial"),
          InlineKeyboardButton(text="📈 Stats Grupos", callback_data="wsp_grupo_stats")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
@@ -3548,6 +3550,241 @@ async def msg_autojoin_wsp(msg: types.Message, state: FSMContext):
     if len(texto) > 4000:
         texto = texto[:4000] + "\n(truncado)"
     await msg.answer(texto)
+
+
+# --- CONFIG DE ENVIO WSP ---
+_config_state = {}
+
+@dp.callback_query(F.data == "wsp_config_envio")
+async def cb_wsp_config_envio(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    await call.answer()
+    r = await wsp.wsp_get_envio_config(call.from_user.id)
+    cfg = r.get("config", {})
+    horario = r.get("horario", {})
+    delay_seg = cfg.get("delay_seg", 10)
+    lote_tamano = cfg.get("lote_tamano", 0)
+    lote_pausa = cfg.get("lote_pausa_seg", 300)
+    h_inicio = horario.get("hora_inicio", 0)
+    h_fin = horario.get("hora_fin", 24)
+    horario_txt = f"{h_inicio}:00 - {h_fin}:00" if (h_inicio != 0 or h_fin != 24) else "Sin limite (24h)"
+    lotes_txt = f"{lote_tamano} envios, pausa {lote_pausa}s" if lote_tamano > 0 else "Desactivado"
+    texto = (
+        f"⚙ *CONFIG DE ENVIO*\n\n"
+        f"⏱ Delay entre envios: *{delay_seg}s*\n"
+        f"📦 Sistema de lotes: *{lotes_txt}*\n"
+        f"🕐 Horario: *{horario_txt}*\n\n"
+        f"📝 Variables disponibles en mensajes:\n"
+        f"  `{{nombre}}` — nombre del contacto\n"
+        f"  `{{numero}}` — numero del contacto\n\n"
+        f"Selecciona que quieres cambiar:"
+    )
+    botones = [
+        [InlineKeyboardButton(text=f"⏱ Delay: {delay_seg}s", callback_data="wcfg_delay")],
+        [InlineKeyboardButton(text=f"📦 Lotes: {lotes_txt}", callback_data="wcfg_lotes")],
+        [InlineKeyboardButton(text=f"🕐 Horario: {horario_txt}", callback_data="wcfg_horario")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    await safe_edit(call.message, texto, reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+@dp.callback_query(F.data == "wcfg_delay")
+async def cb_wcfg_delay(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    await call.answer()
+    botones = []
+    for d in [5, 10, 15, 20, 30, 45, 60]:
+        botones.append([InlineKeyboardButton(text=f"{d} segundos", callback_data=f"wcfg_dset_{d}")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_config_envio")])
+    await safe_edit(call.message, "⏱ *Selecciona el delay entre envios:*", reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+@dp.callback_query(F.data.startswith("wcfg_dset_"))
+async def cb_wcfg_dset(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    delay_seg = int(call.data.replace("wcfg_dset_", ""))
+    import wsp_bridge as wsp
+    # Obtener config actual para preservar lotes
+    r = await wsp.wsp_get_envio_config(call.from_user.id)
+    cfg = r.get("config", {})
+    await wsp.wsp_set_envio_config(call.from_user.id,
+        delay_seg=delay_seg,
+        lote_tamano=cfg.get("lote_tamano", 0),
+        lote_pausa_seg=cfg.get("lote_pausa_seg", 300))
+    await call.answer(f"Delay actualizado a {delay_seg}s")
+    call.data = "wsp_config_envio"
+    await cb_wsp_config_envio(call)
+
+
+@dp.callback_query(F.data == "wcfg_lotes")
+async def cb_wcfg_lotes(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    await call.answer()
+    botones = [
+        [InlineKeyboardButton(text="Desactivado (envio continuo)", callback_data="wcfg_lset_0_0")],
+        [InlineKeyboardButton(text="5 envios, pausa 3 min", callback_data="wcfg_lset_5_180")],
+        [InlineKeyboardButton(text="10 envios, pausa 5 min", callback_data="wcfg_lset_10_300")],
+        [InlineKeyboardButton(text="10 envios, pausa 10 min", callback_data="wcfg_lset_10_600")],
+        [InlineKeyboardButton(text="15 envios, pausa 5 min", callback_data="wcfg_lset_15_300")],
+        [InlineKeyboardButton(text="20 envios, pausa 10 min", callback_data="wcfg_lset_20_600")],
+        [InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_config_envio")],
+    ]
+    await safe_edit(call.message,
+        "📦 *SISTEMA DE LOTES*\n\n"
+        "Envia X mensajes, luego pausa Y minutos.\n"
+        "Esto ayuda a evitar bloqueos.\n\n"
+        "Selecciona una opcion:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+@dp.callback_query(F.data.startswith("wcfg_lset_"))
+async def cb_wcfg_lset(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    parts = call.data.replace("wcfg_lset_", "").split("_")
+    lote_tamano = int(parts[0])
+    lote_pausa = int(parts[1])
+    import wsp_bridge as wsp
+    r = await wsp.wsp_get_envio_config(call.from_user.id)
+    cfg = r.get("config", {})
+    await wsp.wsp_set_envio_config(call.from_user.id,
+        delay_seg=cfg.get("delay_seg", 10),
+        lote_tamano=lote_tamano,
+        lote_pausa_seg=lote_pausa)
+    await call.answer("Lotes actualizado")
+    call.data = "wsp_config_envio"
+    await cb_wsp_config_envio(call)
+
+
+@dp.callback_query(F.data == "wcfg_horario")
+async def cb_wcfg_horario(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    await call.answer()
+    botones = [
+        [InlineKeyboardButton(text="Sin limite (24h)", callback_data="wcfg_hset_0_24")],
+        [InlineKeyboardButton(text="6:00 - 22:00", callback_data="wcfg_hset_6_22")],
+        [InlineKeyboardButton(text="8:00 - 20:00", callback_data="wcfg_hset_8_20")],
+        [InlineKeyboardButton(text="9:00 - 18:00", callback_data="wcfg_hset_9_18")],
+        [InlineKeyboardButton(text="9:00 - 21:00", callback_data="wcfg_hset_9_21")],
+        [InlineKeyboardButton(text="10:00 - 22:00", callback_data="wcfg_hset_10_22")],
+        [InlineKeyboardButton(text="7:00 - 23:00", callback_data="wcfg_hset_7_23")],
+        [InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_config_envio")],
+    ]
+    await safe_edit(call.message,
+        "🕐 *HORARIO DE ENVIO*\n\n"
+        "Solo envia mensajes dentro del horario seleccionado.\n"
+        "Si esta fuera de horario, el envio se pausa automaticamente.\n\n"
+        "Selecciona un horario:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+@dp.callback_query(F.data.startswith("wcfg_hset_"))
+async def cb_wcfg_hset(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    parts = call.data.replace("wcfg_hset_", "").split("_")
+    h_inicio = int(parts[0])
+    h_fin = int(parts[1])
+    import wsp_bridge as wsp
+    await wsp.wsp_set_envio_config(call.from_user.id, hora_inicio=h_inicio, hora_fin=h_fin)
+    txt = "Sin limite (24h)" if (h_inicio == 0 and h_fin == 24) else f"{h_inicio}:00 - {h_fin}:00"
+    await call.answer(f"Horario: {txt}")
+    call.data = "wsp_config_envio"
+    await cb_wsp_config_envio(call)
+
+
+# --- LISTA NEGRA WSP ---
+@dp.callback_query(F.data == "wsp_lista_negra")
+async def cb_wsp_lista_negra(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    await call.answer()
+    r = await wsp.wsp_get_lista_negra(call.from_user.id)
+    numeros = r.get("numeros", [])
+    total = r.get("total", 0)
+    texto = f"🚫 *LISTA NEGRA* ({total} numeros)\n\n"
+    if numeros:
+        for i, n in enumerate(numeros[:30], 1):
+            texto += f"  {i}. {n.get('numero', '?')}"
+            if n.get("razon"):
+                texto += f" — {n['razon']}"
+            texto += "\n"
+        if total > 30:
+            texto += f"  ... y {total - 30} mas\n"
+    else:
+        texto += "Lista vacia. Los numeros en esta lista no recibiran mensajes.\n"
+    texto += "\nUsa estos comandos:\n"
+    texto += "`/wspbloquear 51999999999` — Agregar numero\n"
+    texto += "`/wspdesbloquear 51999999999` — Quitar numero\n"
+    texto += "`/wsplimpiarbloqueos` — Limpiar toda la lista\n"
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    botones = [
+        [InlineKeyboardButton(text="🗑 Limpiar toda la lista", callback_data="wsp_ln_limpiar")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    await safe_edit(call.message, texto, reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+@dp.callback_query(F.data == "wsp_ln_limpiar")
+async def cb_wsp_ln_limpiar(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_lista_negra_accion(call.from_user.id, "limpiar")
+    eliminados = r.get("eliminados", 0)
+    await call.answer(f"Lista negra limpiada ({eliminados} eliminados)")
+    call.data = "wsp_lista_negra"
+    await cb_wsp_lista_negra(call)
+
+
+@dp.message(Command("wspbloquear"))
+async def cmd_wsp_bloquear(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    numero = command.args
+    if not numero:
+        return await msg.answer("Uso: /wspbloquear NUMERO\nEjemplo: /wspbloquear 51999999999")
+    numero = numero.strip().split()[0]
+    import wsp_bridge as wsp
+    r = await wsp.wsp_lista_negra_accion(msg.from_user.id, "agregar", numero=numero)
+    if r.get("ok"):
+        await msg.answer(f"🚫 Numero {numero} agregado a lista negra.")
+    else:
+        await msg.answer(f"Ya esta en la lista o error: {r.get('message', '')}")
+
+
+@dp.message(Command("wspdesbloquear"))
+async def cmd_wsp_desbloquear(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    numero = command.args
+    if not numero:
+        return await msg.answer("Uso: /wspdesbloquear NUMERO\nEjemplo: /wspdesbloquear 51999999999")
+    numero = numero.strip().split()[0]
+    import wsp_bridge as wsp
+    r = await wsp.wsp_lista_negra_accion(msg.from_user.id, "eliminar", numero=numero)
+    if r.get("ok"):
+        await msg.answer(f"✅ Numero {numero} removido de lista negra.")
+    else:
+        await msg.answer("No se encontro en la lista.")
+
+
+@dp.message(Command("wsplimpiarbloqueos"))
+async def cmd_wsp_limpiar_bloqueos(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_lista_negra_accion(msg.from_user.id, "limpiar")
+    eliminados = r.get("eliminados", 0)
+    await msg.answer(f"🗑 Lista negra limpiada. {eliminados} numero(s) eliminados.")
 
 
 # --- ENVIO PERSONAL WSP ---
@@ -3937,7 +4174,8 @@ async def cmd_wsp_miembros(msg: types.Message, command: CommandObject):
         return await msg.answer(
             "Uso: /wspmiembros GRUPO_JID Tu mensaje aqui\n\n"
             "Ejemplo: /wspmiembros 120363123456@g.us Hola, te contacto desde el grupo\n\n"
-            "Envia un DM a cada miembro del grupo con 10 seg de delay."
+            "Envia un DM a cada miembro del grupo con delay configurable.\n"
+            "Variables: {nombre} {numero}"
         )
     parts = args.split(" ", 1)
     grupo_jid = parts[0]
@@ -3948,6 +4186,58 @@ async def cmd_wsp_miembros(msg: types.Message, command: CommandObject):
         await msg.answer("Envio a miembros iniciado! Recibiras progreso en WhatsApp.\n\nUsa /wspcancelarpersonal para detener.")
     else:
         await msg.answer(f"Error: {r.get('error', r.get('message', 'error desconocido'))}")
+
+
+@dp.message(Command("wsplista"))
+async def cmd_wsp_lista(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args:
+        return await msg.answer(
+            "📋 *Enviar a lista de numeros*\n\n"
+            "Formato:\n"
+            "`/wsplista NUMERO1,NUMERO2,NUMERO3 Tu mensaje`\n\n"
+            "Ejemplo:\n"
+            "`/wsplista 51999888777,51999666555 Hola {nombre}!`\n\n"
+            "Variables: {nombre} {numero}\n"
+            "Separa los numeros con comas."
+        )
+    parts = args.split(" ", 1)
+    if len(parts) < 2:
+        return await msg.answer("Falta el mensaje. Uso: /wsplista NUMEROS mensaje")
+    numeros = [n.strip() for n in parts[0].split(",") if n.strip()]
+    mensaje = parts[1]
+    import wsp_bridge as wsp
+    r = await wsp.wsp_enviar_a_lista(msg.from_user.id, numeros, mensaje)
+    if r.get("ok"):
+        await msg.answer(f"Envio iniciado a {len(numeros)} numero(s).\n\nUsa /wspcancelarpersonal para detener.")
+    else:
+        await msg.answer(f"Error: {r.get('error', 'error desconocido')}")
+
+
+@dp.message(Command("wspreporte"))
+async def cmd_wsp_reporte(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_reporte_diario(msg.from_user.id)
+    if r.get("ok"):
+        texto = (
+            f"📊 *REPORTE DEL DIA*\n\n"
+            f"📨 Total envios: {r.get('totalEnvios', 0)}\n"
+            f"✅ Exitosos: {r.get('exitosos', 0)}\n"
+            f"❌ Fallidos: {r.get('fallidos', 0)}\n"
+            f"💬 Respuestas: {r.get('respuestas', 0)}\n"
+        )
+        por_cuenta = r.get("porCuenta", [])
+        if por_cuenta:
+            texto += "\n📱 Por cuenta:\n"
+            for c in por_cuenta:
+                texto += f"  {c.get('cuenta_nombre', '?')}: {c.get('total', 0)} envios\n"
+        await msg.answer(texto)
+    else:
+        await msg.answer("No hay datos para hoy.")
 
 
 # --- CAMPAÑAS WSP ---
@@ -5292,6 +5582,44 @@ async def main():
                 logger.error(f"[TG Scheduler] Error: {e}")
 
     asyncio.create_task(tg_scheduler())
+
+    # --- Reporte diario automatico ---
+    async def reporte_diario_task():
+        import wsp_bridge as wsp
+        while True:
+            try:
+                ahora = __import__('datetime').datetime.now()
+                # Enviar reporte a las 23:00
+                if ahora.hour == 23 and ahora.minute == 0:
+                    r = await wsp.wsp_status()
+                    # Enviar a todos los usuarios activos
+                    from db import get_all_users
+                    try:
+                        users = await get_all_users()
+                        for u in users:
+                            try:
+                                rr = await wsp.wsp_get_envio_config(u["user_id"])
+                                # Solo si tiene reporte activado (por defecto si)
+                                reporte = await wsp._get("/api/reporte_diario", {"u": str(u["user_id"])})
+                                if reporte.get("ok"):
+                                    d = reporte
+                                    texto = (
+                                        f"📊 *REPORTE DIARIO*\n\n"
+                                        f"📨 Total envios: {d.get('totalEnvios', 0)}\n"
+                                        f"✅ Exitosos: {d.get('exitosos', 0)}\n"
+                                        f"❌ Fallidos: {d.get('fallidos', 0)}\n"
+                                        f"💬 Respuestas: {d.get('respuestas', 0)}\n"
+                                    )
+                                    await bot.send_message(u["user_id"], texto)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                await asyncio.sleep(60)
+            except Exception:
+                await asyncio.sleep(60)
+
+    asyncio.create_task(reporte_diario_task())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

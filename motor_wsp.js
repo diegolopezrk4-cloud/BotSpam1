@@ -4,6 +4,26 @@ const fs = require("fs");
 const db = require("./db_wsp");
 const config = require("./config_wsp");
 
+// Helper: detectar tipo de medio y construir payload para sendMessage
+function buildMediaPayload(filePath, caption) {
+    if (!filePath || !fs.existsSync(filePath)) return caption ? { text: caption } : null;
+    const ext = path.extname(filePath).toLowerCase();
+    const fileBuffer = fs.readFileSync(filePath);
+    if ([".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(ext)) {
+        return { image: fileBuffer, caption: caption || "" };
+    } else if ([".mp4", ".avi", ".mov", ".mkv", ".3gp"].includes(ext)) {
+        return { video: fileBuffer, caption: caption || "" };
+    } else if ([".mp3", ".ogg", ".m4a", ".wav", ".aac"].includes(ext)) {
+        if (ext === ".ogg") {
+            return { audio: fileBuffer, mimetype: "audio/ogg; codecs=opus", ptt: true };
+        }
+        return { audio: fileBuffer, mimetype: `audio/${ext.replace(".", "")}` };
+    } else if ([".pdf", ".doc", ".docx", ".xls", ".xlsx", ".txt", ".zip"].includes(ext)) {
+        return { document: fileBuffer, fileName: path.basename(filePath), caption: caption || "" };
+    }
+    return { document: fileBuffer, fileName: path.basename(filePath), caption: caption || "" };
+}
+
 const tareasActivas = {};    // { campanaId: { running, cancel } }
 const responderActivos = {}; // { userId: { running, cancel } }
 const clientSessions = {};   // { "userId_nombre": socket }
@@ -902,10 +922,83 @@ function getCampanasActivas() {
 }
 
 // ============================================================
-// ENVIO PERSONAL — Enviar a chats personales con delay 10s
+// ROTACION DE CUENTAS — obtener cuentas disponibles en rotacion
 // ============================================================
-const DELAY_ENTRE_ENVIOS = 10000; // 10 segundos entre cada envio
+const _rotacionIndex = {};
+
+async function obtenerSockRotado(userId) {
+    const sesiones = db.getSesiones(userId);
+    if (!sesiones.length) return null;
+
+    if (!_rotacionIndex[userId]) _rotacionIndex[userId] = 0;
+    const idx = _rotacionIndex[userId] % sesiones.length;
+    _rotacionIndex[userId]++;
+
+    try {
+        const sock = await getOrConnectClient(userId, sesiones[idx].nombre);
+        return sock;
+    } catch (e) {
+        // Si falla, intentar con las demas
+        for (let i = 0; i < sesiones.length; i++) {
+            if (i === idx) continue;
+            try {
+                return await getOrConnectClient(userId, sesiones[i].nombre);
+            } catch (e2) {}
+        }
+        return null;
+    }
+}
+
+// ============================================================
+// ENVIO PERSONAL — Enviar a chats personales con delay configurable
+// ============================================================
 const envioPersonalActivo = {};
+
+// Helper: verificar si estamos en horario permitido
+function dentroDeHorario(userId) {
+    const horario = db.getHorarioEnvio(userId);
+    if (horario.hora_inicio === 0 && horario.hora_fin === 24) return true;
+    const ahora = new Date();
+    const horaActual = parseInt(ahora.toLocaleString("en-US", { timeZone: config.TIMEZONE, hour: "numeric", hour12: false }));
+    if (horario.hora_inicio < horario.hora_fin) {
+        return horaActual >= horario.hora_inicio && horaActual < horario.hora_fin;
+    }
+    return horaActual >= horario.hora_inicio || horaActual < horario.hora_fin;
+}
+
+// Helper: esperar hasta que estemos en horario
+async function esperarHorario(userId) {
+    while (!dentroDeHorario(userId)) {
+        await delay(60000); // Revisar cada minuto
+    }
+}
+
+// Helper: reemplazar variables en mensaje
+function reemplazarVariables(texto, contacto) {
+    let result = texto;
+    if (contacto.nombre) result = result.replace(/\{nombre\}/gi, contacto.nombre);
+    if (contacto.numero) result = result.replace(/\{numero\}/gi, contacto.numero);
+    if (contacto.jid) {
+        const num = contacto.jid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+        result = result.replace(/\{numero\}/gi, num);
+        if (!contacto.nombre) result = result.replace(/\{nombre\}/gi, num);
+    }
+    return result;
+}
+
+// Helper: delay inteligente con lotes
+async function delayConLotes(userId, enviados, cancelled) {
+    if (cancelled) return;
+    const cfg = db.getEnvioConfig(userId);
+    const delayMs = (cfg.delay_seg || 10) * 1000;
+    // Sistema de lotes: si lote_tamano > 0, pausa larga cada X envios
+    if (cfg.lote_tamano > 0 && enviados > 0 && enviados % cfg.lote_tamano === 0) {
+        const pausaMs = (cfg.lote_pausa_seg || 300) * 1000;
+        await delay(pausaMs);
+    } else {
+        await delay(delayMs);
+    }
+}
 
 async function listarChatsPersonales(sock, userId) {
     const chats = [];
@@ -965,27 +1058,33 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
             return false;
         }
 
-        const total = chats.length;
-        let enviados = 0, errores = 0;
+        // Filtrar lista negra
+        const chatsFiltrados = chats.filter(c => {
+            const num = c.jid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+            return !db.estaEnListaNegra(userId, num);
+        });
+
+        const cfg = db.getEnvioConfig(userId);
+        const total = chatsFiltrados.length;
+        let enviados = 0, errores = 0, saltados = chats.length - total;
 
         try {
+            let infoLotes = cfg.lote_tamano > 0 ? `\nLotes: ${cfg.lote_tamano} envios, pausa ${cfg.lote_pausa_seg}s` : "";
             await botSock.sendMessage(userId, {
-                text: `\u{1F4E8} Iniciando envio personal a ${total} chat(s)...\nDelay: ${DELAY_ENTRE_ENVIOS / 1000}s entre cada envio.\nEscribe "cancelar envio" para detener.`
+                text: `\u{1F4E8} Iniciando envio personal a ${total} chat(s)...\nDelay: ${cfg.delay_seg}s entre cada envio.${infoLotes}${saltados > 0 ? `\n\u{1F6AB} ${saltados} en lista negra (saltados)` : ""}\nEscribe "cancelar envio" para detener.`
             });
         } catch (e) {}
 
-        for (const chat of chats) {
+        for (const chat of chatsFiltrados) {
+            if (cancelled) break;
+            // Verificar horario
+            await esperarHorario(userId);
             if (cancelled) break;
             try {
-                const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
-                if (imagenPath && fs.existsSync(imagenPath)) {
-                    await botSock.sendMessage(chat.jid, {
-                        image: fs.readFileSync(imagenPath),
-                        caption: textoFinal,
-                    });
-                } else {
-                    await botSock.sendMessage(chat.jid, { text: textoFinal });
-                }
+                let textoFinal = reemplazarVariables(mensaje, chat);
+                textoFinal = addInvisibleChars(variarMensaje(textoFinal, userId));
+                const payload = buildMediaPayload(imagenPath, textoFinal) || { text: textoFinal };
+                await botSock.sendMessage(chat.jid, payload);
                 enviados++;
                 db.registrarEnvio(userId, 0, chat.jid, "enviado_personal");
             } catch (e) {
@@ -993,12 +1092,10 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
                 db.registrarEnvio(userId, 0, chat.jid, "error_personal");
             }
             if (enviados % 10 === 0 && enviados > 0) {
-                try {
-                    await botSock.sendMessage(userId, { text: `\u{1F4CA} Progreso: ${enviados}/${total}...` });
-                } catch (e) {}
+                try { await botSock.sendMessage(userId, { text: `\u{1F4CA} Progreso: ${enviados}/${total}...` }); } catch (e) {}
             }
             if (!cancelled) {
-                await new Promise(r => setTimeout(r, DELAY_ENTRE_ENVIOS));
+                await delayConLotes(userId, enviados, cancelled);
             }
         }
 
@@ -1022,27 +1119,32 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock) 
     envioPersonalActivo[userId] = task;
 
     try {
-        const total = jids.length;
+        // Filtrar lista negra
+        const jidsFiltrados = jids.filter(jid => {
+            const num = jid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+            return !db.estaEnListaNegra(userId, num);
+        });
+        const cfg = db.getEnvioConfig(userId);
+        const total = jidsFiltrados.length;
         let enviados = 0, errores = 0;
 
         try {
+            let infoLotes = cfg.lote_tamano > 0 ? `\nLotes: ${cfg.lote_tamano} envios, pausa ${cfg.lote_pausa_seg}s` : "";
             await botSock.sendMessage(userId, {
-                text: `\u{1F4E8} Enviando a ${total} contacto(s) seleccionados...\nDelay: ${DELAY_ENTRE_ENVIOS / 1000}s`
+                text: `\u{1F4E8} Enviando a ${total} contacto(s)...\nDelay: ${cfg.delay_seg}s${infoLotes}`
             });
         } catch (e) {}
 
-        for (const jid of jids) {
+        for (const jid of jidsFiltrados) {
+            if (cancelled) break;
+            await esperarHorario(userId);
             if (cancelled) break;
             try {
-                const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
-                if (imagenPath && fs.existsSync(imagenPath)) {
-                    await botSock.sendMessage(jid, {
-                        image: fs.readFileSync(imagenPath),
-                        caption: textoFinal,
-                    });
-                } else {
-                    await botSock.sendMessage(jid, { text: textoFinal });
-                }
+                const contacto = { jid, numero: jid.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "") };
+                let textoFinal = reemplazarVariables(mensaje, contacto);
+                textoFinal = addInvisibleChars(variarMensaje(textoFinal, userId));
+                const payload = buildMediaPayload(imagenPath, textoFinal) || { text: textoFinal };
+                await botSock.sendMessage(jid, payload);
                 enviados++;
                 db.registrarEnvio(userId, 0, jid, "enviado_personal");
             } catch (e) {
@@ -1053,7 +1155,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock) 
                 try { await botSock.sendMessage(userId, { text: `\u{1F4CA} Progreso: ${enviados}/${total}...` }); } catch (e) {}
             }
             if (!cancelled) {
-                await new Promise(r => setTimeout(r, DELAY_ENTRE_ENVIOS));
+                await delayConLotes(userId, enviados, cancelled);
             }
         }
 
@@ -1120,29 +1222,35 @@ async function enviarAMiembrosGrupo(userId, groupJid, mensaje, imagenPath, sock)
             return false;
         }
 
-        const total = miembros.length;
-        let enviados = 0, errores = 0;
+        // Filtrar lista negra y al propio usuario
+        const myJid = sock.user?.id;
+        const myNum = myJid ? myJid.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "") : "";
+        const miembrosFiltrados = miembros.filter(m => {
+            const num = m.jid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+            if (num === myNum) return false;
+            return !db.estaEnListaNegra(userId, num);
+        });
+
+        const cfg = db.getEnvioConfig(userId);
+        const total = miembrosFiltrados.length;
+        let enviados = 0, errores = 0, saltados = miembros.length - total;
 
         try {
+            let infoLotes = cfg.lote_tamano > 0 ? `\nLotes: ${cfg.lote_tamano} envios, pausa ${cfg.lote_pausa_seg}s` : "";
             await sock.sendMessage(userId, {
-                text: `\u{1F4E8} Enviando DM a ${total} miembro(s) del grupo...\nDelay: ${DELAY_ENTRE_ENVIOS / 1000}s entre cada envio.\nEscribe "cancelar envio" para detener.`
+                text: `\u{1F4E8} Enviando DM a ${total} miembro(s) del grupo...\nDelay: ${cfg.delay_seg}s entre cada envio.${infoLotes}${saltados > 0 ? `\n\u{1F6AB} ${saltados} saltados (lista negra/propios)` : ""}\nEscribe "cancelar envio" para detener.`
             });
         } catch (e) {}
 
-        for (const m of miembros) {
+        for (const m of miembrosFiltrados) {
             if (cancelled) break;
-            // No enviar al propio bot/usuario
-            if (m.jid === userId) { continue; }
+            await esperarHorario(userId);
+            if (cancelled) break;
             try {
-                const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
-                if (imagenPath && fs.existsSync(imagenPath)) {
-                    await sock.sendMessage(m.jid, {
-                        image: fs.readFileSync(imagenPath),
-                        caption: textoFinal,
-                    });
-                } else {
-                    await sock.sendMessage(m.jid, { text: textoFinal });
-                }
+                let textoFinal = reemplazarVariables(mensaje, m);
+                textoFinal = addInvisibleChars(variarMensaje(textoFinal, userId));
+                const payload = buildMediaPayload(imagenPath, textoFinal) || { text: textoFinal };
+                await sock.sendMessage(m.jid, payload);
                 enviados++;
                 db.registrarEnvio(userId, 0, m.jid, "enviado_miembro");
             } catch (e) {
@@ -1150,12 +1258,10 @@ async function enviarAMiembrosGrupo(userId, groupJid, mensaje, imagenPath, sock)
                 db.registrarEnvio(userId, 0, m.jid, "error_miembro");
             }
             if (enviados % 10 === 0 && enviados > 0) {
-                try {
-                    await sock.sendMessage(userId, { text: `\u{1F4CA} Progreso: ${enviados}/${total}...` });
-                } catch (e) {}
+                try { await sock.sendMessage(userId, { text: `\u{1F4CA} Progreso: ${enviados}/${total}...` }); } catch (e) {}
             }
             if (!cancelled) {
-                await new Promise(r => setTimeout(r, DELAY_ENTRE_ENVIOS));
+                await delayConLotes(userId, enviados, cancelled);
             }
         }
 
@@ -1274,4 +1380,6 @@ module.exports = {
     listarMiembrosGrupo,
     enviarAMiembrosGrupo,
     agregarMiembrosAGrupo,
+    obtenerSockRotado,
+    buildMediaPayload,
 };

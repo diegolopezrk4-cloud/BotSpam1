@@ -806,6 +806,99 @@ poll();
                 return res.end(JSON.stringify({ ok: true, message: "envio a miembros iniciado" }));
             }
 
+            // GET /api/envio_config?u=USER_ID — Obtener config de envio
+            if (url.pathname === "/api/envio_config" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const cfg = db.getEnvioConfig(userId);
+                const horario = db.getHorarioEnvio(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, config: cfg, horario }));
+            }
+
+            // POST /api/envio_config — Actualizar config de envio
+            if (url.pathname === "/api/envio_config" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                if (body.delay_seg !== undefined) {
+                    db.setEnvioConfig(userId, body.delay_seg || 10, body.lote_tamano || 0, body.lote_pausa_seg || 300);
+                }
+                if (body.hora_inicio !== undefined) {
+                    db.setHorarioEnvio(userId, body.hora_inicio || 0, body.hora_fin || 24);
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/lista_negra?u=USER_ID — Obtener lista negra
+            if (url.pathname === "/api/lista_negra" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const lista = db.getListaNegra(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, total: lista.length, numeros: lista }));
+            }
+
+            // POST /api/lista_negra — Agregar/eliminar de lista negra
+            if (url.pathname === "/api/lista_negra" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                const accion = body.accion; // "agregar", "eliminar", "limpiar"
+                if (!userId || !accion) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o accion" })); }
+                if (accion === "agregar") {
+                    const ok = db.agregarListaNegra(userId, body.numero, body.razon);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok, message: ok ? "agregado" : "ya existe" }));
+                } else if (accion === "eliminar") {
+                    const ok = db.eliminarListaNegra(userId, body.numero);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok }));
+                } else if (accion === "limpiar") {
+                    const count = db.limpiarListaNegra(userId);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, eliminados: count }));
+                }
+                res.writeHead(400);
+                return res.end(JSON.stringify({ ok: false, error: "accion invalida" }));
+            }
+
+            // POST /api/enviar_a_lista — Enviar a lista de numeros especificos
+            if (url.pathname === "/api/enviar_a_lista" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                const numeros = body.numeros; // array de numeros
+                const mensaje = body.mensaje;
+                if (!userId || !numeros || !mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, numeros o mensaje" })); }
+                let sock = botSock;
+                if (!sock) {
+                    const sesiones = db.getSesiones(userId);
+                    for (const s of sesiones) {
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); break; } catch (e) {}
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
+                if (motor.envioPersonalActivo[userId]) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: false, error: "ya hay un envio activo" }));
+                }
+                const jids = numeros.map(n => n.replace(/[^0-9]/g, "") + "@s.whatsapp.net");
+                motor.enviarASeleccionados(userId, jids, mensaje, body.media_path || null, sock).catch(e => {
+                    console.error(`Error en envio a lista: ${e.message}`);
+                });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, message: `envio iniciado a ${jids.length} numero(s)` }));
+            }
+
+            // GET /api/reporte_diario?u=USER_ID — Reporte del dia
+            if (url.pathname === "/api/reporte_diario" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const reporte = db.getReporteDiario(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...reporte }));
+            }
+
             // POST /api/agregar_miembros — Agregar miembros de un grupo a otro
             if (url.pathname === "/api/agregar_miembros" && req.method === "POST") {
                 const body = await readBody();
