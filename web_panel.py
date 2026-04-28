@@ -53,6 +53,21 @@ def es_admin(user_id):
     return int(user_id) == ADMIN_ID
 
 
+async def check_membresia(user_id):
+    if es_admin(user_id):
+        return True
+    return await db.tiene_membresia_activa(user_id)
+
+
+async def verificar_propiedad_campana(campana_id, user_id):
+    campana = await db.get_campana_by_id(campana_id)
+    if not campana:
+        return None, web.json_response({"ok": False, "error": "Campana no encontrada"}, status=404)
+    if int(campana["user_id"]) != int(user_id):
+        return None, web.json_response({"ok": False, "error": "Sin permiso"}, status=403)
+    return campana, None
+
+
 # ─────────────────────────────────────────
 #   API ENDPOINTS
 # ─────────────────────────────────────────
@@ -260,10 +275,17 @@ async def api_grupo_agregar(request):
         return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
 
     lines = [l.strip() for l in links_raw.strip().split("\n") if l.strip()]
+    max_g = await db.get_max_grupos(user_id)
+    grupos_actuales = await db.get_grupos(user_id)
+    total_actual = len(grupos_actuales)
     agregados = 0
     duplicados = 0
     invalidos = 0
+    limite_alcanzado = False
     for link in lines:
+        if total_actual + agregados >= max_g:
+            limite_alcanzado = True
+            break
         link = link.strip()
         if link.startswith("t.me/"):
             link = "https://" + link
@@ -280,6 +302,7 @@ async def api_grupo_agregar(request):
         "agregados": agregados,
         "duplicados": duplicados,
         "invalidos": invalidos,
+        "limite_alcanzado": limite_alcanzado,
     })
 
 
@@ -527,10 +550,15 @@ async def api_campana_editar(request):
             fields[part.name] = (await part.read()).decode("utf-8")
 
     campana_id = int(fields.get("id", 0))
+    user_id = int(fields.get("u", 0))
     mensaje = fields.get("mensaje", "").strip()
 
-    if not campana_id:
-        return web.json_response({"ok": False, "error": "Falta id"}, status=400)
+    if not campana_id or not user_id:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+
+    campana, err = await verificar_propiedad_campana(campana_id, user_id)
+    if err:
+        return err
 
     await db.actualizar_campana_mensaje(campana_id, mensaje, foto_path)
     return web.json_response({"ok": True, "msg": "Campana actualizada."})
@@ -539,10 +567,13 @@ async def api_campana_editar(request):
 async def api_campana_eliminar(request):
     body = await request.json()
     campana_id = int(body.get("id", 0))
-    if not campana_id:
-        return web.json_response({"ok": False, "error": "Falta id"}, status=400)
-    campana = await db.get_campana_by_id(campana_id)
-    if campana and campana["activa"]:
+    user_id = int(body.get("u", 0))
+    if not campana_id or not user_id:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    campana, err = await verificar_propiedad_campana(campana_id, user_id)
+    if err:
+        return err
+    if campana["activa"]:
         detener_campana(campana_id)
     await db.eliminar_campana(campana_id)
     return web.json_response({"ok": True})
@@ -551,10 +582,14 @@ async def api_campana_eliminar(request):
 async def api_campana_config(request):
     body = await request.json()
     campana_id = int(body.get("id", 0))
+    user_id = int(body.get("u", 0))
     intervalo_min = int(body.get("min", 30))
     intervalo_max = int(body.get("max", 60))
-    if not campana_id:
-        return web.json_response({"ok": False, "error": "Falta id"}, status=400)
+    if not campana_id or not user_id:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    campana, err = await verificar_propiedad_campana(campana_id, user_id)
+    if err:
+        return err
     if intervalo_min < 3:
         return web.json_response({"ok": False, "error": "Minimo 3 segundos"})
     if intervalo_max < intervalo_min:
@@ -581,8 +616,12 @@ async def api_campana_clonar(request):
 async def api_campana_resetear(request):
     body = await request.json()
     campana_id = int(body.get("id", 0))
-    if not campana_id:
-        return web.json_response({"ok": False, "error": "Falta id"}, status=400)
+    user_id = int(body.get("u", 0))
+    if not campana_id or not user_id:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    campana, err = await verificar_propiedad_campana(campana_id, user_id)
+    if err:
+        return err
     await db.resetear_stats_campana(campana_id)
     return web.json_response({"ok": True, "msg": "Estadisticas reseteadas."})
 
@@ -625,8 +664,12 @@ async def api_iniciar(request):
 async def api_detener(request):
     body = await request.json()
     campana_id = int(body.get("id", 0))
-    if not campana_id:
-        return web.json_response({"ok": False, "error": "Falta id"}, status=400)
+    user_id = int(body.get("u", 0))
+    if not campana_id or not user_id:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    campana, err = await verificar_propiedad_campana(campana_id, user_id)
+    if err:
+        return err
     detener_campana(campana_id)
     await db.set_campana_activa(campana_id, False)
     return web.json_response({"ok": True, "msg": "Campana detenida."})
@@ -1701,6 +1744,7 @@ async function editarCampana() {
 
   const fd = new FormData();
   fd.append('id', id);
+  fd.append('u', UID);
   fd.append('mensaje', mensaje);
   if(fotoInput.files.length) fd.append('foto', fotoInput.files[0]);
 
@@ -1727,7 +1771,7 @@ async function resetearStats(id) {
   const r = await api('campana/resetear', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ id })
+    body: JSON.stringify({ id, u: UID })
   });
   if(r.ok) { toast(r.msg, 'success'); loadCampanas(); }
   else toast(r.error, 'error');
@@ -1738,7 +1782,7 @@ async function eliminarCampana(id) {
   const r = await api('campana/eliminar', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ id })
+    body: JSON.stringify({ id, u: UID })
   });
   if(r.ok) { toast('Campana eliminada', 'success'); loadCampanas(); }
   else toast(r.error, 'error');
@@ -1758,7 +1802,7 @@ async function detenerCampana(id) {
   const r = await api('detener', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ id })
+    body: JSON.stringify({ id, u: UID })
   });
   if(r.ok) { toast(r.msg, 'success'); loadCampanas(); loadControl(); }
   else toast(r.error, 'error');
@@ -1829,7 +1873,7 @@ async function guardarIntervalo(id) {
   const r = await api('campana/config', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ id, min, max })
+    body: JSON.stringify({ id, u: UID, min, max })
   });
   if(r.ok) { toast(r.msg, 'success'); loadIntervalo(); }
   else toast(r.error, 'error');
