@@ -2725,10 +2725,18 @@ async def cb_sec_wsp(call: types.CallbackQuery):
     import wsp_bridge as wsp
     r = await wsp.wsp_status()
     if r.get("ok"):
-        estado = "🟢 Conectado" if r["status"] == "conectado" else "🔴 Desconectado"
-        numero = r.get("bot_number", "---")
+        st = r["status"]
+        if st == "conectado":
+            estado = "🟢 Conectado"
+        elif st == "solo_api":
+            estado = "🟢 API activa (sin cuenta bot WSP)"
+        elif st == "esperando_qr":
+            estado = "🟡 Esperando QR"
+        else:
+            estado = "🔴 Desconectado"
+        numero = r.get("bot_number") or "(modo solo API)"
     else:
-        estado = "⚠ Sin conexión al bot WSP"
+        estado = "⚠ Sin conexión al servidor WSP"
         numero = "---"
 
     texto = (
@@ -3135,10 +3143,18 @@ async def cmd_wsp(msg: types.Message):
     import wsp_bridge as wsp
     r = await wsp.wsp_status()
     if r.get("ok"):
-        estado = "🟢 Conectado" if r["status"] == "conectado" else "🔴 Desconectado"
-        numero = r.get("bot_number", "---")
+        st = r["status"]
+        if st == "conectado":
+            estado = "🟢 Conectado"
+        elif st == "solo_api":
+            estado = "🟢 API activa (sin cuenta bot WSP)"
+        elif st == "esperando_qr":
+            estado = "🟡 Esperando QR"
+        else:
+            estado = "🔴 Desconectado"
+        numero = r.get("bot_number") or "(modo solo API)"
     else:
-        estado = "⚠ Sin conexión al bot WSP"
+        estado = "⚠ Sin conexión al servidor WSP"
         numero = "---"
 
     texto = (
