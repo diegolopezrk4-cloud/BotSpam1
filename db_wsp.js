@@ -198,21 +198,42 @@ function getUsuario(wspId) {
 }
 
 function findUserByNumber(phoneNumber) {
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    // Limpiar el input (quitar sufijos si los tiene)
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+
+    // Busqueda exacta con sufijos comunes
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     const userLid = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(withLid);
     if (userLid) return userLid;
     const userWsp = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(withWsp);
     if (userWsp) return userWsp;
+
+    // Busqueda LIKE para LID con :device (ej: "12345:42@lid")
+    const likeUser = db.prepare("SELECT * FROM usuarios WHERE wsp_id LIKE ? LIMIT 1").get(cleanNum + ":%@lid");
+    if (likeUser) return likeUser;
+
+    // Busqueda exacta con el input original (por si ya viene con formato completo)
+    if (phoneNumber !== cleanNum) {
+        const exactUser = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(phoneNumber);
+        if (exactUser) return exactUser;
+    }
+
     return null;
 }
 
 function getAllJidsForNumber(phoneNumber) {
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
     const jids = [];
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     if (db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(withLid)) jids.push(withLid);
     if (db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(withWsp)) jids.push(withWsp);
+    // Buscar tambien JIDs con :device@lid
+    const lidDevices = db.prepare("SELECT wsp_id FROM usuarios WHERE wsp_id LIKE ?").all(cleanNum + ":%@lid");
+    for (const row of lidDevices) {
+        if (!jids.includes(row.wsp_id)) jids.push(row.wsp_id);
+    }
     return jids;
 }
 
@@ -281,10 +302,11 @@ function activarMembresia(wspId, dias) {
 }
 
 function activarMembresiaByNumber(phoneNumber, dias) {
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
     const expira = expiraPeru(dias);
     const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : "mensual";
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     let activated = false;
     const userLid = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(withLid);
     if (userLid) {
@@ -296,6 +318,12 @@ function activarMembresiaByNumber(phoneNumber, dias) {
         db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, withWsp);
         activated = true;
     }
+    // Buscar JIDs con :device@lid
+    const lidDevices = db.prepare("SELECT wsp_id FROM usuarios WHERE wsp_id LIKE ?").all(cleanNum + ":%@lid");
+    for (const row of lidDevices) {
+        db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, row.wsp_id);
+        activated = true;
+    }
     if (!activated) {
         db.prepare("INSERT OR IGNORE INTO usuarios (wsp_id, nombre) VALUES (?, '')").run(withWsp);
         db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, withWsp);
@@ -304,15 +332,20 @@ function activarMembresiaByNumber(phoneNumber, dias) {
 }
 
 function desactivarByNumber(phoneNumber) {
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     db.prepare("UPDATE usuarios SET activo = 0 WHERE wsp_id IN (?, ?)").run(withLid, withWsp);
+    // Tambien desactivar JIDs con :device@lid
+    db.prepare("UPDATE usuarios SET activo = 0 WHERE wsp_id LIKE ?").run(cleanNum + ":%@lid");
 }
 
 function banByNumber(phoneNumber) {
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     db.prepare("UPDATE usuarios SET activo = 0, plan = 'baneado' WHERE wsp_id IN (?, ?)").run(withLid, withWsp);
+    db.prepare("UPDATE usuarios SET activo = 0, plan = 'baneado' WHERE wsp_id LIKE ?").run(cleanNum + ":%@lid");
 }
 
 let botRealJid = null;
@@ -345,20 +378,27 @@ function tieneMembresia(wspId) {
         }
         return true;
     }
-    let altJid = null;
+    // Buscar en todos los formatos de JID alternativos
+    const altJids = [];
     if (wspId.endsWith("@lid")) {
-        altJid = num + "@s.whatsapp.net";
+        altJids.push(num + "@s.whatsapp.net");
+        // Si tiene :device, tambien probar sin device
+        if (wspId.includes(":")) altJids.push(num + "@lid");
     } else if (wspId.endsWith("@s.whatsapp.net")) {
-        altJid = num + "@lid";
+        altJids.push(num + "@lid");
     }
-    if (altJid) {
+    // Buscar tambien por LIKE para LID con :device
+    const lidDevices = db.prepare("SELECT * FROM usuarios WHERE wsp_id LIKE ? AND wsp_id != ? LIMIT 1").all(num + ":%@lid", wspId);
+    for (const ld of lidDevices) altJids.push(ld.wsp_id);
+
+    for (const altJid of altJids) {
         const altUser = getUsuario(altJid);
         if (altUser && altUser.activo) {
             if (altUser.fecha_expira) {
                 const expira = new Date(altUser.fecha_expira);
                 if (Date.now() > expira.getTime()) {
                     db.prepare("UPDATE usuarios SET activo = 0, plan = 'expirado' WHERE wsp_id = ?").run(altJid);
-                    return false;
+                    continue;
                 }
             }
             crearUsuario(wspId, user ? user.nombre : "");

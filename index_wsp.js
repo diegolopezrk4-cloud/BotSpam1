@@ -36,19 +36,24 @@ function addAdminJid(jid) {
     console.log(`\u{1F451} Admin JID registrado: ${jid}`);
 }
 
+// --- Normalizar JID (LID y @s.whatsapp.net al mismo numero) ---
+function normalizeJid(jid) {
+    return jid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+}
+
 // --- Estado de usuarios (FSM) ---
-const userState = {}; // { jid: { screen, data, step } }
+const userState = {}; // { normalizedJid: { screen, data, step } }
 
 function getState(jid) {
-    return userState[jid] || { screen: null, data: {} };
+    return userState[normalizeJid(jid)] || { screen: null, data: {} };
 }
 
 function setState(jid, screen, data = {}) {
-    userState[jid] = { screen, data };
+    userState[normalizeJid(jid)] = { screen, data };
 }
 
 function clearState(jid) {
-    delete userState[jid];
+    delete userState[normalizeJid(jid)];
 }
 
 // --- Variables globales ---
@@ -409,7 +414,7 @@ poll();
             if (url.pathname === "/api/activar" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.wsp_id || !body.dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta wsp_id o dias" })); }
-                // Buscar usuario por número o ID
+                // Buscar usuario por número o ID (soporta LID con :device)
                 let user = db.getUsuario(body.wsp_id);
                 if (!user) {
                     user = db.findUserByNumber(body.wsp_id);
@@ -418,7 +423,8 @@ poll();
                     res.writeHead(404);
                     return res.end(JSON.stringify({ ok: false, error: "usuario no encontrado" }));
                 }
-                db.activarMembresia(user.wsp_id, parseInt(body.dias));
+                // Activar por numero para cubrir todos los formatos de JID
+                db.activarMembresiaByNumber(jidToNumber(user.wsp_id), parseInt(body.dias));
                 const plan = parseInt(body.dias) === 1 ? "diario" : parseInt(body.dias) === 7 ? "semanal" : "mensual";
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, plan, wsp_id: user.wsp_id, nombre: user.nombre }));
