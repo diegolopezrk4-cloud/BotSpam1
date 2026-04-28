@@ -135,6 +135,11 @@ async def api_tg_auth_verify_code(request):
     except SessionPasswordNeededError:
         return web.json_response({"ok": True, "status": "need_2fa"})
     except Exception as e:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        del web_login_sessions[token]
         return web.json_response({"ok": False, "error": str(e)})
 
 
@@ -156,6 +161,11 @@ async def api_tg_auth_verify_2fa(request):
         del web_login_sessions[token]
         return web.json_response({"ok": True, "status": "success"})
     except Exception as e:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        del web_login_sessions[token]
         return web.json_response({"ok": False, "error": str(e)})
 
 
@@ -190,6 +200,12 @@ async def api_sesiones_tg_eliminar(request):
     if not user_id or not nombre:
         return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
     await db.eliminar_sesion(user_id, nombre)
+    path = get_session_path(user_id, nombre)
+    for ext in ["", ".session"]:
+        try:
+            os.remove(path + ext)
+        except FileNotFoundError:
+            pass
     return web.json_response({"ok": True})
 
 
@@ -546,7 +562,7 @@ async def api_tg_autoresponder_keyword_del(request):
     kw_id = int(body.get("id", 0))
     if not user_id or not kw_id:
         return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
-    await db.eliminar_keyword(kw_id)
+    await db.eliminar_keyword(kw_id, user_id)
     return web.json_response({"ok": True})
 
 

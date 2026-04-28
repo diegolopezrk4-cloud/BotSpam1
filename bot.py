@@ -2741,12 +2741,24 @@ async def cb_sec_wsp(call: types.CallbackQuery):
     )
     botones = [
         [InlineKeyboardButton(text="👤 Cuentas WSP", callback_data="wsp_cuentas")],
-        [InlineKeyboardButton(text="🌐 Grupos WSP", callback_data="wsp_grupos")],
+        [InlineKeyboardButton(text="🌐 Grupos WSP", callback_data="wsp_grupos"),
+         InlineKeyboardButton(text="🔍 Detectar Grupos", callback_data="wsp_detectar")],
+        [InlineKeyboardButton(text="📝 Mensajes", callback_data="wsp_mensajes")],
+        [InlineKeyboardButton(text="📤 Enviar Único", callback_data="wsp_envio_unico"),
+         InlineKeyboardButton(text="⏰ Programados", callback_data="wsp_programados")],
         [InlineKeyboardButton(text="📋 Campañas WSP", callback_data="wsp_campanas")],
         [InlineKeyboardButton(text="🚀 Iniciar campaña", callback_data="wsp_iniciar"),
          InlineKeyboardButton(text="🛑 Detener", callback_data="wsp_detener")],
-        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial")],
+        [InlineKeyboardButton(text="📨 Envío Personal", callback_data="wsp_personal"),
+         InlineKeyboardButton(text="👥 Envío a Miembros", callback_data="wsp_envio_miembros")],
+        [InlineKeyboardButton(text="⚙ Config Envío", callback_data="wsp_config"),
+         InlineKeyboardButton(text="🚫 Lista Negra", callback_data="wsp_listanegra")],
+        [InlineKeyboardButton(text="🤖 Auto-Responder", callback_data="wsp_autoresponder")],
+        [InlineKeyboardButton(text="💬 Envío Interactivo", callback_data="wsp_interactivo")],
+        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial"),
+         InlineKeyboardButton(text="📈 Stats Grupos", callback_data="wsp_stats")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="wsp_panelweb")],
         [InlineKeyboardButton(text="👑 Membresía WSP", callback_data="wsp_membresia")],
         kb_volver(),
     ]
@@ -3228,13 +3240,25 @@ async def cmd_wsp(msg: types.Message):
     )
     botones = [
         [InlineKeyboardButton(text="👤 Cuentas WSP", callback_data="wsp_cuentas")],
-        [InlineKeyboardButton(text="🌐 Grupos WSP", callback_data="wsp_grupos")],
+        [InlineKeyboardButton(text="🌐 Grupos WSP", callback_data="wsp_grupos"),
+         InlineKeyboardButton(text="🔍 Detectar Grupos", callback_data="wsp_detectar")],
+        [InlineKeyboardButton(text="📝 Mensajes", callback_data="wsp_mensajes")],
+        [InlineKeyboardButton(text="📤 Enviar Único", callback_data="wsp_envio_unico"),
+         InlineKeyboardButton(text="⏰ Programados", callback_data="wsp_programados")],
         [InlineKeyboardButton(text="📋 Campañas WSP", callback_data="wsp_campanas")],
         [InlineKeyboardButton(text="🚀 Iniciar campaña", callback_data="wsp_iniciar"),
          InlineKeyboardButton(text="🛑 Detener", callback_data="wsp_detener")],
-        [InlineKeyboardButton(text="📨 Envio Personal", callback_data="wsp_personal")],
-        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial")],
+        [InlineKeyboardButton(text="📨 Envío Personal", callback_data="wsp_personal"),
+         InlineKeyboardButton(text="👥 Envío a Miembros", callback_data="wsp_envio_miembros")],
+        [InlineKeyboardButton(text="⚙ Config Envío", callback_data="wsp_config"),
+         InlineKeyboardButton(text="🚫 Lista Negra", callback_data="wsp_listanegra")],
+        [InlineKeyboardButton(text="🤖 Auto-Responder", callback_data="wsp_autoresponder")],
+        [InlineKeyboardButton(text="💬 Envío Interactivo", callback_data="wsp_interactivo")],
+        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial"),
+         InlineKeyboardButton(text="📈 Stats Grupos", callback_data="wsp_stats")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
+        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="👑 Membresía WSP", callback_data="wsp_membresia")],
         kb_volver(),
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
@@ -3371,6 +3395,246 @@ async def cmd_wsp_membresia(msg: types.Message):
     if len(texto) > 4000:
         texto = texto[:4000] + "\n(truncado)"
     await msg.answer(texto)
+
+
+# --- DETECTAR GRUPOS WSP ---
+@dp.callback_query(F.data == "wsp_detectar")
+async def cb_wsp_detectar(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_detectar_grupos(call.from_user.id)
+    if not r.get("ok"):
+        botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, f"❌ Error: {r.get('error', 'sin conexión')}", reply_markup=kb)
+        await call.answer()
+        return
+    grupos = r.get("grupos", [])
+    texto = f"🔍 DETECTAR GRUPOS WSP ({len(grupos)}):\n\n"
+    if grupos:
+        for i, g in enumerate(grupos[:30], 1):
+            nombre = g.get("subject", g.get("name", "Sin nombre"))
+            miembros = g.get("size", "?")
+            texto += f"{i}. {nombre} ({miembros} miembros)\n"
+    else:
+        texto += "(no se detectaron grupos)\n"
+    texto += "\nUsa /wspgrupo link para agregar un grupo."
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- MENSAJES WSP ---
+@dp.callback_query(F.data == "wsp_mensajes")
+async def cb_wsp_mensajes(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_campanas(call.from_user.id)
+    if not r.get("ok"):
+        botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, f"❌ Error: {r.get('error', 'sin conexión')}", reply_markup=kb)
+        await call.answer()
+        return
+    campanas = r.get("campanas", [])
+    texto = f"📝 MENSAJES WSP ({len(campanas)}):\n\n"
+    if campanas:
+        for c in campanas[:10]:
+            nombre = c.get("nombre", "?")
+            msg_prev = (c.get("mensaje", "") or "")[:60]
+            texto += f"• {nombre}: {msg_prev}...\n"
+    else:
+        texto += "(sin mensajes/campañas)\n"
+    texto += "\n/wspcampana nombre | mensaje — Crear campaña con mensaje"
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- ENVIO UNICO WSP ---
+@dp.callback_query(F.data == "wsp_envio_unico")
+async def cb_wsp_envio_unico(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    texto = (
+        "📤 ENVÍO ÚNICO WSP\n\n"
+        "Envía un mensaje a un grupo específico.\n\n"
+        "Usa: /wspenvio ID_CAMPANA\n"
+        "Esto enviará la campaña a sus grupos asignados una sola vez."
+    )
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- PROGRAMADOS WSP ---
+@dp.callback_query(F.data == "wsp_programados")
+async def cb_wsp_programados(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    texto = (
+        "⏰ PROGRAMADOS WSP\n\n"
+        "Programa envíos automáticos en horarios específicos.\n\n"
+        "Funcionalidad próximamente disponible."
+    )
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- ENVIO A MIEMBROS WSP ---
+@dp.callback_query(F.data == "wsp_envio_miembros")
+async def cb_wsp_envio_miembros(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    texto = (
+        "👥 ENVÍO A MIEMBROS WSP\n\n"
+        "Envía mensajes directos a los miembros de un grupo.\n\n"
+        "Usa: /wsppersonal mensaje\n"
+        "Esto enviará el mensaje a todos tus chats personales."
+    )
+    botones = [
+        [InlineKeyboardButton(text="📨 Envío Personal", callback_data="wsp_personal")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- CONFIG ENVIO WSP ---
+@dp.callback_query(F.data == "wsp_config")
+async def cb_wsp_config(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    texto = (
+        "⚙ CONFIG ENVÍO WSP\n\n"
+        "Configuración de intervalos y comportamiento de envío.\n\n"
+        "• Delay entre mensajes\n"
+        "• Tamaño de lote\n"
+        "• Pausa entre lotes\n\n"
+        "Configurable desde el Panel Web."
+    )
+    botones = [
+        [InlineKeyboardButton(text="🌐 Ir al Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- LISTA NEGRA WSP ---
+@dp.callback_query(F.data == "wsp_listanegra")
+async def cb_wsp_listanegra(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    texto = (
+        "🚫 LISTA NEGRA WSP\n\n"
+        "Grupos bloqueados que no recibirán mensajes.\n\n"
+        "Gestiona la lista negra desde el Panel Web."
+    )
+    botones = [
+        [InlineKeyboardButton(text="🌐 Ir al Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- AUTO-RESPONDER WSP ---
+@dp.callback_query(F.data == "wsp_autoresponder")
+async def cb_wsp_autoresponder(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    texto = (
+        "🤖 AUTO-RESPONDER WSP\n\n"
+        "Responde automáticamente a mensajes con keywords específicas.\n\n"
+        "Configurable desde el Panel Web."
+    )
+    botones = [
+        [InlineKeyboardButton(text="🌐 Ir al Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- ENVIO INTERACTIVO WSP ---
+@dp.callback_query(F.data == "wsp_interactivo")
+async def cb_wsp_interactivo(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    texto = (
+        "💬 ENVÍO INTERACTIVO WSP\n\n"
+        "Envía mensajes y recibe respuestas en tiempo real.\n\n"
+        "Funcionalidad disponible desde el Panel Web."
+    )
+    botones = [
+        [InlineKeyboardButton(text="🌐 Ir al Panel Web", callback_data="wsp_panelweb")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- STATS GRUPOS WSP ---
+@dp.callback_query(F.data == "wsp_stats")
+async def cb_wsp_stats(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_dashboard(call.from_user.id)
+    if not r.get("ok"):
+        botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, f"❌ Error: {r.get('error', 'sin conexión')}", reply_markup=kb)
+        await call.answer()
+        return
+    d = r.get("dashboard", r)
+    texto = (
+        f"📈 STATS GRUPOS WSP\n\n"
+        f"🌐 Grupos: {d.get('grupos', 0)}\n"
+        f"👤 Cuentas: {d.get('cuentas', d.get('sesiones', 0))}\n"
+        f"📋 Campañas: {d.get('campanas', 0)}\n"
+        f"📤 Enviados: {d.get('enviados', d.get('total_enviados', 0))}\n"
+        f"❌ Errores: {d.get('errores', d.get('total_errores', 0))}\n"
+    )
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# --- PANEL WEB ---
+@dp.callback_query(F.data == "wsp_panelweb")
+async def cb_wsp_panelweb(call: types.CallbackQuery):
+    texto = (
+        "🌐 PANEL WEB\n\n"
+        "Accede al panel web completo en:\n"
+        "https://jdbotspam.duckdns.org\n\n"
+        f"Tu ID: {call.from_user.id}\n\n"
+        "Desde el panel puedes gestionar todo:\n"
+        "• Cuentas, Grupos, Campañas\n"
+        "• Iniciar/Detener spam\n"
+        "• Config, Lista Negra, Auto-Responder\n"
+        "• Historial y Estadísticas"
+    )
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
 
 
 # --- COMANDOS WSP RAPIDOS ---

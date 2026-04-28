@@ -544,9 +544,12 @@ async def get_keywords_full(user_id):
         ) as cur:
             return await cur.fetchall()
 
-async def eliminar_keyword(kw_id):
+async def eliminar_keyword(kw_id, user_id=None):
     async with _connect() as db:
-        await db.execute("DELETE FROM responder_keywords WHERE id=?", (kw_id,))
+        if user_id:
+            await db.execute("DELETE FROM responder_keywords WHERE id=? AND user_id=?", (kw_id, user_id))
+        else:
+            await db.execute("DELETE FROM responder_keywords WHERE id=?", (kw_id,))
         await db.commit()
 
 async def limpiar_keywords(user_id):
