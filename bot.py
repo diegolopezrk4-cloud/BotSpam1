@@ -3637,7 +3637,7 @@ async def main():
     web_panel.set_bot_reference(bot)
     await web_panel.start_web_panel()
     logger.info("🚀 Bot de Spam J&D v2.0 iniciado correctamente.")
-    logger.info(f"🌐 Panel web disponible en http://0.0.0.0:{web_panel.WEB_PORT}")
+    logger.info(f"🌐 TG API backend en puerto {web_panel.WEB_PORT} (panel_server.js lo proxea)")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

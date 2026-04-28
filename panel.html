@@ -1,0 +1,2163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bot de Spam J&D - Panel de Control</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+<style>
+:root {
+  --bg: #0a0a1a;
+  --bg2: #111128;
+  --bg3: #1a1a3e;
+  --accent: #6c5ce7;
+  --accent2: #a29bfe;
+  --danger: #e94560;
+  --success: #00b894;
+  --warn: #fdcb6e;
+  --text: #e0e0e0;
+  --text2: #94a3b8;
+  --border: #2d2d5e;
+  --radius: 12px;
+}
+[data-theme="light"] {
+  --bg: #f0f2f5;
+  --bg2: #ffffff;
+  --bg3: #e8eaf0;
+  --accent: #6c5ce7;
+  --accent2: #5a4bd1;
+  --danger: #e94560;
+  --success: #00b894;
+  --warn: #e67e22;
+  --text: #1a1a2e;
+  --text2: #555770;
+  --border: #d1d5db;
+}
+[data-theme="light"] .auth-container { background: linear-gradient(135deg, #e8eaf0 0%, #d1d5e8 50%, #e8eaf0 100%); }
+[data-theme="light"] .auth-card .btn-main { color: white; }
+[data-theme="light"] table tr:hover { background: rgba(108,92,231,0.08); }
+[data-theme="light"] .toast { background: #fff; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* AUTH SCREENS */
+.auth-container {
+  display: flex; align-items: center; justify-content: center; min-height: 100vh;
+  background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0a0a1a 100%);
+}
+.auth-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 20px;
+  padding: 50px 40px; text-align: center; max-width: 440px; width: 90%;
+  box-shadow: 0 20px 60px rgba(108,92,231,0.15);
+}
+.auth-card .logo { font-size: 64px; margin-bottom: 10px; }
+.auth-card h1 { font-size: 26px; color: var(--accent2); margin-bottom: 5px; }
+.auth-card .subtitle { color: var(--text2); margin-bottom: 25px; font-size: 14px; }
+.auth-card input {
+  width: 100%; padding: 14px 18px; border: 2px solid var(--border); border-radius: 10px;
+  background: var(--bg); color: var(--text); font-size: 16px; margin-bottom: 12px;
+  outline: none; transition: border-color 0.3s;
+}
+.auth-card input:focus { border-color: var(--accent); }
+.auth-card input::placeholder { color: #555; }
+.auth-card .btn-main {
+  width: 100%; padding: 14px; border: none; border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), #5a4bd1); color: white;
+  font-size: 16px; font-weight: 700; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;
+  margin-bottom: 12px;
+}
+.auth-card .btn-main:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(108,92,231,0.4); }
+.auth-card .btn-main:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.auth-card .link-btn { background: none; border: none; color: var(--accent2); cursor: pointer; font-size: 14px; text-decoration: underline; }
+.auth-card .link-btn:hover { color: white; }
+.auth-error { color: var(--danger); margin-top: 8px; font-size: 14px; display: none; }
+.auth-success { color: var(--success); margin-top: 8px; font-size: 14px; display: none; }
+.auth-card .divider { border-top: 1px solid var(--border); margin: 20px 0; }
+.password-rules { text-align: left; font-size: 12px; color: var(--text2); margin-bottom: 15px; padding: 10px; background: var(--bg); border-radius: 8px; }
+.password-rules li { margin-bottom: 3px; }
+
+/* LAYOUT */
+.app { display: none; }
+.sidebar {
+  position: fixed; left: 0; top: 0; bottom: 0; width: 250px;
+  background: var(--bg2); border-right: 1px solid var(--border); padding: 20px 0;
+  overflow-y: auto; z-index: 100; transition: width 0.3s;
+  display: flex; flex-direction: column;
+}
+.sidebar .brand { padding: 0 20px 15px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.sidebar .brand h2 { color: var(--accent2); font-size: 18px; display: flex; align-items: center; gap: 8px; }
+.sidebar .brand small { color: var(--text2); font-size: 11px; }
+.sidebar .user-info {
+  padding: 12px 20px; border-bottom: 1px solid var(--border); margin-bottom: 10px;
+  background: rgba(108,92,231,0.05);
+}
+.sidebar .user-info .uid { color: var(--accent2); font-weight: 700; font-size: 14px; }
+.sidebar .user-info .label { color: var(--text2); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+.sidebar nav { padding: 5px 0; flex: 1; overflow-y: auto; }
+.sidebar nav .nav-group { padding: 5px 20px 5px; font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 10px; }
+.sidebar nav a {
+  display: flex; align-items: center; gap: 10px; padding: 11px 20px;
+  color: var(--text2); text-decoration: none; font-size: 14px; transition: all 0.2s;
+  border-left: 3px solid transparent;
+}
+.sidebar nav a:hover { background: var(--bg3); color: var(--text); }
+.sidebar nav a.active { background: var(--bg3); color: var(--accent2); border-left-color: var(--accent); font-weight: 600; }
+.sidebar nav a .icon { font-size: 17px; width: 22px; text-align: center; }
+.sidebar .bottom-actions {
+  padding: 15px; flex-shrink: 0;
+  border-top: 1px solid var(--border); background: var(--bg2);
+}
+.sidebar .bottom-actions button {
+  width: 100%; padding: 9px; border: 1px solid var(--border); border-radius: 8px;
+  background: transparent; color: var(--text2); cursor: pointer; font-size: 13px;
+  transition: all 0.2s; margin-bottom: 6px;
+}
+.sidebar .bottom-actions button:hover { border-color: var(--accent); color: var(--accent2); }
+.sidebar .bottom-actions .logout-btn { border-color: var(--danger); color: var(--danger); }
+.sidebar .bottom-actions .logout-btn:hover { background: var(--danger); color: white; }
+.main { margin-left: 250px; padding: 30px; min-height: 100vh; }
+
+/* SECTIONS */
+.section { display: none; animation: fadeIn 0.3s; }
+.section.active { display: block; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.section h2 { font-size: 24px; color: var(--accent2); margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+
+/* CARDS */
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 25px; }
+.card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 22px; transition: transform 0.2s, box-shadow 0.2s;
+}
+.card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
+.card .card-title { font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+.card .card-value { font-size: 32px; font-weight: 700; }
+.card .card-value.success { color: var(--success); }
+.card .card-value.warn { color: var(--warn); }
+.card .card-value.danger { color: var(--danger); }
+.card .card-value.accent { color: var(--accent2); }
+.card .card-sub { font-size: 12px; color: var(--text2); margin-top: 5px; }
+
+/* TABLE */
+.table-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 20px; }
+.table-wrap .table-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+.table-wrap .table-header h3 { font-size: 15px; color: var(--accent2); }
+table { width: 100%; border-collapse: collapse; }
+table th { padding: 10px 16px; text-align: left; font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); background: var(--bg3); }
+table td { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+table tr:hover { background: rgba(108,92,231,0.05); }
+
+/* BUTTONS */
+.btn {
+  padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer;
+  font-size: 13px; font-weight: 600; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;
+}
+.btn-primary { background: var(--accent); color: white; }
+.btn-primary:hover { background: #5a4bd1; }
+.btn-success { background: var(--success); color: white; }
+.btn-success:hover { opacity: 0.85; }
+.btn-danger { background: var(--danger); color: white; }
+.btn-danger:hover { opacity: 0.85; }
+.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text2); }
+.btn-outline:hover { border-color: var(--accent); color: var(--accent2); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+/* FORMS */
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-size: 13px; color: var(--text2); margin-bottom: 5px; font-weight: 600; }
+.form-group input, .form-group textarea, .form-group select {
+  width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--text); font-size: 14px; outline: none; transition: border-color 0.3s;
+}
+.form-group input:focus, .form-group textarea:focus, .form-group select:focus { border-color: var(--accent); }
+.form-group textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+
+/* BADGES */
+.badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; display: inline-block; }
+.badge-success { background: rgba(0,184,148,0.15); color: var(--success); }
+.badge-danger { background: rgba(233,69,96,0.15); color: var(--danger); }
+.badge-warn { background: rgba(253,203,110,0.15); color: var(--warn); }
+.badge-info { background: rgba(108,92,231,0.15); color: var(--accent2); }
+
+/* MODAL */
+.modal-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+  z-index: 1000; align-items: center; justify-content: center;
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 16px;
+  padding: 28px; max-width: 520px; width: 92%; max-height: 85vh; overflow-y: auto;
+}
+.modal h3 { color: var(--accent2); margin-bottom: 18px; font-size: 18px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+
+/* TOAST */
+.toast-container { position: fixed; bottom: 25px; right: 25px; z-index: 2000; }
+.toast {
+  background: var(--bg3); border: 1px solid var(--border);
+  padding: 12px 20px; border-radius: 10px; font-size: 13px;
+  margin-top: 8px; transform: translateX(120%); opacity: 0; transition: all 0.3s;
+}
+.toast.show { transform: translateX(0); opacity: 1; }
+.toast.success { border-color: var(--success); }
+.toast.error { border-color: var(--danger); }
+
+/* RESPONSIVE */
+@media (max-width: 768px) {
+  .sidebar { width: 60px; }
+  .sidebar .brand h2 span, .sidebar .brand small, .sidebar .user-info, .sidebar nav a span:not(.icon), .sidebar nav .nav-group, .sidebar .bottom-actions span { display: none; }
+  .sidebar nav a { justify-content: center; padding: 13px; border-left: none; }
+  .sidebar nav a .icon { font-size: 19px; }
+  .sidebar .bottom-actions button { font-size: 15px; padding: 10px; }
+  .main { margin-left: 60px; padding: 15px; }
+  .grid { grid-template-columns: 1fr; }
+}
+
+/* LOADING / EMPTY */
+.spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-overlay { display: flex; align-items: center; justify-content: center; padding: 35px; color: var(--text2); gap: 10px; font-size: 14px; }
+.empty-state { text-align: center; padding: 35px; color: var(--text2); }
+.empty-state .icon { font-size: 42px; margin-bottom: 8px; }
+.empty-state p { font-size: 14px; line-height: 1.5; }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.status-dot.online { background: var(--success); box-shadow: 0 0 8px var(--success); }
+.status-dot.offline { background: var(--danger); }
+.platform-card:hover { border-color: var(--accent) !important; transform: translateY(-3px); box-shadow: 0 8px 25px rgba(108,92,231,0.3); }
+.theme-toggle { position: fixed; top: 15px; right: 15px; z-index: 9998; background: var(--bg2); border: 1px solid var(--border); border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; transition: all 0.3s; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.theme-toggle:hover { transform: scale(1.1); border-color: var(--accent); }
+.lang-toggle { position: fixed; top: 15px; right: 65px; z-index: 9998; background: var(--bg2); border: 1px solid var(--border); border-radius: 20px; padding: 5px 12px; cursor: pointer; font-size: 13px; font-weight: 700; color: var(--text); transition: all 0.3s; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.lang-toggle:hover { border-color: var(--accent); color: var(--accent2); }
+.notif-bell { position: fixed; top: 15px; right: 115px; z-index: 9998; background: var(--bg2); border: 1px solid var(--border); border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; transition: all 0.3s; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.notif-bell:hover { transform: scale(1.1); border-color: var(--accent); }
+.notif-bell .notif-count { position: absolute; top: -4px; right: -4px; background: var(--danger); color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+.notif-panel { display: none; position: fixed; top: 60px; right: 15px; width: 320px; max-height: 400px; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; z-index: 9998; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+.notif-panel.show { display: block; }
+.notif-item { padding: 12px 15px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.notif-item:last-child { border-bottom: none; }
+.notif-item .notif-time { color: var(--text2); font-size: 11px; margin-top: 4px; }
+.tg-id-help { background: var(--bg); border: 1px solid var(--accent); border-radius: 12px; padding: 18px; margin: 15px 0; text-align: left; }
+.tg-id-help h4 { color: var(--accent2); margin-bottom: 10px; font-size: 15px; }
+.tg-id-help ol { padding-left: 20px; font-size: 13px; color: var(--text2); line-height: 2; }
+.tg-id-help a { color: var(--accent2); font-weight: bold; text-decoration: none; }
+.tg-id-help a:hover { text-decoration: underline; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- GLOBAL CONTROLS -->
+<div class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Modo oscuro/claro">🌙</div>
+<div class="lang-toggle" id="langToggle" onclick="toggleLang()" title="Idioma">ES</div>
+<div class="notif-bell" id="notifBell" onclick="toggleNotifs()" style="display:none" title="Notificaciones">🔔<span class="notif-count" id="notifCount" style="display:none">0</span></div>
+<div class="notif-panel" id="notifPanel"><div style="padding:12px 15px;border-bottom:1px solid var(--border);font-weight:700;color:var(--accent2)">Notificaciones</div><div id="notifList"><div class="notif-item" style="color:var(--text2)">Sin notificaciones</div></div></div>
+
+<!-- PLATFORM SELECTOR -->
+<div class="auth-container" id="platformSelector">
+  <div class="auth-card">
+    <div class="logo">🤖</div>
+    <h1>Bot de Spam J&D</h1>
+    <p class="subtitle">Selecciona tu plataforma</p>
+    <div style="display:flex;gap:15px;margin:25px 0;justify-content:center;flex-wrap:wrap">
+      <div onclick="selectPlatform('wsp')" class="platform-card" id="platWsp" style="cursor:pointer;background:var(--bg);border:2px solid var(--border);border-radius:15px;padding:30px 25px;flex:1;min-width:160px;transition:all 0.3s;text-align:center">
+        <div style="font-size:48px;margin-bottom:10px">📱</div>
+        <h3 style="color:var(--success);margin-bottom:5px">WhatsApp</h3>
+        <p style="color:var(--text2);font-size:12px">Spam a grupos y chats de WhatsApp</p>
+      </div>
+      <div onclick="selectPlatform('tg')" class="platform-card" id="platTg" style="cursor:pointer;background:var(--bg);border:2px solid var(--border);border-radius:15px;padding:30px 25px;flex:1;min-width:160px;transition:all 0.3s;text-align:center">
+        <div style="font-size:48px;margin-bottom:10px">✈️</div>
+        <h3 style="color:var(--accent2);margin-bottom:5px">Telegram</h3>
+        <p style="color:var(--text2);font-size:12px">Spam a grupos y chats de Telegram</p>
+      </div>
+    </div>
+    <p style="color:var(--text2);font-size:11px">Puedes vincular ambas plataformas despues</p>
+  </div>
+</div>
+
+<!-- AUTH: LOGIN -->
+<div class="auth-container" id="authLogin" style="display:none">
+  <div class="auth-card">
+    <div class="logo" id="loginLogo">🤖</div>
+    <h1 id="loginTitle">Bot de Spam J&D</h1>
+    <p class="subtitle" id="loginSubtitle">Panel de Control</p>
+    <input type="text" id="loginId" placeholder="Tu ID de Telegram" autocomplete="off">
+    <input type="password" id="loginPass" placeholder="Contrasena">
+    <button class="btn-main" onclick="doLogin()" id="btnLogin">Iniciar Sesion</button>
+    <p style="color:var(--text2);font-size:12px;margin-top:8px;margin-bottom:4px">
+      <button class="link-btn" onclick="showForgot()" style="font-size:12px">Olvide mi contrasena</button>
+    </p>
+    <div class="divider"></div>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:8px">Primera vez?</p>
+    <button class="link-btn" onclick="showRegister()">Crear cuenta</button>
+    <div style="margin-top:12px"><button class="link-btn" onclick="showPlatformSelector()" style="font-size:12px">⬅ Cambiar plataforma</button></div>
+    <div class="auth-error" id="loginError"></div>
+  </div>
+</div>
+
+<!-- AUTH: REGISTER -->
+<div class="auth-container" id="authRegister" style="display:none">
+  <div class="auth-card" style="max-width:500px">
+    <div class="logo">📝</div>
+    <h1>Crear Cuenta</h1>
+    <p class="subtitle">Registrate para acceder al panel — Demo 1 dia gratis</p>
+    <div class="tg-id-help" id="tgIdHelp">
+      <h4>📌 Como obtener tu ID de Telegram</h4>
+      <ol>
+        <li>Abre Telegram y busca el bot: <a href="https://t.me/BotSpamJM_bot" target="_blank">@BotSpamJM_bot</a></li>
+        <li>Inicia el bot con /start y usa el comando /miid para obtener tu <b>ID numerico</b></li>
+        <li>Copia ese numero y pegalo aqui abajo</li>
+      </ol>
+      <p style="margin-top:10px;font-size:12px;color:var(--text2)">Tambien puedes contactar al creador para ayuda: <a href="https://t.me/JhonnyVip05" target="_blank">@JhonnyVip05</a></p>
+    </div>
+    <input type="text" id="regId" placeholder="Tu ID de Telegram (numerico)" autocomplete="off">
+    <input type="text" id="regUsername" placeholder="Nombre de usuario" autocomplete="off">
+    <input type="password" id="regPass" placeholder="Crear contrasena">
+    <input type="password" id="regPass2" placeholder="Confirmar contrasena">
+    <ul class="password-rules">
+      <li>Minimo 4 caracteres</li>
+      <li>Obtendras 1 dia de demo gratis al registrarte</li>
+    </ul>
+    <button class="btn-main" onclick="doRegister()" id="btnRegister">Registrarse</button>
+    <div class="divider"></div>
+    <button class="link-btn" onclick="showLogin()">Ya tengo cuenta — Iniciar Sesion</button>
+    <div style="margin-top:12px"><button class="link-btn" onclick="showPlatformSelector()" style="font-size:12px">⬅ Cambiar plataforma</button></div>
+    <div class="auth-error" id="regError"></div>
+    <div class="auth-success" id="regSuccess"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="app" id="app">
+  <div class="sidebar">
+    <div class="brand">
+      <h2>🤖 <span>J&D Bot</span></h2>
+      <small>Panel de Control v2.0</small>
+    </div>
+    <div class="user-info">
+      <div class="label">Telegram ID</div>
+      <div class="uid" id="sideUserId"></div>
+    </div>
+    <div id="platformSwitch" style="display:flex;margin:10px 15px;border-radius:10px;overflow:hidden;border:1px solid var(--border);background:var(--bg)">
+      <button id="platBtnWsp" onclick="switchPlatform('wsp')" style="flex:1;padding:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.3s;background:var(--accent);color:#fff">📱 WSP</button>
+      <button id="platBtnTg" onclick="switchPlatform('tg')" style="flex:1;padding:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.3s;background:transparent;color:var(--text2)">✈️ TG</button>
+    </div>
+    <nav>
+      <div class="nav-group">Principal</div>
+      <a href="#" class="active" data-section="dashboard"><span class="icon">📊</span><span>Dashboard</span></a>
+      <a href="#" data-section="cuentas" data-plat="wsp"><span class="icon">👤</span><span>Cuentas WSP</span></a>
+      <a href="#" data-section="cuentastg" data-plat="tg"><span class="icon">✈️</span><span>Cuentas Telegram</span></a>
+      <a href="#" data-section="grupos" data-plat="wsp"><span class="icon">🌐</span><span>Grupos</span></a>
+      <a href="#" data-section="tggrupos" data-plat="tg"><span class="icon">🌐</span><span>Grupos TG</span></a>
+      <div class="nav-group" data-plat="wsp">Mensajeria WSP</div>
+      <a href="#" data-section="mensajes" data-plat="wsp"><span class="icon">✉</span><span>Mensajes</span></a>
+      <a href="#" data-section="envios" data-plat="wsp"><span class="icon">📤</span><span>Envio Unico</span></a>
+      <a href="#" data-section="enviopersonal" data-plat="wsp"><span class="icon">💬</span><span>Envio Personal</span></a>
+      <a href="#" data-section="enviomiembros" data-plat="wsp"><span class="icon">👥</span><span>Envio a Miembros</span></a>
+      <a href="#" data-section="enviointeractivo" data-plat="wsp"><span class="icon">📨</span><span>Envio Interactivo</span></a>
+      <a href="#" data-section="programados" data-plat="wsp"><span class="icon">⏰</span><span>Programados</span></a>
+      <a href="#" data-section="campanas" data-plat="wsp"><span class="icon">📋</span><span>Campanas</span></a>
+      <div class="nav-group" data-plat="tg">Mensajeria TG</div>
+      <a href="#" data-section="tgmensajes" data-plat="tg"><span class="icon">✉</span><span>Mensajes TG</span></a>
+      <a href="#" data-section="tgcampanas" data-plat="tg"><span class="icon">📋</span><span>Campanas TG</span></a>
+      <a href="#" data-section="tgprogramados" data-plat="tg"><span class="icon">⏰</span><span>Programados TG</span></a>
+      <a href="#" data-section="tghistorial" data-plat="tg"><span class="icon">📜</span><span>Historial TG</span></a>
+      <div class="nav-group">Herramientas</div>
+      <a href="#" data-section="plantillas"><span class="icon">📋</span><span>Plantillas</span></a>
+      <a href="#" data-section="historial" data-plat="wsp"><span class="icon">📜</span><span>Historial WSP</span></a>
+      <div class="nav-group" data-plat="wsp">Config WSP</div>
+      <a href="#" data-section="config" data-plat="wsp"><span class="icon">⚙</span><span>Config Envio</span></a>
+      <a href="#" data-section="listanegra" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra</span></a>
+      <a href="#" data-section="autoresp" data-plat="wsp"><span class="icon">🤖</span><span>Auto-Responder</span></a>
+      <div class="nav-group" data-plat="tg">Config TG</div>
+      <a href="#" data-section="tgautoresp" data-plat="tg"><span class="icon">🤖</span><span>Auto-Responder TG</span></a>
+      <a href="#" data-section="tgconfig" data-plat="tg"><span class="icon">⚙</span><span>Config Envio TG</span></a>
+      <a href="#" data-section="tglistanegra" data-plat="tg"><span class="icon">🚫</span><span>Lista Negra TG</span></a>
+      <div class="nav-group">General</div>
+      <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas</span></a>
+      <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
+      <div class="nav-group admin-only" style="display:none">Admin</div>
+      <a href="#" data-section="admin" class="admin-only" style="display:none"><span class="icon">👑</span><span>Admin Panel</span></a>
+      <a href="#" data-section="adminlogs" class="admin-only" style="display:none"><span class="icon">📋</span><span>Logs Global</span></a>
+    </nav>
+    <div class="bottom-actions">
+      <button onclick="showCambiarPass()">🔑 <span>Cambiar Contrasena</span></button>
+      <button class="logout-btn" onclick="doLogout()">🚪 <span>Cerrar Sesion</span></button>
+    </div>
+  </div>
+
+  <div class="main">
+    <!-- BANNER MEMBRESIA EXPIRADA -->
+    <div id="membresiaBanner" style="display:none;background:linear-gradient(135deg,#e94560,#7c2d12);padding:15px 20px;border-radius:12px;margin-bottom:20px;color:#fff">
+      <div style="display:flex;align-items:center;gap:15px;flex-wrap:wrap">
+        <div style="font-size:32px">🔒</div>
+        <div style="flex:1;min-width:200px">
+          <h3 style="margin:0 0 5px;color:#fff">Membresia Requerida</h3>
+          <p style="margin:0;font-size:13px;opacity:0.9" id="membresiaMsg">Tu periodo de prueba ha terminado. Puedes ver todo pero no usar las funciones hasta activar una membresia.</p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="background:rgba(255,255,255,0.15);padding:8px 15px;border-radius:8px;text-align:center">
+            <div style="font-size:11px;opacity:0.8">Semanal</div>
+            <div style="font-weight:bold;font-size:16px">S/ 15</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.15);padding:8px 15px;border-radius:8px;text-align:center">
+            <div style="font-size:11px;opacity:0.8">Mensual</div>
+            <div style="font-weight:bold;font-size:16px">S/ 30</div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:15px;align-items:center;flex-wrap:wrap;font-size:13px">
+        <span>💳 Yape: <b>9776680776</b></span>
+        <span>📱 WSP: <a href="https://wa.me/51976680776" target="_blank" style="color:#fff;font-weight:bold">+51 976 680 776</a></span>
+        <span>✈️ TG: <a href="https://t.me/JhonnyVip05" target="_blank" style="color:#fff;font-weight:bold">@JhonnyVip05</a></span>
+      </div>
+    </div>
+    <!-- DASHBOARD -->
+    <div class="section active" id="sec-dashboard">
+      <h2>📊 Dashboard</h2>
+      <div class="grid" id="dashCards"></div>
+      <div class="grid">
+        <div class="table-wrap">
+          <div class="table-header"><h3>📈 Reporte del Dia</h3></div>
+          <div id="dashReporte" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-header"><h3>📨 Tasa de Entrega</h3></div>
+          <div id="dashTasa" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-top:15px">
+        <div class="table-header"><h3>📊 Envios por Dia (ultimos 7 dias)</h3>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm btn-outline" onclick="loadChart(7)">7d</button>
+            <button class="btn btn-sm btn-outline" onclick="loadChart(14)">14d</button>
+            <button class="btn btn-sm btn-outline" onclick="loadChart(30)">30d</button>
+          </div>
+        </div>
+        <div style="padding:15px;height:250px"><canvas id="enviosChart"></canvas></div>
+      </div>
+      <div class="grid" style="margin-top:15px">
+        <div class="card" id="limitesCard">
+          <div class="card-title">📦 Limites de tu Plan</div>
+          <div id="limitesInfo" style="margin-top:10px;font-size:14px;color:var(--text2)">Cargando...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CUENTAS -->
+    <div class="section" id="sec-cuentas">
+      <h2>👤 Cuentas WhatsApp</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Vincula tus cuentas de WhatsApp escaneando el codigo QR.</p>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+          <label>Nombre de la cuenta</label>
+          <input type="text" id="wspCuentaNombre" placeholder="Ej: micuenta1">
+        </div>
+        <button class="btn btn-primary" onclick="vincularCuentaWspQR()">📱 Vincular con QR</button>
+      </div>
+      <div id="wspQrInlineBox" style="display:none;background:var(--bg);padding:20px;border-radius:12px;margin-bottom:15px;border:2px solid var(--accent);text-align:center">
+        <h3 id="wspQrTitle" style="margin-bottom:10px">📱 Vinculando cuenta...</h3>
+        <div id="wspQrStatus" style="padding:8px 12px;border-radius:8px;margin-bottom:12px;font-weight:bold;background:#3d3d0a;color:#ffeb3b">⏳ Preparando QR...</div>
+        <div id="wspQrImg" style="margin:10px auto"></div>
+        <div style="text-align:left;margin:15px auto;max-width:350px;font-size:13px;color:var(--text2)">
+          <p><b>📲 Instrucciones:</b></p>
+          <ol style="margin:5px 0 0 15px;line-height:1.8">
+            <li>Abre <b>WhatsApp</b> en tu celular</li>
+            <li>Ve a <b>Ajustes > Dispositivos vinculados</b></li>
+            <li>Toca <b>Vincular dispositivo</b></li>
+            <li><b>Escanea este QR</b></li>
+          </ol>
+        </div>
+        <button class="btn btn-outline" onclick="cancelarQrInline()" style="margin-top:10px">❌ Cancelar</button>
+      </div>
+      <div id="cuentasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- GRUPOS -->
+    <div class="section" id="sec-grupos">
+      <h2>🌐 Grupos WhatsApp</h2>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="detectarGrupos()">🔍 Detectar Grupos</button>
+        <button class="btn btn-success" onclick="showAutoJoin()">🔗 Auto-unirse a Grupos</button>
+        <button class="btn btn-outline" onclick="loadGrupos()">🔄 Refrescar</button>
+      </div>
+      <div id="gruposContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- MENSAJES -->
+    <div class="section" id="sec-mensajes">
+      <h2>✉ Mensajes</h2>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearMensaje()">➕ Crear Mensaje</button></div>
+      <div id="mensajesContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- ENVIOS -->
+    <div class="section" id="sec-envios">
+      <h2>📤 Envio Unico</h2>
+      <p style="color:var(--text2);margin-bottom:20px;font-size:14px">Selecciona un mensaje y envialo a tus grupos una sola vez.</p>
+      <div id="enviosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      <div class="table-wrap" style="margin-top:20px">
+        <div class="table-header"><h3>📊 Historial de Envios</h3></div>
+        <div id="enviosHistorial" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
+    </div>
+
+    <!-- PROGRAMADOS -->
+    <div class="section" id="sec-programados">
+      <h2>⏰ Envios Programados</h2>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearProgramado()">➕ Programar Envio</button></div>
+      <div id="programadosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- CAMPANAS -->
+    <div class="section" id="sec-campanas">
+      <h2>📋 Campanas</h2>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearCampana()">➕ Crear Campana</button></div>
+      <div id="campanasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- CONFIG -->
+    <div class="section" id="sec-config">
+      <h2>⚙ Configuracion de Envio</h2>
+      <div id="configContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- LISTA NEGRA -->
+    <div class="section" id="sec-listanegra">
+      <h2>🚫 Lista Negra</h2>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+        <input type="text" id="inputBlacklist" placeholder="Numero (ej: 51999888777)" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;flex:1;min-width:200px">
+        <button class="btn btn-danger" onclick="agregarBlacklist()">🚫 Bloquear</button>
+        <button class="btn btn-outline" onclick="limpiarBlacklist()">🗑 Limpiar</button>
+      </div>
+      <div id="listaNegraContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- AUTO RESPONDER -->
+    <div class="section" id="sec-autoresp">
+      <h2>🤖 Auto-Responder</h2>
+      <div style="margin-bottom:15px;display:flex;gap:10px">
+        <button class="btn btn-primary" onclick="showCrearAutoResp()">➕ Agregar Regla</button>
+        <button class="btn btn-outline" onclick="limpiarAutoResp()">🗑 Limpiar</button>
+      </div>
+      <div id="autoRespContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- ENVIO PERSONAL -->
+    <div class="section" id="sec-enviopersonal">
+      <h2>💬 Envio Personal</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia un mensaje a todos tus chats personales de WhatsApp.</p>
+      <div class="form-group" style="margin-bottom:15px">
+        <label>Cuenta WhatsApp</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select id="epCuenta" style="flex:1"><option value="">-- Cargando cuentas... --</option></select>
+          <button class="btn btn-primary" onclick="cargarChatsPersonales()">📋 Cargar Chats</button>
+        </div>
+      </div>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-outline" onclick="showAgregarNumero()">➕ Agregar Numero</button>
+        <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Cancelar Envio</button>
+      </div>
+      <div class="form-group">
+        <label>Mensaje a enviar</label>
+        <textarea id="epMensaje" rows="4" placeholder="Escribe el mensaje que se enviara a tus contactos..."></textarea>
+      </div>
+      <div style="margin-bottom:15px">
+        <button class="btn btn-success" onclick="enviarPersonal()">📤 Enviar a Todos los Chats</button>
+      </div>
+      <div id="personalContent" class="empty-state"><div class="icon">💬</div><p>Selecciona una cuenta y carga sus chats</p></div>
+    </div>
+
+    <!-- ENVIO A MIEMBROS -->
+    <div class="section" id="sec-enviomiembros">
+      <h2>👥 Envio a Miembros de Grupo</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia un DM personalizado a cada miembro de un grupo. Selecciona la cuenta WSP para cargar sus grupos.</p>
+      <div class="form-group" style="margin-bottom:15px">
+        <label>Cuenta WhatsApp</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select id="emCuenta" style="flex:1"><option value="">-- Cargando cuentas... --</option></select>
+          <button class="btn btn-primary" onclick="cargarGruposCuenta()">🔄 Cargar Grupos</button>
+        </div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;margin-bottom:15px">
+        <div class="form-group">
+          <label>Grupo origen (de donde tomar miembros)</label>
+          <select id="emGrupo" onchange="cargarMiembros()"><option value="">-- Carga grupos primero --</option></select>
+        </div>
+        <div class="form-group">
+          <label>Grupo destino (para agregar miembros)</label>
+          <select id="emDestino"><option value="">-- Opcional: agregar miembros aqui --</option></select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Mensaje DM (dejar vacio si solo quieres agregar miembros)</label>
+        <textarea id="emMensaje" rows="4" placeholder="Mensaje que se enviara como DM a cada miembro..."></textarea>
+      </div>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-success" onclick="enviarAMiembros()">📤 Enviar DM a Miembros</button>
+        <button class="btn btn-primary" onclick="agregarMiembrosAGrupo()">➕ Agregar Miembros al Grupo Destino</button>
+        <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Cancelar Envio</button>
+      </div>
+      <div id="miembrosContent" class="empty-state"><div class="icon">👥</div><p>Selecciona una cuenta y carga sus grupos</p></div>
+    </div>
+
+    <!-- ENVIO INTERACTIVO -->
+    <div class="section" id="sec-enviointeractivo">
+      <h2>📨 Envio Interactivo (Promo)</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia una promocion y el bot espera la respuesta de los clientes. Te notifica cuando aceptan o rechazan.</p>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent)">
+        <div class="form-group">
+          <label>Palabra para ACEPTAR (el cliente responde esto para aceptar)</label>
+          <input type="text" id="promoAceptar" placeholder="Ej: si" value="si">
+        </div>
+        <div class="form-group">
+          <label>Palabra para RECHAZAR (el cliente responde esto para ignorar)</label>
+          <input type="text" id="promoRechazar" placeholder="Ej: no" value="no">
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-success" onclick="iniciarPromo()">📨 Activar Escucha de Respuestas</button>
+          <button class="btn btn-danger" onclick="detenerPromo()">🛑 Detener Escucha</button>
+          <button class="btn btn-primary" onclick="verRespuestasPromo()">🔄 Actualizar Respuestas</button>
+        </div>
+      </div>
+      <div style="background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border);font-size:13px;color:var(--text2)">
+        <p>💡 <b>Como funciona:</b></p>
+        <ol style="margin:8px 0 0 15px;line-height:1.8">
+          <li>Configura las palabras de aceptar/rechazar (ej: "si" / "no")</li>
+          <li>Activa la escucha de respuestas</li>
+          <li>Envia tu mensaje de promo usando <b>Envio Unico</b>, <b>Envio Personal</b> o <b>Envio a Miembros</b></li>
+          <li>Cuando los clientes respondan con la palabra clave, el bot te notificara automaticamente en Telegram</li>
+        </ol>
+      </div>
+      <div id="promoEstado" style="padding:10px 15px;border-radius:8px;margin-bottom:15px;background:var(--bg);border:1px solid var(--border);font-weight:bold;text-align:center;color:var(--text2)">⏸ Escucha no iniciada</div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:15px">
+        <div style="background:var(--bg);padding:15px;border-radius:10px;border:1px solid var(--success)">
+          <h3 style="color:var(--success);margin-bottom:10px">✅ Aceptaron</h3>
+          <div id="promoAceptados" style="max-height:300px;overflow-y:auto;font-size:13px"><p style="color:var(--text2)">Sin respuestas aun</p></div>
+        </div>
+        <div style="background:var(--bg);padding:15px;border-radius:10px;border:1px solid var(--danger)">
+          <h3 style="color:var(--danger);margin-bottom:10px">❌ Rechazaron</h3>
+          <div id="promoRechazados" style="max-height:300px;overflow-y:auto;font-size:13px"><p style="color:var(--text2)">Sin respuestas aun</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div class="section" id="sec-stats">
+      <h2>📈 Estadisticas por Grupo</h2>
+      <div style="margin-bottom:15px"><button class="btn btn-success" onclick="exportarStatsCSV()">📥 Exportar CSV</button></div>
+      <div id="statsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- ADMIN -->
+    <div class="section" id="sec-admin">
+      <h2>👑 Panel de Administrador</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Gestiona usuarios y membresias desde aqui.</p>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="loadAdminUsuarios()">🔄 Actualizar Lista</button>
+      </div>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px">
+        <h3 style="margin-bottom:10px">💰 Planes de Membresia</h3>
+        <div style="display:flex;gap:15px;flex-wrap:wrap">
+          <div style="background:var(--bg2);padding:15px;border-radius:10px;flex:1;min-width:150px;border:1px solid var(--accent)">
+            <h4 style="color:var(--accent)">Semanal</h4>
+            <div style="font-size:24px;font-weight:bold;margin:10px 0">S/ 15</div>
+            <div style="color:var(--text2);font-size:13px">7 dias de acceso</div>
+          </div>
+          <div style="background:var(--bg2);padding:15px;border-radius:10px;flex:1;min-width:150px;border:1px solid var(--accent2)">
+            <h4 style="color:var(--accent2)">Mensual</h4>
+            <div style="font-size:24px;font-weight:bold;margin:10px 0">S/ 30</div>
+            <div style="color:var(--text2);font-size:13px">30 dias de acceso</div>
+          </div>
+          <div style="background:var(--bg2);padding:15px;border-radius:10px;flex:1;min-width:150px;border:1px solid var(--success)">
+            <h4 style="color:var(--success)">Permanente</h4>
+            <div style="font-size:24px;font-weight:bold;margin:10px 0">&#8734;</div>
+            <div style="color:var(--text2);font-size:13px">Acceso ilimitado</div>
+          </div>
+        </div>
+      </div>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--success)">
+        <h3 style="margin-bottom:10px;color:var(--success)">💳 Pagos con Yape</h3>
+        <p style="color:var(--text2);font-size:13px">Los clientes pagan por Yape al numero: <b style="color:var(--success);font-size:16px">9776680776</b></p>
+        <p style="color:var(--text2);font-size:12px;margin-top:5px">Recibe el comprobante y activa la membresia manualmente desde esta tabla.</p>
+      </div>
+      <div id="adminContent" class="empty-state"><div class="icon">👑</div><p>Cargando usuarios...</p></div>
+    </div>
+
+    <!-- CUENTAS TELEGRAM -->
+    <div class="section" id="sec-cuentastg">
+      <h2>✈️ Cuentas Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Registra tus cuentas de Telegram para usar en el panel.</p>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent)">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
+            <label>Nombre de la cuenta</label>
+            <input type="text" id="tgCuentaNombre" placeholder="Ej: micuenta1">
+          </div>
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
+            <label>Telefono (con codigo de pais)</label>
+            <input type="text" id="tgCuentaTel" placeholder="Ej: +51999999999">
+          </div>
+          <button class="btn btn-primary" onclick="iniciarLoginTgPanel()">➕ Vincular Cuenta</button>
+        </div>
+        <div id="tgAuthBox" style="display:none;margin-top:15px;padding:15px;background:var(--bg2);border-radius:10px;border:1px solid var(--accent2)">
+          <div id="tgAuthStatus" style="padding:8px 12px;border-radius:8px;margin-bottom:12px;font-weight:bold;text-align:center;background:#3d3d0a;color:#ffeb3b">⏳ Enviando codigo...</div>
+          <div id="tgAuthCodeBox" style="display:none">
+            <div class="form-group" style="margin-bottom:10px">
+              <label>🔑 Ingresa el codigo que recibiste en Telegram:</label>
+              <input type="text" id="tgAuthCode" placeholder="Ej: 12345" style="font-size:18px;text-align:center;letter-spacing:8px">
+            </div>
+            <button class="btn btn-success" onclick="verificarCodigoTgPanel()">✅ Verificar Codigo</button>
+          </div>
+          <div id="tgAuth2faBox" style="display:none">
+            <div class="form-group" style="margin-bottom:10px">
+              <label>🔐 Esta cuenta tiene 2FA. Ingresa tu contrasena de Telegram:</label>
+              <input type="password" id="tgAuth2fa" placeholder="Tu contrasena 2FA">
+            </div>
+            <button class="btn btn-success" onclick="verificar2faTgPanel()">✅ Verificar 2FA</button>
+          </div>
+          <button class="btn btn-outline" onclick="cancelarAuthTg()" style="margin-top:8px">❌ Cancelar</button>
+        </div>
+      </div>
+      <div style="background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border);font-size:13px;color:var(--text2)">
+        <p>📱 <b>Como vincular:</b></p>
+        <ol style="margin:5px 0 0 15px;line-height:1.8">
+          <li>Escribe un nombre y tu numero con codigo de pais (ej: +51999999999)</li>
+          <li>Haz clic en <b>"Vincular Cuenta"</b></li>
+          <li>Te llegara un <b>codigo a tu app de Telegram</b></li>
+          <li>Ingresa el codigo aqui y listo!</li>
+        </ol>
+        <p style="margin-top:8px">Tu ID de Telegram: <b style="color:var(--accent2)" id="tgIdDisplay"></b></p>
+      </div>
+      <div id="cuentasTgContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- GRUPOS TG -->
+    <div class="section" id="sec-tggrupos">
+      <h2>🌐 Grupos Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Grupos registrados para envio por Telegram.</p>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+          <label>Link del grupo (t.me/...)</label>
+          <input type="text" id="tgGrupoLink" placeholder="Ej: https://t.me/migrupo">
+        </div>
+        <button class="btn btn-primary" onclick="addTgGrupoPanel()">➕ Agregar</button>
+        <button class="btn btn-danger btn-sm" onclick="delAllTgGruposPanel()">🗑 Borrar Todos</button>
+      </div>
+      <div id="tgGruposContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- MENSAJES TG -->
+    <div class="section" id="sec-tgmensajes">
+      <h2>✉ Mensajes Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Crea y gestiona mensajes para enviar a grupos de Telegram.</p>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearTgMensaje()">➕ Crear Mensaje</button></div>
+      <div id="tgMensajesContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- CAMPANAS TG -->
+    <div class="section" id="sec-tgcampanas">
+      <h2>📋 Campanas Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Crea y gestiona campanas de envio para Telegram.</p>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearTgCampana()">➕ Nueva Campana</button></div>
+      <div id="tgCampanasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- PROGRAMADOS TG -->
+    <div class="section" id="sec-tgprogramados">
+      <h2>⏰ Programados Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Programa envios automaticos para Telegram.</p>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearTgProgramado()">➕ Nuevo Programado</button></div>
+      <div id="tgProgramadosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- HISTORIAL TG -->
+    <div class="section" id="sec-tghistorial">
+      <h2>📜 Historial Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Historial de envios realizados por Telegram.</p>
+      <div id="tgHistorialContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- AUTO-RESPONDER TG -->
+    <div class="section" id="sec-tgautoresp">
+      <h2>🤖 Auto-Responder Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Configura respuestas automaticas por palabras clave.</p>
+      <div id="tgAutoRespContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- CONFIG ENVIO TG -->
+    <div class="section" id="sec-tgconfig">
+      <h2>⚙ Config Envio Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Configura delay, lotes y pausas para envios de Telegram.</p>
+      <div id="tgConfigContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- LISTA NEGRA TG -->
+    <div class="section" id="sec-tglistanegra">
+      <h2>🚫 Lista Negra Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Grupos bloqueados que no recibiran envios.</p>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+          <label>Grupo a bloquear</label>
+          <input type="text" id="tgListaNegraInput" placeholder="Ej: https://t.me/grupo">
+        </div>
+        <button class="btn btn-primary" onclick="addTgListaNegraPanel()">🚫 Bloquear</button>
+        <button class="btn btn-danger btn-sm" onclick="limpiarTgListaNegraPanel()">🗑 Limpiar Todo</button>
+      </div>
+      <div id="tgListaNegraContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- PLANTILLAS -->
+    <div class="section" id="sec-plantillas">
+      <h2>📋 Plantillas de Mensajes</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Guarda mensajes frecuentes para reutilizarlos rapido.</p>
+      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearPlantilla()">➕ Nueva Plantilla</button></div>
+      <div id="plantillasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- HISTORIAL -->
+    <div class="section" id="sec-historial">
+      <h2>📜 Historial de Envios</h2>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-group" style="margin-bottom:0;min-width:120px">
+          <label>Tipo</label>
+          <select id="histFiltroTipo" style="padding:6px 10px;font-size:13px">
+            <option value="">Todos</option>
+            <option value="grupo">Grupo</option>
+            <option value="personal">Personal</option>
+            <option value="miembros">Miembros</option>
+            <option value="campana">Campana</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;min-width:120px">
+          <label>Resultado</label>
+          <select id="histFiltroRes" style="padding:6px 10px;font-size:13px">
+            <option value="">Todos</option>
+            <option value="enviado">Enviado</option>
+            <option value="exitoso">Exitoso</option>
+            <option value="fallido">Fallido</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;min-width:130px">
+          <label>Desde</label>
+          <input type="date" id="histDesde" style="padding:6px 10px;font-size:13px">
+        </div>
+        <div class="form-group" style="margin-bottom:0;min-width:130px">
+          <label>Hasta</label>
+          <input type="date" id="histHasta" style="padding:6px 10px;font-size:13px">
+        </div>
+        <button class="btn btn-primary" onclick="loadHistorial()">🔍 Filtrar</button>
+        <button class="btn btn-success" onclick="exportarHistorialCSV()">📥 CSV</button>
+      </div>
+      <div id="historialContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- ACTIVIDAD -->
+    <div class="section" id="sec-actividad">
+      <h2>📝 Registro de Actividad</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Tu historial de acciones recientes en el panel.</p>
+      <div style="margin-bottom:15px"><button class="btn btn-success" onclick="exportarActividadCSV()">📥 Exportar CSV</button></div>
+      <div id="actividadContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- ADMIN LOGS -->
+    <div class="section" id="sec-adminlogs">
+      <h2>📋 Logs de Actividad Global</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Toda la actividad de todos los usuarios (solo admin).</p>
+      <div style="margin-bottom:15px">
+        <button class="btn btn-primary" onclick="loadAdminLogs()">🔄 Actualizar</button>
+        <button class="btn btn-success" onclick="exportarAdminLogsCSV()">📥 Exportar CSV</button>
+      </div>
+      <div id="adminLogsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- (membresia banner moved to top of main) -->
+  </div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal"><div class="modal" id="modalContent"></div></div>
+
+<!-- TOAST -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+const API='';
+let userId=null;
+let currentPlatform='wsp';
+
+function $(id){return document.getElementById(id)}
+async function api(path,opts){
+  try{const r=opts?await fetch(API+path,opts):await fetch(API+path);return await r.json()}
+  catch(e){return{ok:false,error:e.message}}
+}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/`/g,'&#96;')}
+function toast(msg,type='success'){
+  const t=document.createElement('div');t.className='toast show '+type;t.textContent=msg;
+  $('toastContainer').appendChild(t);
+  setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),400)},3500);
+}
+function showModal(html){$('modalContent').innerHTML=html;$('modal').classList.add('show')}
+function closeModal(){$('modal').classList.remove('show')}
+function requireMembresia(){
+  if(esAdmin)return true;
+  if(!membresiaActiva){
+    toast('Necesitas una membresia activa para usar esta funcion. Contacta al creador.','error');
+    return false;
+  }
+  return true;
+}
+$('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
+
+// --- PLATFORM SELECTOR ---
+function selectPlatform(p){
+  currentPlatform=p;
+  localStorage.setItem('panel_platform',p);
+  $('platformSelector').style.display='none';
+  if(p==='wsp'){
+    $('loginLogo').textContent='\ud83d\udcf1';
+    $('loginTitle').textContent='Panel WhatsApp';
+    $('loginSubtitle').textContent='Spam a grupos y chats de WhatsApp';
+  }else{
+    $('loginLogo').textContent='\u2708\ufe0f';
+    $('loginTitle').textContent='Panel Telegram';
+    $('loginSubtitle').textContent='Spam a grupos y chats de Telegram';
+  }
+  $('authLogin').style.display='flex';
+}
+function showPlatformSelector(){
+  $('authLogin').style.display='none';$('authRegister').style.display='none';
+  $('platformSelector').style.display='flex';
+}
+
+// --- PLATFORM SWITCH (inside panel) ---
+function switchPlatform(p){
+  currentPlatform=p;
+  localStorage.setItem('panel_platform',p);
+  if(p==='wsp'){
+    $('platBtnWsp').style.background='var(--accent)';$('platBtnWsp').style.color='#fff';
+    $('platBtnTg').style.background='transparent';$('platBtnTg').style.color='var(--text2)';
+  }else{
+    $('platBtnTg').style.background='var(--accent)';$('platBtnTg').style.color='#fff';
+    $('platBtnWsp').style.background='transparent';$('platBtnWsp').style.color='var(--text2)';
+  }
+  // Hide/show sidebar items based on platform
+  document.querySelectorAll('.sidebar nav [data-plat]').forEach(el=>{
+    el.style.display=el.dataset.plat===p?'':'none';
+  });
+  // Navigate to the corresponding accounts section
+  const sec=p==='wsp'?'cuentas':'cuentastg';
+  document.querySelectorAll('.sidebar nav a').forEach(x=>x.classList.remove('active'));
+  const link=document.querySelector('.sidebar nav a[data-section="'+sec+'"]');
+  if(link)link.classList.add('active');
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  $('sec-'+sec).classList.add('active');
+  if(p==='wsp')loadCuentas();else loadCuentasTg();
+}
+function initPlatformSwitch(){
+  const p=currentPlatform||'wsp';
+  if(p==='tg'){
+    $('platBtnTg').style.background='var(--accent)';$('platBtnTg').style.color='#fff';
+    $('platBtnWsp').style.background='transparent';$('platBtnWsp').style.color='var(--text2)';
+  }
+  document.querySelectorAll('.sidebar nav [data-plat]').forEach(el=>{
+    el.style.display=el.dataset.plat===p?'':'none';
+  });
+}
+
+// --- AUTH ---
+function showLogin(){$('authLogin').style.display='flex';$('authRegister').style.display='none';$('platformSelector').style.display='none'}
+function showRegister(){$('authLogin').style.display='none';$('authRegister').style.display='flex';$('platformSelector').style.display='none'}
+function showForgot(){
+  showModal(`<h3>🔑 Recuperar Contrasena</h3>
+    <p style="color:var(--text2);font-size:14px;line-height:1.6;margin-bottom:15px">
+      Para recuperar tu contrasena, ve al <b>bot de Telegram</b> y escribe:<br><br>
+      <code style="background:var(--bg);padding:6px 12px;border-radius:6px;font-size:15px;color:var(--accent2)">/recuperpass</code><br><br>
+      El bot te dara un <b>codigo unico de un solo uso</b>.<br>
+      Luego escribe: <code style="background:var(--bg);padding:4px 8px;border-radius:4px;font-size:13px">/recuperpass CODIGO</code><br>
+      y podras poner tu nueva contrasena.
+    </p>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Entendido</button></div>`);
+}
+
+let esAdmin=false;
+let membresiaActiva=true;
+
+async function doLogin(){
+  const id=$('loginId').value.trim(),pass=$('loginPass').value;
+  if(!id||!pass){showErr('loginError','Ingresa ID y contrasena');return}
+  $('btnLogin').disabled=true;$('btnLogin').textContent='Verificando...';
+  const r=await api('/api/panel_login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id,password:pass})});
+  $('btnLogin').disabled=false;$('btnLogin').textContent='Iniciar Sesion';
+  if(!r.ok){
+    const msgs={'no_registrado':'No tienes cuenta. Registrate primero.','password_incorrecta':'Contrasena incorrecta.'};
+    showErr('loginError',msgs[r.error]||r.error||'Error');return;
+  }
+  userId=id;
+  esAdmin=r.es_admin||false;
+  localStorage.setItem('panel_uid',id);localStorage.setItem('panel_token',r.token);
+  localStorage.setItem('panel_admin',esAdmin?'1':'0');
+  showApp();
+}
+
+async function doRegister(){
+  const id=$('regId').value.trim(),username=$('regUsername').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
+  hideMsg('regError');hideMsg('regSuccess');
+  if(!id||!username||!pass){showErr('regError','Completa todos los campos');return}
+  if(pass.length<4){showErr('regError','La contrasena debe tener minimo 4 caracteres');return}
+  if(pass!==pass2){showErr('regError','Las contrasenas no coinciden');return}
+  $('btnRegister').disabled=true;$('btnRegister').textContent='Registrando...';
+  const r=await api('/api/panel_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id,password:pass,username})});
+  $('btnRegister').disabled=false;$('btnRegister').textContent='Registrarse';
+  if(!r.ok){
+    const msgs={'ya_registrado':'Ya tienes cuenta. Inicia sesion.'};
+    showErr('regError',msgs[r.error]||r.error||'Error');return;
+  }
+  showMsg('regSuccess','Registro exitoso! Demo de 1 dia activado. Inicia sesion.');
+  setTimeout(()=>{showLogin();$('loginId').value=id},2000);
+}
+
+function doLogout(){localStorage.removeItem('panel_uid');localStorage.removeItem('panel_token');localStorage.removeItem('panel_admin');location.reload()}
+
+function showErr(id,msg){const el=$(id);el.style.display='block';el.textContent=msg;el.className='auth-error';el.style.display='block'}
+function showMsg(id,msg){const el=$(id);el.style.display='block';el.textContent=msg}
+function hideMsg(id){$(id).style.display='none'}
+
+async function showApp(){
+  $('authLogin').style.display='none';$('authRegister').style.display='none';$('platformSelector').style.display='none';
+  $('app').style.display='block';
+  $('sideUserId').textContent=userId;
+  if($('tgIdDisplay'))$('tgIdDisplay').textContent=userId;
+  // Check admin
+  esAdmin=localStorage.getItem('panel_admin')==='1';
+  // Verificar membresia
+  const m=await api('/api/check_membresia?u='+userId);
+  if(m.ok){
+    esAdmin=m.es_admin||esAdmin;
+    membresiaActiva=m.activa;
+    if(m.membresia){
+      const info=m.membresia;
+      if(!info.activo && !esAdmin){
+        membresiaActiva=false;
+        $('membresiaBanner').style.display='block';
+        if(info.plan==='demo')$('membresiaMsg').textContent='Tu demo de 1 dia ha terminado. Puedes ver todo pero no usar las funciones hasta activar una membresia.';
+        else $('membresiaMsg').textContent='Tu membresia '+info.plan+' ha expirado. Puedes ver todo pero no usar las funciones hasta renovar.';
+      }
+    }
+  }
+  // Mostrar items admin
+  if(esAdmin){
+    document.querySelectorAll('.admin-only').forEach(el=>el.style.display='');
+    localStorage.setItem('panel_admin','1');
+  }
+  initPlatformSwitch();
+  loadDashboard();
+  loadLimites();
+  loadChart(7);
+  startNotifPolling();
+  if(currentLang!=='es')applyLang();
+}
+
+function showCambiarPass(){
+  showModal(`<h3>🔑 Cambiar Contrasena</h3>
+    <div class="form-group"><label>Contrasena actual</label><input type="password" id="cpOld"></div>
+    <div class="form-group"><label>Nueva contrasena</label><input type="password" id="cpNew"></div>
+    <div class="form-group"><label>Confirmar nueva</label><input type="password" id="cpNew2"></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="cambiarPass()">Guardar</button></div>`);
+}
+async function cambiarPass(){
+  const old_password=$('cpOld').value,new_password=$('cpNew').value,confirm=$('cpNew2').value;
+  if(!old_password||!new_password){toast('Completa los campos','error');return}
+  if(new_password.length<4){toast('Minimo 4 caracteres','error');return}
+  if(new_password!==confirm){toast('No coinciden','error');return}
+  closeModal();
+  const r=await api('/api/panel_cambiar_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId,old_password,new_password})});
+  toast(r.ok?'Contrasena actualizada':'Error: '+(r.error||''),r.ok?'success':'error');
+}
+
+// --- NAV ---
+document.querySelectorAll('.sidebar nav a').forEach(a=>{
+  a.addEventListener('click',e=>{
+    e.preventDefault();
+    document.querySelectorAll('.sidebar nav a').forEach(x=>x.classList.remove('active'));
+    a.classList.add('active');
+    const sec=a.dataset.section;
+    document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+    $('sec-'+sec).classList.add('active');
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:verRespuestasPromo,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra};
+    if(loaders[sec])loaders[sec]();
+  });
+});
+
+// --- DASHBOARD ---
+async function loadDashboard(){
+  const [rep,tasa,dash,status]=await Promise.all([api('/api/reporte_diario?u='+userId),api('/api/tasa_entrega?u='+userId),api('/api/dashboard?u='+userId),api('/api/status')]);
+  let cards='';
+  const st=status.ok?(status.status==='conectado'||status.status==='solo_api'?'online':'offline'):'offline';
+  const stLabel=status.ok?(status.status==='solo_api'?'API Activa':status.status==='conectado'?'Conectado':'Desconectado'):'Sin conexion';
+  cards+=`<div class="card"><div class="card-title">Estado WSP</div><div class="card-value accent"><span class="status-dot ${st}"></span> ${stLabel}</div></div>`;
+  if(rep.ok){
+    cards+=`<div class="card"><div class="card-title">Envios Hoy</div><div class="card-value success">${rep.totalEnvios||0}</div><div class="card-sub">✅ ${rep.exitosos||0} exitosos · ❌ ${rep.fallidos||0} fallidos</div></div>`;
+    cards+=`<div class="card"><div class="card-title">Respuestas Hoy</div><div class="card-value accent">${rep.respuestas||0}</div></div>`;
+  }
+  if(tasa.ok){
+    const v=tasa.tasa_entrega||0,c=v>=80?'success':v>=50?'warn':'danger';
+    cards+=`<div class="card"><div class="card-title">Tasa de Entrega</div><div class="card-value ${c}">${v}%</div><div class="card-sub">📨 ${tasa.total||0} enviados · ✅ ${tasa.entregados||0} entregados</div></div>`;
+  }
+  if(dash.ok){
+    cards+=`<div class="card"><div class="card-title">Grupos</div><div class="card-value accent">${dash.grupos||0}</div></div>`;
+    cards+=`<div class="card"><div class="card-title">Campanas</div><div class="card-value accent">${dash.campanas||0}</div><div class="card-sub">${dash.activas||0} activas</div></div>`;
+  }
+  $('dashCards').innerHTML=cards;
+  $('dashReporte').innerHTML=rep.ok?`<div style="padding:20px"><div style="font-size:30px;font-weight:700;color:var(--success)">${rep.totalEnvios||0}</div><p style="color:var(--text2)">Total envios hoy</p><p style="margin-top:10px">✅ ${rep.exitosos||0} exitosos<br>❌ ${rep.fallidos||0} fallidos<br>💬 ${rep.respuestas||0} respuestas</p></div>`:'<div class="empty-state"><p>Sin datos</p></div>';
+  $('dashTasa').innerHTML=tasa.ok?`<div style="padding:20px"><div style="font-size:30px;font-weight:700;color:var(--success)">${tasa.tasa_entrega||0}%</div><p style="color:var(--text2)">Tasa de entrega</p><p style="margin-top:10px">📨 ${tasa.total||0} enviados<br>✅ ${tasa.entregados||0} entregados<br>👁 ${tasa.leidos||0} leidos (${tasa.tasa_lectura||0}%)</p></div>`:'<div class="empty-state"><p>Sin datos</p></div>';
+}
+
+// --- CUENTAS ---
+async function loadCuentas(){
+  const r=await api('/api/sesiones?u='+userId);
+  if(!r.ok){$('cuentasContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const s=r.sesiones||[],ban=(r.baneadas||[]).map(b=>b.nombre);
+  if(!s.length){$('cuentasContent').innerHTML='<div class="empty-state"><div class="icon">👤</div><p>No hay cuentas vinculadas.<br>Agrega una usando el formulario de arriba.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Cuentas ('+s.length+')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Telefono</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
+  s.forEach((x,i)=>{
+    const b=ban.includes(x.nombre);
+    h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td>${x.telefono||'?'}</td><td><span class="badge ${b?'badge-danger':'badge-success'}">${b?'BANEADA':'Activa'}</span></td><td><button class="btn btn-danger btn-sm" onclick="eliminarCuenta('${x.nombre}')">🗑 Eliminar</button></td></tr>`;
+  });
+  h+='</tbody></table></div>';$('cuentasContent').innerHTML=h;
+}
+function eliminarCuenta(n){showModal(`<h3>⚠ Eliminar Cuenta</h3><p>Eliminar <b>'${n}'</b>?<br>Se desconectara y borrara.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarElimCuenta('${n}')">Eliminar</button></div>`)}
+async function confirmarElimCuenta(n){if(!requireMembresia())return;closeModal();const r=await api('/api/desvincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n})});toast(r.ok?'Cuenta eliminada':'Error','success');loadCuentas()}
+let wspQrPollTimer=null;
+function vincularCuentaWspQR(){
+  if(!requireMembresia())return;
+  const nombre=$('wspCuentaNombre').value.trim();
+  if(!nombre){toast('Ingresa un nombre para la cuenta','error');return}
+  $('wspQrInlineBox').style.display='block';
+  $('wspQrTitle').textContent='📱 Vinculando: '+nombre;
+  $('wspQrStatus').style.background='#3d3d0a';$('wspQrStatus').style.color='#ffeb3b';
+  $('wspQrStatus').textContent='⏳ Preparando QR...';
+  $('wspQrImg').innerHTML='<span class="spinner"></span>';
+  $('wspCuentaNombre').value='';
+  fetch('/link?u='+encodeURIComponent(userId)+'&n='+encodeURIComponent(nombre)).catch(()=>{});
+  let lastQr='';
+  function pollQr(){
+    fetch('/link-status?u='+encodeURIComponent(userId)+'&n='+encodeURIComponent(nombre))
+      .then(r=>r.json()).then(d=>{
+        if(d.status==='conectado'){
+          $('wspQrStatus').style.background='#0a3d0a';$('wspQrStatus').style.color='#4caf50';
+          $('wspQrStatus').textContent='✅ VINCULADO — Cuenta lista!';
+          $('wspQrImg').innerHTML='<div style="font-size:48px;margin:20px">✅</div>';
+          clearInterval(wspQrPollTimer);wspQrPollTimer=null;
+          setTimeout(()=>{$('wspQrInlineBox').style.display='none';loadCuentas()},3000);
+          return;
+        }
+        if(d.status==='esperando_qr'&&d.qr&&d.qr!==lastQr){
+          lastQr=d.qr;
+          $('wspQrStatus').textContent='⏳ Escanea el QR con tu celular';
+          $('wspQrImg').innerHTML='<img src="'+d.qr+'" width="280" height="280" style="border-radius:12px;border:2px solid var(--accent)">';
+        }
+        if(d.status==='error'||d.status==='timeout'){
+          $('wspQrStatus').style.background='#3d0a0a';$('wspQrStatus').style.color='#f44336';
+          $('wspQrStatus').textContent='❌ '+(d.error||'Error al vincular');
+          clearInterval(wspQrPollTimer);wspQrPollTimer=null;
+        }
+      }).catch(()=>{});
+  }
+  wspQrPollTimer=setInterval(pollQr,3000);
+  pollQr();
+}
+function cancelarQrInline(){
+  if(wspQrPollTimer){clearInterval(wspQrPollTimer);wspQrPollTimer=null}
+  $('wspQrInlineBox').style.display='none';
+}
+
+// --- TG BOT DATA LOADERS (FULL CRUD) ---
+async function loadTgGrupos(){
+  const r=await api('/api/tg/grupos?u='+userId);
+  if(!r.ok){$('tgGruposContent').innerHTML='<div class="empty-state"><p>Error al cargar grupos</p></div>';return}
+  const g=r.grupos||[];
+  if(!g.length){$('tgGruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos registrados.<br>Usa el formulario de arriba para agregar.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+')</h3></div><table><thead><tr><th>#</th><th>Link del Grupo</th><th>Acciones</th></tr></thead><tbody>';
+  g.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><a href="${esc(x.link)}" target="_blank" style="color:var(--accent2)">${esc(x.link)}</a></td><td><button class="btn btn-danger btn-sm" onclick="delTgGrupoPanel('${encodeURIComponent(x.link)}')">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('tgGruposContent').innerHTML=h;
+}
+async function addTgGrupoPanel(){
+  if(!requireMembresia())return;
+  const link=$('tgGrupoLink').value.trim();
+  if(!link){toast('Ingresa el link del grupo','error');return}
+  const r=await api('/api/tg/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link})});
+  toast(r.ok?'Grupo agregado':'Error o ya existe',r.ok?'success':'error');
+  if(r.ok){$('tgGrupoLink').value='';loadTgGrupos()}
+}
+async function delTgGrupoPanel(link){if(!requireMembresia())return;const r=await api('/api/tg/grupos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:decodeURIComponent(link)})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadTgGrupos()}
+async function delAllTgGruposPanel(){if(!requireMembresia())return;showModal('<h3>Borrar TODOS los grupos TG?</h3><p>Esta accion no se puede deshacer.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarDelAllTgGrupos()">Borrar Todos</button></div>')}
+async function confirmarDelAllTgGrupos(){closeModal();const r=await api('/api/tg/grupos/delall',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});toast(r.ok?'Todos eliminados':'Error',r.ok?'success':'error');loadTgGrupos()}
+
+async function loadTgMensajes(){
+  const r=await api('/api/tg/mensajes?u='+userId);
+  if(!r.ok){$('tgMensajesContent').innerHTML='<div class="empty-state"><p>Error al cargar mensajes</p></div>';return}
+  const m=r.mensajes||[];
+  if(!m.length){$('tgMensajesContent').innerHTML='<div class="empty-state"><div class="icon">✉</div><p>No hay mensajes creados.<br>Crea uno con el boton de arriba.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Mensajes ('+m.length+')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Texto</th><th>Foto</th><th>Acciones</th></tr></thead><tbody>';
+  m.forEach((x,i)=>{
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre||'?')}</b></td><td style="font-size:12px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc((x.texto||'').slice(0,60))}</td><td>${x.foto_path?'<span class="badge badge-success">Si</span>':'<span class="badge" style="background:var(--bg3)">No</span>'}</td><td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="showEditTgMsg(${x.id},${JSON.stringify(esc(x.nombre||''))},${JSON.stringify(esc(x.texto||''))})">✏</button> <button class="btn btn-sm" style="background:var(--accent2);color:#fff" onclick="dupTgMsg(${x.id})">📋</button> <button class="btn btn-danger btn-sm" onclick="delTgMsg(${x.id})">🗑</button></td></tr>`;
+  });
+  h+='</tbody></table></div>';$('tgMensajesContent').innerHTML=h;
+}
+function showCrearTgMensaje(){if(!requireMembresia())return;showModal('<h3>Crear Mensaje TG</h3><div class="form-group"><label>Nombre</label><input type="text" id="tgMsgNombre" placeholder="Ej: promo1"></div><div class="form-group"><label>Texto del mensaje</label><textarea id="tgMsgTexto" rows="5" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px" placeholder="Escribe tu mensaje aqui..."></textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearTgMsgPanel()">Crear</button></div>')}
+async function crearTgMsgPanel(){
+  const nombre=$('tgMsgNombre').value.trim(),texto=$('tgMsgTexto').value.trim();
+  if(!nombre||!texto){toast('Nombre y texto son requeridos','error');return}
+  closeModal();const r=await api('/api/tg/mensajes/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre,texto})});
+  toast(r.ok?'Mensaje creado':'Error',r.ok?'success':'error');loadTgMensajes();
+}
+function showEditTgMsg(id,nombre,texto){if(!requireMembresia())return;showModal('<h3>Editar Mensaje TG</h3><div class="form-group"><label>Nombre</label><input type="text" id="tgMsgEditNombre" value="'+nombre+'"></div><div class="form-group"><label>Texto</label><textarea id="tgMsgEditTexto" rows="5" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">'+texto+'</textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="editTgMsgPanel('+id+')">Guardar</button></div>')}
+async function editTgMsgPanel(id){
+  const nombre=$('tgMsgEditNombre').value.trim(),texto=$('tgMsgEditTexto').value.trim();
+  closeModal();const r=await api('/api/tg/mensajes/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id,nombre,texto})});
+  toast(r.ok?'Mensaje editado':'Error',r.ok?'success':'error');loadTgMensajes();
+}
+async function delTgMsg(id){if(!requireMembresia())return;const r=await api('/api/tg/mensajes/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadTgMensajes()}
+async function dupTgMsg(id){if(!requireMembresia())return;const r=await api('/api/tg/mensajes/duplicar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Duplicado':'Error',r.ok?'success':'error');loadTgMensajes()}
+
+async function loadTgCampanas(){
+  const r=await api('/api/tg/campanas?u='+userId);
+  if(!r.ok){$('tgCampanasContent').innerHTML='<div class="empty-state"><p>Error al cargar campanas</p></div>';return}
+  const c=r.campanas||[];
+  if(!c.length){$('tgCampanasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay campanas creadas.<br>Crea una con el boton de arriba.</p></div>';return}
+  let h='';
+  c.forEach(x=>{
+    const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
+    h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
+    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div>${estado} <button class="btn btn-danger btn-sm" onclick="delTgCampanaPanel(${x.id})" style="margin-left:8px">🗑 Eliminar</button></div></div>`;
+    h+=`<p style="font-size:12px;color:var(--text2);margin-bottom:5px">${esc((x.mensaje||'').slice(0,100))}</p>`;
+    h+=`<div style="display:flex;gap:15px;font-size:12px;color:var(--text2)"><span>📤 Enviados: <b style="color:var(--success)">${x.enviados||0}</b></span><span>❌ Errores: <b style="color:var(--danger)">${x.errores||0}</b></span>`;
+    h+=`<span>⏱ Intervalo: ${x.intervalo_min||30}s - ${x.intervalo_max||60}s</span></div>`;
+    if(x.sesiones&&x.sesiones.length)h+=`<p style="font-size:11px;color:var(--text2);margin-top:5px">Sesiones: ${x.sesiones.map(s=>esc(s)).join(', ')}</p>`;
+    if(x.grupos&&x.grupos.length)h+=`<p style="font-size:11px;color:var(--text2);margin-top:3px">Grupos: ${x.grupos.length} asignados</p>`;
+    h+=`</div>`;
+  });
+  $('tgCampanasContent').innerHTML=h;
+}
+function showCrearTgCampana(){if(!requireMembresia())return;showModal('<h3>Nueva Campana TG</h3><div class="form-group"><label>Nombre de la campana</label><input type="text" id="tgCampNombre" placeholder="Ej: campana1"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearTgCampanaPanel()">Crear</button></div>')}
+async function crearTgCampanaPanel(){
+  const nombre=$('tgCampNombre').value.trim();
+  if(!nombre){toast('Nombre requerido','error');return}
+  closeModal();const r=await api('/api/tg/campanas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre})});
+  toast(r.ok?'Campana creada':'Error',r.ok?'success':'error');loadTgCampanas();
+}
+async function delTgCampanaPanel(id){if(!requireMembresia())return;showModal('<h3>Eliminar Campana?</h3><p>Se eliminara la campana y sus configuraciones.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarDelTgCamp('+id+')">Eliminar</button></div>')}
+async function confirmarDelTgCamp(id){closeModal();const r=await api('/api/tg/campanas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Eliminada':'Error',r.ok?'success':'error');loadTgCampanas()}
+
+async function loadTgProgramados(){
+  const r=await api('/api/tg/programados?u='+userId);
+  if(!r.ok){$('tgProgramadosContent').innerHTML='<div class="empty-state"><p>Error al cargar programados</p></div>';return}
+  const p=r.programados||[];
+  if(!p.length){$('tgProgramadosContent').innerHTML='<div class="empty-state"><div class="icon">⏰</div><p>No hay envios programados.<br>Crea uno con el boton de arriba.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Mensaje</th><th>Hora</th><th>Repetir</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
+  p.forEach((x,i)=>{
+    const hora=String(x.hora||0).padStart(2,'0')+':'+String(x.minuto||0).padStart(2,'0');
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.msg_nombre||'Mensaje #'+x.mensaje_id)}</b></td><td>${hora}</td><td>${x.repetir?'<span class="badge badge-success">Si</span>':'<span class="badge" style="background:var(--bg3)">No</span>'}</td><td>${x.activo?'<span class="badge badge-success">Activo</span>':'<span class="badge badge-danger">Pausado</span>'}</td><td><button class="btn btn-sm btn-primary" onclick="toggleTgProgPanel(${x.id})">${x.activo?'Pausar':'Activar'}</button> <button class="btn btn-danger btn-sm" onclick="delTgProgPanel(${x.id})">🗑</button></td></tr>`;
+  });
+  h+='</tbody></table></div>';$('tgProgramadosContent').innerHTML=h;
+}
+function showCrearTgProgramado(){if(!requireMembresia())return;showModal('<h3>Nuevo Envio Programado TG</h3><div class="form-group"><label>ID del Mensaje</label><input type="number" id="tgProgMsgId" placeholder="ID del mensaje"></div><div class="form-group"><label>Hora (0-23)</label><input type="number" id="tgProgHora" min="0" max="23" value="8"></div><div class="form-group"><label>Minuto (0-59)</label><input type="number" id="tgProgMin" min="0" max="59" value="0"></div><div class="form-group"><label>Repetir</label><select id="tgProgRepetir" style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px"><option value="diario">Diario</option><option value="unico">Una vez</option></select></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearTgProgPanel()">Crear</button></div>')}
+async function crearTgProgPanel(){
+  const msgId=$('tgProgMsgId').value,hora=$('tgProgHora').value,min=$('tgProgMin').value,rep=$('tgProgRepetir').value;
+  if(!msgId){toast('ID de mensaje requerido','error');return}
+  closeModal();const r=await api('/api/tg/programados/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje_id:parseInt(msgId),hora:parseInt(hora),minuto:parseInt(min),repetir:rep})});
+  toast(r.ok?'Programado creado':'Error',r.ok?'success':'error');loadTgProgramados();
+}
+async function toggleTgProgPanel(id){if(!requireMembresia())return;const r=await api('/api/tg/programados/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Estado cambiado':'Error',r.ok?'success':'error');loadTgProgramados()}
+async function delTgProgPanel(id){if(!requireMembresia())return;const r=await api('/api/tg/programados/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadTgProgramados()}
+
+async function loadTgHistorial(){
+  const r=await api('/api/tg/historial?u='+userId);
+  if(!r.ok){$('tgHistorialContent').innerHTML='<div class="empty-state"><p>Error al cargar historial</p></div>';return}
+  const h_data=r.historial||[];
+  if(!h_data.length){$('tgHistorialContent').innerHTML='<div class="empty-state"><div class="icon">📜</div><p>No hay historial de envios.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Grupo</th><th>Resultado</th><th>Fecha</th></tr></thead><tbody>';
+  h_data.forEach((x,i)=>{
+    const res_badge=x.resultado==='enviado'?'<span class="badge badge-success">Enviado</span>':'<span class="badge badge-danger">'+esc(x.resultado||'Error')+'</span>';
+    h+=`<tr><td>${i+1}</td><td style="font-size:12px;max-width:250px;overflow:hidden;text-overflow:ellipsis">${esc(x.grupo_link||'?')}</td><td>${res_badge}</td><td style="font-size:11px">${esc(x.fecha||'—')}</td></tr>`;
+  });
+  h+='</tbody></table></div>';$('tgHistorialContent').innerHTML=h;
+}
+
+async function loadTgAutoResp(){
+  const r=await api('/api/tg/autoresponder?u='+userId);
+  if(!r.ok){$('tgAutoRespContent').innerHTML='<div class="empty-state"><p>Error al cargar auto-responder</p></div>';return}
+  let h='';
+  const isActive=r.config&&r.config.activo;
+  h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">`;
+  h+=`<div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">Estado: ${isActive?'<span class="badge badge-success">Activo</span>':'<span class="badge badge-danger">Desactivado</span>'}</h3>`;
+  h+=`<button class="btn ${isActive?'btn-danger':'btn-primary'} btn-sm" onclick="toggleTgAutoResp(${isActive?'false':'true'})">${isActive?'Desactivar':'Activar'}</button></div>`;
+  if(r.config&&r.config.contacto)h+=`<p style="font-size:13px;color:var(--text2);margin-top:8px">Contacto: <b>${esc(r.config.contacto)}</b></p>`;
+  h+=`</div>`;
+  h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">`;
+  h+=`<div class="form-group" style="margin-bottom:0;flex:1;min-width:120px"><label>Palabra clave</label><input type="text" id="tgKwInput" placeholder="Ej: precio"></div>`;
+  h+=`<div class="form-group" style="margin-bottom:0;flex:2;min-width:200px"><label>Respuesta</label><input type="text" id="tgKwResp" placeholder="Respuesta automatica"></div>`;
+  h+=`<button class="btn btn-primary" onclick="addTgKwPanel()">➕ Agregar</button>`;
+  h+=`<button class="btn btn-danger btn-sm" onclick="delAllTgKwPanel()">🗑 Limpiar</button></div>`;
+  if(r.keywords&&r.keywords.length){
+    h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;border:1px solid var(--border)"><h3 style="margin:0 0 10px">Palabras Clave (${r.keywords.length})</h3><table><thead><tr><th>Palabra</th><th>Respuesta</th><th></th></tr></thead><tbody>`;
+    r.keywords.forEach(k=>{h+=`<tr><td><b>${esc(k.palabra||k.keyword)}</b></td><td style="font-size:12px;color:var(--text2)">${esc((k.respuesta||'').slice(0,80))}</td><td><button class="btn btn-danger btn-sm" onclick="delTgKwPanel(${k.id})">🗑</button></td></tr>`});
+    h+=`</tbody></table></div>`;
+  }
+  $('tgAutoRespContent').innerHTML=h;
+}
+async function toggleTgAutoResp(activo){if(!requireMembresia())return;const r=await api('/api/tg/autoresponder/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,activo})});toast(r.ok?'Estado cambiado':'Error',r.ok?'success':'error');loadTgAutoResp()}
+async function addTgKwPanel(){if(!requireMembresia())return;const kw=$('tgKwInput').value.trim(),resp=$('tgKwResp').value.trim();if(!kw||!resp){toast('Palabra y respuesta requeridas','error');return}const r=await api('/api/tg/autoresponder/keyword/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,keyword:kw,respuesta:resp})});toast(r.ok?'Agregada':'Error',r.ok?'success':'error');loadTgAutoResp()}
+async function delTgKwPanel(id){if(!requireMembresia())return;const r=await api('/api/tg/autoresponder/keyword/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Eliminada':'Error',r.ok?'success':'error');loadTgAutoResp()}
+async function delAllTgKwPanel(){if(!requireMembresia())return;const r=await api('/api/tg/autoresponder/keyword/delall',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});toast(r.ok?'Limpiado':'Error',r.ok?'success':'error');loadTgAutoResp()}
+
+async function loadTgConfig(){
+  const r=await api('/api/tg/config?u='+userId);
+  if(!r.ok){$('tgConfigContent').innerHTML='<div class="empty-state"><p>Error al cargar config</p></div>';return}
+  const c=r.config||{};
+  let h=`<div style="background:var(--bg);padding:20px;border-radius:10px;border:1px solid var(--border)">`;
+  h+=`<div class="form-group"><label>Delay entre envios (segundos)</label><input type="number" id="tgCfgDelay" value="${c.delay_seg||10}" min="1" max="300"></div>`;
+  h+=`<div class="form-group"><label>Tamano de lote (0 = sin lotes)</label><input type="number" id="tgCfgLote" value="${c.lote_tamano||0}" min="0" max="100"></div>`;
+  h+=`<div class="form-group"><label>Pausa entre lotes (segundos)</label><input type="number" id="tgCfgPausa" value="${c.lote_pausa_seg||30}" min="0" max="600"></div>`;
+  h+=`<button class="btn btn-primary" onclick="saveTgConfigPanel()">💾 Guardar Config</button></div>`;
+  $('tgConfigContent').innerHTML=h;
+}
+async function saveTgConfigPanel(){
+  if(!requireMembresia())return;
+  const delay=parseInt($('tgCfgDelay').value)||10,lote=parseInt($('tgCfgLote').value)||0,pausa=parseInt($('tgCfgPausa').value)||30;
+  const r=await api('/api/tg/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,delay_seg:delay,lote_tamano:lote,lote_pausa_seg:pausa})});
+  toast(r.ok?'Config guardada':'Error',r.ok?'success':'error');
+}
+
+async function loadTgListaNegra(){
+  const r=await api('/api/tg/listanegra?u='+userId);
+  if(!r.ok){$('tgListaNegraContent').innerHTML='<div class="empty-state"><p>Error al cargar lista negra</p></div>';return}
+  const l=r.lista||[];
+  if(!l.length){$('tgListaNegraContent').innerHTML='<div class="empty-state"><div class="icon">🚫</div><p>Lista negra vacia.<br>Agrega grupos que no quieres que reciban envios.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Grupo</th><th>Acciones</th></tr></thead><tbody>';
+  l.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td>${esc(x.grupo)}</td><td><button class="btn btn-danger btn-sm" onclick="delTgLnPanel('${encodeURIComponent(x.grupo)}')">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('tgListaNegraContent').innerHTML=h;
+}
+async function addTgListaNegraPanel(){if(!requireMembresia())return;const g=$('tgListaNegraInput').value.trim();if(!g){toast('Ingresa el grupo','error');return}const r=await api('/api/tg/listanegra/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,grupo:g})});toast(r.ok?'Bloqueado':'Error',r.ok?'success':'error');if(r.ok){$('tgListaNegraInput').value='';loadTgListaNegra()}}
+async function delTgLnPanel(g){if(!requireMembresia())return;const r=await api('/api/tg/listanegra/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,grupo:decodeURIComponent(g)})});toast(r.ok?'Desbloqueado':'Error',r.ok?'success':'error');loadTgListaNegra()}
+async function limpiarTgListaNegraPanel(){if(!requireMembresia())return;const r=await api('/api/tg/listanegra/limpiar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});toast(r.ok?'Limpiado':'Error',r.ok?'success':'error');loadTgListaNegra()}
+
+// --- GRUPOS ---
+async function loadGrupos(){
+  const r=await api('/api/grupos?u='+userId);
+  if(!r.ok){$('gruposContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const g=r.grupos||[];
+  if(!g.length){$('gruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos.<br>Usa "Detectar" para buscar.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+')</h3></div><table><thead><tr><th>#</th><th>Link/JID</th><th>Acciones</th></tr></thead><tbody>';
+  g.forEach((x,i)=>{const l=x.link||x.jid||'?';h+=`<tr><td>${i+1}</td><td style="font-size:12px">${l.length>50?l.slice(0,50)+'...':l}</td><td><button class="btn btn-danger btn-sm" onclick="eliminarGrupo('${encodeURIComponent(l)}')">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('gruposContent').innerHTML=h;
+}
+async function eliminarGrupo(l){if(!requireMembresia())return;const r=await api('/api/grupos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:decodeURIComponent(l)})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadGrupos()}
+async function detectarGrupos(){
+  if(!requireMembresia())return;
+  $('gruposContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Detectando...</div>';
+  const r=await api('/api/detectar_cliente?u='+userId);
+  if(!r.ok){toast('Error: '+(r.error||''),'error');loadGrupos();return}
+  const g=r.grupos||[];if(!g.length){toast('No se detectaron grupos','error');loadGrupos();return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Detectados ('+g.length+')</h3><button class="btn btn-success btn-sm" onclick="agregarTodos()">✅ Agregar Todos</button></div><table><thead><tr><th>✓</th><th>#</th><th>Nombre</th><th>Miembros</th></tr></thead><tbody>';
+  g.forEach((x,i)=>{h+=`<tr><td><input type="checkbox" class="dch" value="${i}" checked></td><td>${i+1}</td><td>${x.subject||'?'}</td><td>${x.size||'?'}</td></tr>`});
+  h+='</tbody></table></div>';window._dg=g;$('gruposContent').innerHTML=h;
+}
+async function agregarTodos(){if(!requireMembresia())return;const ch=document.querySelectorAll('.dch:checked'),g=window._dg||[];let n=0;for(const c of ch){const x=g[parseInt(c.value)];if(x&&x.id){await api('/api/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:x.id})});n++}}toast(n+' grupos agregados','success');loadGrupos()}
+
+// --- MENSAJES ---
+async function loadMensajes(){
+  const r=await api('/api/mensajes?u='+userId);
+  if(!r.ok){$('mensajesContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const m=r.mensajes||[];
+  if(!m.length){$('mensajesContent').innerHTML='<div class="empty-state"><div class="icon">✉</div><p>No hay mensajes. Crea uno.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre</th><th>Texto</th><th>Acciones</th></tr></thead><tbody>';
+  m.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${(x.texto||'').slice(0,60)}</td><td style="white-space:nowrap"><button class="btn btn-outline btn-sm" onclick="editarMensaje(${x.id})">✏</button> <button class="btn btn-outline btn-sm" onclick="duplicarMensaje(${x.id})">📋</button> <button class="btn btn-danger btn-sm" onclick="eliminarMensaje(${x.id})">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('mensajesContent').innerHTML=h;
+}
+function showCrearMensaje(){showModal(`<h3>➕ Crear Mensaje</h3><div class="form-group"><label>Nombre</label><input id="msgN" placeholder="Ej: Promo Enero"></div><div class="form-group"><label>Texto</label><textarea id="msgT" rows="5" placeholder="Tu mensaje...&#10;Variables: {nombre} {numero}"></textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearMensaje()">Crear</button></div>`)}
+async function crearMensaje(){if(!requireMembresia())return;const n=$('msgN').value.trim(),t=$('msgT').value.trim();if(!n||!t){toast('Completa campos','error');return}closeModal();const r=await api('/api/mensajes/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,texto:t})});toast(r.ok?'Creado':'Error',r.ok?'success':'error');loadMensajes()}
+async function editarMensaje(id){const r=await api('/api/mensajes?u='+userId);const m=(r.mensajes||[]).find(x=>x.id===id);if(!m)return;showModal(`<h3>✏ Editar</h3><div class="form-group"><label>Nombre</label><input id="eN" value="${m.nombre||''}"></div><div class="form-group"><label>Texto</label><textarea id="eT" rows="5">${m.texto||''}</textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="guardarMsg(${id})">Guardar</button></div>`)}
+async function guardarMsg(id){if(!requireMembresia())return;closeModal();const r=await api('/api/mensajes/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id,nombre:$('eN').value.trim(),texto:$('eT').value.trim()})});toast(r.ok?'Editado':'Error',r.ok?'success':'error');loadMensajes()}
+async function duplicarMensaje(id){if(!requireMembresia())return;const r=await api('/api/mensajes/duplicar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Duplicado':'Error',r.ok?'success':'error');loadMensajes()}
+function eliminarMensaje(id){showModal(`<h3>🗑 Eliminar?</h3><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confElimMsg(${id})">Eliminar</button></div>`)}
+async function confElimMsg(id){if(!requireMembresia())return;closeModal();await api('/api/mensajes/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminado','success');loadMensajes()}
+
+// --- ENVIOS ---
+async function loadEnvios(){
+  const [ms,hi]=await Promise.all([api('/api/mensajes?u='+userId),api('/api/envios_unicos?u='+userId)]);
+  const m=(ms.ok?ms.mensajes:[])||[];
+  if(!m.length){$('enviosContent').innerHTML='<div class="empty-state"><p>Crea un mensaje primero</p></div>'}
+  else{let h='<div class="grid">';m.forEach(x=>{h+=`<div class="card" style="cursor:pointer" onclick="enviarUnico(${x.id},'${(x.nombre||'').replace(/'/g,"\\'")}')"><div class="card-title">${x.nombre||'?'}</div><p style="font-size:12px;color:var(--text2)">${(x.texto||'').slice(0,80)}</p><button class="btn btn-primary btn-sm" style="margin-top:10px">📤 Enviar</button></div>`});h+='</div>';$('enviosContent').innerHTML=h}
+  const e=(hi.ok?hi.envios:[])||[];
+  if(!e.length){$('enviosHistorial').innerHTML='<div class="empty-state"><p>Sin envios</p></div>'}
+  else{let h='<table><thead><tr><th>Fecha</th><th>Mensaje</th><th>Grupos</th><th>OK</th><th>Error</th></tr></thead><tbody>';e.slice(0,20).forEach(x=>{h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.nombre||x.mensaje_id||'?'}</td><td>${x.total_grupos||'?'}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td></tr>`});h+='</tbody></table>';$('enviosHistorial').innerHTML=h}
+}
+function enviarUnico(id,n){if(!requireMembresia())return;showModal(`<h3>📤 Enviar</h3><p>Enviar <b>"${n}"</b> a todos tus grupos?</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="confEnvio(${id})">Enviar</button></div>`)}
+async function confEnvio(id){if(!requireMembresia())return;closeModal();toast('Enviando...','success');const r=await api('/api/enviar_unico',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje_id:id})});toast(r.ok?'Envio: '+(r.exitosos||0)+' ok, '+(r.fallidos||0)+' error':'Error: '+(r.error||''),r.ok?'success':'error');loadEnvios()}
+
+// --- PROGRAMADOS ---
+async function loadProgramados(){
+  const r=await api('/api/programados?u='+userId);
+  if(!r.ok){$('programadosContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const p=r.programados||[];
+  if(!p.length){$('programadosContent').innerHTML='<div class="empty-state"><div class="icon">⏰</div><p>No hay envios programados.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Mensaje</th><th>Hora</th><th>Repetir</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
+  p.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td>${x.nombre||x.mensaje_id}</td><td><b>${x.hora||'?'}</b></td><td>${x.repetir?'Diario':'Una vez'}</td><td><span class="badge ${x.activo?'badge-success':'badge-warn'}">${x.activo?'Activo':'Pausado'}</span></td><td><button class="btn btn-outline btn-sm" onclick="toggleProg(${x.id})">${x.activo?'⏸':'▶'}</button> <button class="btn btn-danger btn-sm" onclick="elimProg(${x.id})">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('programadosContent').innerHTML=h;
+}
+function showCrearProgramado(){showModal(`<h3>➕ Programar</h3><div class="form-group"><label>ID Mensaje</label><input id="pI" type="number" placeholder="ID"></div><div class="form-group"><label>Hora (HH:MM)</label><input id="pH" placeholder="09:30"></div><div class="form-group"><label><input type="checkbox" id="pR"> Repetir diario</label></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearProg()">Programar</button></div>`)}
+async function crearProg(){const mid=parseInt($('pI').value),h=$('pH').value.trim(),rep=$('pR').checked;if(!mid||!h){toast('Completa','error');return}closeModal();const r=await api('/api/programados/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje_id:mid,hora:h,repetir:rep})});toast(r.ok?'Programado':'Error',r.ok?'success':'error');loadProgramados()}
+async function toggleProg(id){await api('/api/programados/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});loadProgramados()}
+async function elimProg(id){await api('/api/programados/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminado','success');loadProgramados()}
+
+// --- CAMPANAS ---
+async function loadCampanas(){
+  const r=await api('/api/campanas?u='+userId);
+  if(!r.ok){$('campanasContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const c=r.campanas||[];
+  if(!c.length){$('campanasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay campanas.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre</th><th>Estado</th><th>Enviados</th><th>Acciones</th></tr></thead><tbody>';
+  c.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td><span class="badge ${x.activa?'badge-success':'badge-warn'}">${x.activa?'Activa':'Inactiva'}</span></td><td>${x.enviados||0}</td><td><button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})">▶</button> <button class="btn btn-outline btn-sm" onclick="detenerCamp(${x.id})">⏸</button> <button class="btn btn-danger btn-sm" onclick="elimCamp(${x.id})">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('campanasContent').innerHTML=h;
+}
+function showCrearCampana(){showModal(`<h3>➕ Crear Campana</h3><div class="form-group"><label>Nombre</label><input id="cN" placeholder="Nombre"></div><div class="form-group"><label>Mensaje</label><textarea id="cM" rows="4" placeholder="Texto"></textarea></div><div class="form-group"><label>Intervalo (seg)</label><input id="cI" type="number" value="60" min="10"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearCamp()">Crear</button></div>`)}
+async function crearCamp(){const n=$('cN').value.trim(),m=$('cM').value.trim(),iv=parseInt($('cI').value)||60;if(!n||!m){toast('Completa','error');return}closeModal();const r=await api('/api/campanas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,mensaje:m,intervalo:iv})});toast(r.ok?'Creada':'Error',r.ok?'success':'error');loadCampanas()}
+async function iniciarCamp(id){const r=await api('/api/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast(r.ok?'Iniciada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas()}
+async function detenerCamp(id){await api('/api/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast('Detenida','success');loadCampanas()}
+async function elimCamp(id){await api('/api/campanas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminada','success');loadCampanas()}
+
+// --- CONFIG ---
+async function loadConfig(){
+  const r=await api('/api/envio_config?u='+userId);
+  if(!r.ok){$('configContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const c=r.config||{},hr=r.horario||{};
+  $('configContent').innerHTML=`<div class="grid">
+    <div class="card"><div class="card-title">⏱ Delay</div><div class="form-group" style="margin-top:10px"><input id="cd" type="number" value="${c.delay_seg||10}" min="5" max="120"><small style="color:var(--text2)"> segundos</small></div></div>
+    <div class="card"><div class="card-title">📦 Lote</div><div class="form-group" style="margin-top:10px"><input id="cl" type="number" value="${c.lote_tamano||0}" min="0"><small style="color:var(--text2)"> msgs (0=sin lotes)</small></div><div class="form-group"><label>Pausa lotes (seg)</label><input id="cp" type="number" value="${c.lote_pausa_seg||30}" min="0"></div></div>
+    <div class="card"><div class="card-title">🕐 Horario</div><div class="form-group" style="margin-top:10px"><label>Inicio</label><input id="chi" type="number" value="${hr.hora_inicio||0}" min="0" max="23"></div><div class="form-group"><label>Fin</label><input id="chf" type="number" value="${hr.hora_fin||24}" min="1" max="24"></div></div>
+  </div><button class="btn btn-primary" onclick="guardarConfig()">💾 Guardar</button>`;
+}
+async function guardarConfig(){
+  if(!requireMembresia())return;
+  const r=await api('/api/envio_config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,delay_seg:parseInt($('cd').value)||10,lote_tamano:parseInt($('cl').value)||0,lote_pausa_seg:parseInt($('cp').value)||30,hora_inicio:parseInt($('chi').value)||0,hora_fin:parseInt($('chf').value)||24})});
+  toast(r.ok?'Guardado':'Error',r.ok?'success':'error');
+}
+
+// --- LISTA NEGRA ---
+async function loadListaNegra(){
+  const r=await api('/api/lista_negra?u='+userId);
+  if(!r.ok){$('listaNegraContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const l=r.lista||[];
+  if(!l.length){$('listaNegraContent').innerHTML='<div class="empty-state"><div class="icon">🚫</div><p>Lista vacia</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Numero</th><th></th></tr></thead><tbody>';
+  l.forEach((x,i)=>{const n=x.numero||x;h+=`<tr><td>${i+1}</td><td>${n}</td><td><button class="btn btn-outline btn-sm" onclick="quitarBL('${n}')">Quitar</button></td></tr>`});
+  h+='</tbody></table></div>';$('listaNegraContent').innerHTML=h;
+}
+async function agregarBlacklist(){const n=$('inputBlacklist').value.trim();if(!n)return;const r=await api('/api/lista_negra',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'agregar',numero:n})});toast(r.ok?'Bloqueado':'Error',r.ok?'success':'error');$('inputBlacklist').value='';loadListaNegra()}
+async function quitarBL(n){await api('/api/lista_negra',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'eliminar',numero:n})});toast('Desbloqueado','success');loadListaNegra()}
+function limpiarBlacklist(){showModal(`<h3>🗑 Limpiar?</h3><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confLimpBL()">Limpiar</button></div>`)}
+async function confLimpBL(){closeModal();await api('/api/lista_negra',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'limpiar'})});toast('Limpiada','success');loadListaNegra()}
+
+// --- AUTO RESPONDER ---
+async function loadAutoResp(){
+  const r=await api('/api/auto_respuestas?u='+userId);
+  if(!r.ok){$('autoRespContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const reg=r.reglas||[];
+  if(!reg.length){$('autoRespContent').innerHTML='<div class="empty-state"><div class="icon">🤖</div><p>Sin reglas</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Palabra</th><th>Respuesta</th><th></th></tr></thead><tbody>';
+  reg.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${x.palabra||x.keyword||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${(x.respuesta||x.response||'').slice(0,80)}</td><td><button class="btn btn-danger btn-sm" onclick="elimAR(${x.id})">🗑</button></td></tr>`});
+  h+='</tbody></table></div>';$('autoRespContent').innerHTML=h;
+}
+function showCrearAutoResp(){showModal(`<h3>➕ Auto-Respuesta</h3><div class="form-group"><label>Palabra clave</label><input id="arP" placeholder="Ej: precio"></div><div class="form-group"><label>Respuesta</label><textarea id="arR" rows="3" placeholder="Respuesta..."></textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearAR()">Agregar</button></div>`)}
+async function crearAR(){const p=$('arP').value.trim(),r=$('arR').value.trim();if(!p||!r){toast('Completa','error');return}closeModal();const res=await api('/api/auto_respuestas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'agregar',palabra:p,respuesta:r})});toast(res.ok?'Agregada':'Error',res.ok?'success':'error');loadAutoResp()}
+async function elimAR(id){await api('/api/auto_respuestas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'eliminar',id})});toast('Eliminada','success');loadAutoResp()}
+function limpiarAutoResp(){showModal(`<h3>🗑 Limpiar?</h3><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confLimpAR()">Limpiar</button></div>`)}
+async function confLimpAR(){closeModal();await api('/api/auto_respuestas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'limpiar'})});toast('Limpiadas','success');loadAutoResp()}
+
+// --- AUTO-UNIRSE A GRUPOS ---
+function showAutoJoin(){
+  showModal(`<h3>🔗 Auto-unirse a Grupos</h3>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:12px">Pega los links de invitacion de WhatsApp (uno por linea):</p>
+    <div class="form-group"><textarea id="ajLinks" rows="6" placeholder="https://chat.whatsapp.com/ABC123\nhttps://chat.whatsapp.com/XYZ789"></textarea></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="ejecutarAutoJoin()">🔗 Unirse</button></div>`);
+}
+async function ejecutarAutoJoin(){
+  const raw=$('ajLinks').value.trim();
+  if(!raw){toast('Pega al menos un link','error');return}
+  const links=raw.split('\n').map(l=>l.trim()).filter(l=>l.startsWith('https://chat.whatsapp.com/'));
+  if(!links.length){toast('No se encontraron links validos','error');return}
+  closeModal();toast('Uniendose a '+links.length+' grupo(s)...','success');
+  const r=await api('/api/autojoin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,links})});
+  if(r.ok){
+    const s=r.stats||[];const ok=s.filter(x=>x.ok).length;const err=s.filter(x=>!x.ok).length;
+    toast('Unido a '+ok+' grupo(s), '+err+' error(es)',ok>0?'success':'error');
+    loadGrupos();
+  }else{toast('Error: '+(r.error||''),'error')}
+}
+
+// --- ENVIO PERSONAL ---
+let epCuentaActual='';
+async function loadEnvioPersonal(){
+  const r=await api('/api/sesiones?u='+userId);
+  const sel=$('epCuenta');
+  sel.innerHTML='<option value="">-- Selecciona cuenta --</option>';
+  if(r.ok){
+    (r.sesiones||[]).forEach(s=>{
+      sel.innerHTML+=`<option value="${s.nombre}">${s.nombre} (${s.telefono||'?'})</option>`;
+    });
+  }
+}
+async function cargarChatsPersonales(){
+  const cuenta=$('epCuenta').value;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
+  epCuentaActual=cuenta;
+  $('personalContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando chats...</div>';
+  const r=await api('/api/chats_personales?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
+  if(!r.ok){$('personalContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'sin conexion')+'</p></div>';return}
+  const chats=r.chats||[];
+  if(!chats.length){$('personalContent').innerHTML='<div class="empty-state"><div class="icon">💬</div><p>No se encontraron chats. Intenta agregar numeros manualmente.</p></div>';return}
+  renderChatsPersonales(chats,r.cuenta);
+}
+function renderChatsPersonales(chats,cuenta){
+  let h='<div class="table-wrap"><div class="table-header"><h3>💬 '+chats.length+' Chats Personales (cuenta: '+(cuenta||'?')+')</h3></div>';
+  h+='<table><thead><tr><th>#</th><th>Nombre</th><th>Numero</th><th>Accion</th></tr></thead><tbody>';
+  chats.forEach((c,i)=>{
+    const nombre=c.nombre||c.name||c.jid||'?';
+    const numero=c.numero||c.jid?.replace(/@s\.whatsapp\.net$/,'')||'';
+    const jid=c.jid||c.id||'';
+    h+=`<tr><td>${i+1}</td><td>${nombre}</td><td style="font-size:11px;color:var(--text2)">${numero}</td>`;
+    h+=`<td><button class="btn btn-sm btn-danger" onclick="eliminarChatPersonal('${jid}')">🗑</button></td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  $('personalContent').innerHTML=h;
+}
+async function eliminarChatPersonal(jid){
+  if(!confirm('Eliminar este chat de la lista?'))return;
+  await api('/api/chat_personal_eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,cuenta:epCuentaActual,jid})});
+  toast('Chat eliminado','success');
+  cargarChatsPersonales();
+}
+function showAgregarNumero(){
+  showModal(`<h3>➕ Agregar Numero</h3>
+    <div class="form-group"><label>Numero de telefono (con codigo de pais)</label><input type="text" id="nuevoNumero" placeholder="51987654321"></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="agregarNumeroManual()">Agregar</button></div>`);
+}
+async function agregarNumeroManual(){
+  const num=$('nuevoNumero').value.trim();
+  if(!num){toast('Escribe un numero','error');return}
+  const cuenta=$('epCuenta').value||epCuentaActual;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
+  const r=await api('/api/chat_personal_agregar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,cuenta,numero:num})});
+  if(r.ok){closeModal();toast('Numero agregado','success');cargarChatsPersonales();}
+  else{toast('Error','error')}
+}
+async function enviarPersonal(){
+  if(!requireMembresia())return;
+  const msg=$('epMensaje').value.trim();
+  if(!msg){toast('Escribe un mensaje primero','error');return}
+  const cuenta=$('epCuenta').value;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
+  if(!confirm('Enviar este mensaje a TODOS tus chats personales?'))return;
+  toast('Iniciando envio personal...','success');
+  const r=await api('/api/enviar_personal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje:msg,cuenta})});
+  toast(r.ok?'Envio personal iniciado':'Error: '+(r.error||''),r.ok?'success':'error');
+}
+async function cancelarEnvioPersonal(){
+  const r=await api('/api/cancelar_envio_personal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  toast(r.ok?'Envio cancelado':'No hay envio activo',r.ok?'success':'error');
+}
+
+// --- ENVIO A MIEMBROS ---
+async function loadEnvioMiembros(){
+  // Cargar cuentas WSP
+  const r=await api('/api/sesiones?u='+userId);
+  const sel=$('emCuenta');
+  sel.innerHTML='<option value="">-- Selecciona cuenta --</option>';
+  if(r.ok){
+    (r.sesiones||[]).forEach(s=>{
+      sel.innerHTML+=`<option value="${s.nombre}">${s.nombre} (${s.telefono||'?'})</option>`;
+    });
+  }
+  $('emGrupo').innerHTML='<option value="">-- Carga grupos primero --</option>';
+  $('emDestino').innerHTML='<option value="">-- Opcional: grupo destino --</option>';
+}
+async function cargarGruposCuenta(){
+  const cuenta=$('emCuenta').value;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
+  toast('Cargando grupos de '+cuenta+'...','success');
+  const sel=$('emGrupo'),sel2=$('emDestino');
+  sel.innerHTML='<option value="">-- Cargando... --</option>';
+  sel2.innerHTML='<option value="">-- Cargando... --</option>';
+  const r=await api('/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
+  sel.innerHTML='<option value="">-- Selecciona grupo origen --</option>';
+  sel2.innerHTML='<option value="">-- Opcional: grupo destino --</option>';
+  if(r.ok){
+    const grupos=(r.grupos||[]).sort((a,b)=>(a.subject||'').localeCompare(b.subject||''));
+    grupos.forEach(g=>{
+      const name=g.subject||'Sin nombre';
+      const info=name+' ('+g.size+' miembros)';
+      sel.innerHTML+=`<option value="${g.jid}">${info}</option>`;
+      sel2.innerHTML+=`<option value="${g.jid}">${info}</option>`;
+    });
+    toast(grupos.length+' grupos cargados','success');
+  }else{toast('Error: '+(r.error||''),'error')}
+}
+async function cargarMiembros(){
+  const grupoJid=$('emGrupo').value;
+  const cuenta=$('emCuenta').value;
+  if(!grupoJid){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>Selecciona un grupo</p></div>';return}
+  $('miembrosContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando miembros...</div>';
+  let url='/api/miembros_grupo?u='+userId+'&grupo='+encodeURIComponent(grupoJid);
+  if(cuenta)url+='&cuenta='+encodeURIComponent(cuenta);
+  const r=await api(url);
+  if(!r.ok){$('miembrosContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
+  const m=r.miembros||[];
+  if(!m.length){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>No se encontraron miembros</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>👥 '+m.length+' Miembros</h3></div>';
+  h+='<table><thead><tr><th>#</th><th>ID</th><th>Admin</th></tr></thead><tbody>';
+  m.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td>${x.id||x}</td><td>${x.admin?'<span class="badge badge-info">Admin</span>':''}</td></tr>`});
+  h+='</tbody></table></div>';
+  $('miembrosContent').innerHTML=h;
+}
+async function enviarAMiembros(){
+  if(!requireMembresia())return;
+  const grupo=$('emGrupo').value,msg=$('emMensaje').value.trim();
+  if(!grupo){toast('Selecciona un grupo','error');return}
+  if(!msg){toast('Escribe un mensaje','error');return}
+  if(!confirm('Enviar DM a todos los miembros del grupo seleccionado?'))return;
+  toast('Iniciando envio a miembros...','success');
+  const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,grupo,mensaje:msg})});
+  toast(r.ok?'Envio a miembros iniciado':'Error: '+(r.error||''),r.ok?'success':'error');
+}
+async function agregarMiembrosAGrupo(){if(!requireMembresia())return;
+  const origen=$('emGrupo').value,destino=$('emDestino').value;
+  if(!origen){toast('Selecciona grupo origen','error');return}
+  if(!destino){toast('Selecciona grupo destino','error');return}
+  if(origen===destino){toast('Origen y destino no pueden ser iguales','error');return}
+  if(!confirm('Agregar los miembros del grupo origen al grupo destino?'))return;
+  toast('Agregando miembros...','success');
+  const r=await api('/api/agregar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,origen,destino})});
+  toast(r.ok?'Miembros agregados: '+(r.agregados||0)+' ok, '+(r.fallidos||0)+' error':'Error: '+(r.error||''),r.ok?'success':'error');
+}
+
+// --- STATS ---
+async function loadStats(){
+  if(!userId){$('statsContent').innerHTML='<div class="empty-state"><p>Inicia sesion primero</p></div>';return}
+  if(currentPlatform==='tg'){
+    const r=await api('/api/tg/stats?u='+userId);
+    if(!r.ok||!r.stats){$('statsContent').innerHTML='<div class="empty-state"><div class="icon">📈</div><p>Sin estadisticas TG disponibles.</p></div>';return}
+    const s=r.stats;
+    let h='<div class="grid">';
+    h+=`<div class="card"><div class="card-title">📤 Total Envios</div><div style="font-size:28px;font-weight:bold;color:var(--accent)">${s.total_envios||0}</div></div>`;
+    h+=`<div class="card"><div class="card-title">Exitosos</div><div style="font-size:28px;font-weight:bold;color:var(--success)">${s.exitosos||0}</div></div>`;
+    h+=`<div class="card"><div class="card-title">Fallidos</div><div style="font-size:28px;font-weight:bold;color:var(--danger)">${s.fallidos||0}</div></div>`;
+    h+=`<div class="card"><div class="card-title">🌐 Grupos</div><div style="font-size:28px;font-weight:bold;color:var(--accent2)">${s.grupos||0}</div></div>`;
+    h+=`<div class="card"><div class="card-title">👤 Cuentas</div><div style="font-size:28px;font-weight:bold">${s.cuentas||0}</div></div>`;
+    h+=`<div class="card"><div class="card-title">📋 Campanas</div><div style="font-size:28px;font-weight:bold">${s.campanas||0} <span style="font-size:14px;color:var(--success)">(${s.campanas_activas||0} activas)</span></div></div>`;
+    h+='</div>';$('statsContent').innerHTML=h;return;
+  }
+  const r=await api('/api/grupo_stats?u='+userId);
+  if(!r.ok){$('statsContent').innerHTML='<div class="empty-state"><div class="icon">\ud83d\udcca</div><p>Sin estadisticas disponibles.</p></div>';return}
+  const s=r.stats||[];
+  if(!s.length){$('statsContent').innerHTML='<div class="empty-state"><div class="icon">📈</div><p>Sin stats. Envia mensajes para generar datos.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>Grupo</th><th>Enviados</th><th>OK</th><th>Error</th><th>Tasa</th></tr></thead><tbody>';
+  s.forEach(x=>{
+    const env=x.enviados||0,ok=x.exitos||0,fail=x.fallidos||0;
+    const t=x.tasa_exito||0;
+    const c=t>=80?'badge-success':t>=50?'badge-warn':'badge-danger';
+    h+=`<tr><td style="font-size:11px">${(x.grupo_link||'?').slice(0,40)}</td><td>${env}</td><td style="color:var(--success)">${ok}</td><td style="color:var(--danger)">${fail}</td><td><span class="badge ${c}">${t}%</span></td></tr>`;
+  });
+  h+='</tbody></table></div>';$('statsContent').innerHTML=h;
+}
+
+// --- CUENTAS TELEGRAM ---
+async function loadCuentasTg(){
+  if($('tgIdDisplay'))$('tgIdDisplay').textContent=userId;
+  const r=await api('/api/sesiones_tg?u='+userId);
+  if(!r.ok){$('cuentasTgContent').innerHTML='<div class="empty-state"><p>Error al cargar cuentas</p></div>';return}
+  const s=r.sesiones||[];
+  if(!s.length){$('cuentasTgContent').innerHTML='<div class="empty-state"><div class="icon">✈️</div><p>No tienes cuentas de Telegram registradas.<br>Agrega una usando el formulario de arriba.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>✈️ Cuentas ('+s.length+')</h3></div>';
+  h+='<table><thead><tr><th>#</th><th>Nombre</th><th>Telefono</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>';
+  s.forEach((x,i)=>{
+    const origenBadge=x.origen==='bot'?'<span class="badge badge-info" style="font-size:10px;margin-left:4px">Bot</span>':'<span class="badge badge-warn" style="font-size:10px;margin-left:4px">Panel</span>';
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre)}</b>${origenBadge}</td><td>${esc(x.telefono||'—')}</td>`;
+    h+=`<td><span class="badge badge-success">Activa</span></td>`;
+    h+=`<td style="font-size:11px">${x.fecha||'—'}</td>`;
+    h+=`<td><button class="btn btn-sm btn-danger" onclick="eliminarCuentaTg(${JSON.stringify(x.nombre)})">🗑 Eliminar</button></td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  $('cuentasTgContent').innerHTML=h;
+}
+let tgAuthToken='';
+async function iniciarLoginTgPanel(){
+  if(!requireMembresia())return;
+  const nombre=$('tgCuentaNombre').value.trim();
+  const tel=$('tgCuentaTel').value.trim();
+  if(!nombre){toast('Ingresa un nombre para la cuenta','error');return}
+  if(!tel){toast('Ingresa tu numero de telefono con codigo de pais (ej: +51999999999)','error');return}
+  $('tgAuthBox').style.display='block';
+  $('tgAuthCodeBox').style.display='none';
+  $('tgAuth2faBox').style.display='none';
+  $('tgAuthStatus').style.background='#3d3d0a';$('tgAuthStatus').style.color='#ffeb3b';
+  $('tgAuthStatus').textContent='⏳ Enviando codigo a '+tel+'...';
+  const r=await api('/api/tg-auth/send-code',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre,telefono:tel})});
+  if(!r.ok){
+    $('tgAuthStatus').style.background='#3d0a0a';$('tgAuthStatus').style.color='#f44336';
+    $('tgAuthStatus').textContent='❌ Error: '+(r.error||'No se pudo enviar codigo');
+    return;
+  }
+  if(r.status==='already_authorized'){
+    $('tgAuthStatus').style.background='#0a3d0a';$('tgAuthStatus').style.color='#4caf50';
+    $('tgAuthStatus').textContent='✅ Cuenta ya estaba autorizada! Vinculada correctamente.';
+    $('tgCuentaNombre').value='';$('tgCuentaTel').value='';
+    setTimeout(()=>{$('tgAuthBox').style.display='none';loadCuentasTg()},2000);
+    return;
+  }
+  tgAuthToken=r.token;
+  $('tgAuthStatus').style.background='#0a3d0a';$('tgAuthStatus').style.color='#4caf50';
+  $('tgAuthStatus').textContent='📨 Codigo enviado a tu app de Telegram. Ingresalo abajo:';
+  $('tgAuthCodeBox').style.display='block';
+  $('tgAuthCode').value='';$('tgAuthCode').focus();
+}
+async function verificarCodigoTgPanel(){
+  const codigo=$('tgAuthCode').value.trim();
+  if(!codigo){toast('Ingresa el codigo','error');return}
+  $('tgAuthStatus').style.background='#3d3d0a';$('tgAuthStatus').style.color='#ffeb3b';
+  $('tgAuthStatus').textContent='⏳ Verificando codigo...';
+  const r=await api('/api/tg-auth/verify-code',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tgAuthToken,codigo})});
+  if(!r.ok){
+    $('tgAuthStatus').style.background='#3d0a0a';$('tgAuthStatus').style.color='#f44336';
+    $('tgAuthStatus').textContent='❌ Error: '+(r.error||'Codigo incorrecto o expirado');
+    return;
+  }
+  if(r.status==='need_2fa'){
+    $('tgAuthStatus').textContent='🔐 Cuenta tiene 2FA. Ingresa tu contrasena:';
+    $('tgAuthCodeBox').style.display='none';
+    $('tgAuth2faBox').style.display='block';
+    $('tgAuth2fa').value='';$('tgAuth2fa').focus();
+    return;
+  }
+  $('tgAuthStatus').style.background='#0a3d0a';$('tgAuthStatus').style.color='#4caf50';
+  $('tgAuthStatus').textContent='✅ Cuenta vinculada correctamente!';
+  $('tgCuentaNombre').value='';$('tgCuentaTel').value='';
+  toast('Cuenta de Telegram vinculada!','success');
+  setTimeout(()=>{$('tgAuthBox').style.display='none';loadCuentasTg()},2000);
+}
+async function verificar2faTgPanel(){
+  const pass=$('tgAuth2fa').value.trim();
+  if(!pass){toast('Ingresa tu contrasena 2FA','error');return}
+  $('tgAuthStatus').textContent='⏳ Verificando 2FA...';
+  const r=await api('/api/tg-auth/verify-2fa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tgAuthToken,password:pass})});
+  if(!r.ok){
+    $('tgAuthStatus').style.background='#3d0a0a';$('tgAuthStatus').style.color='#f44336';
+    $('tgAuthStatus').textContent='❌ Error: '+(r.error||'Contrasena incorrecta');
+    return;
+  }
+  $('tgAuthStatus').style.background='#0a3d0a';$('tgAuthStatus').style.color='#4caf50';
+  $('tgAuthStatus').textContent='✅ Cuenta vinculada con 2FA!';
+  $('tgCuentaNombre').value='';$('tgCuentaTel').value='';
+  toast('Cuenta de Telegram vinculada!','success');
+  setTimeout(()=>{$('tgAuthBox').style.display='none';loadCuentasTg()},2000);
+}
+function cancelarAuthTg(){
+  $('tgAuthBox').style.display='none';tgAuthToken='';
+}
+async function eliminarCuentaTg(nombre){
+  if(!confirm('Eliminar cuenta TG "'+nombre+'"?'))return;
+  const r=await api('/api/sesiones_tg/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre})});
+  toast(r.ok?'Cuenta eliminada':'Error',r.ok?'success':'error');
+  if(r.ok)loadCuentasTg();
+}
+
+// --- ENVIO INTERACTIVO (PROMO) ---
+let promoRefreshTimer=null;
+async function iniciarPromo(){
+  if(!requireMembresia())return;
+  const aceptar=$('promoAceptar').value.trim()||'si';
+  const rechazar=$('promoRechazar').value.trim()||'no';
+  const r=await api('/api/promo/registrar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,palabra_aceptar:aceptar,palabra_rechazar:rechazar})});
+  if(r.ok){
+    toast('Escucha de respuestas activada! Ahora envia tu promo.','success');
+    $('promoEstado').style.background='#0a3d0a';$('promoEstado').style.color='#4caf50';$('promoEstado').style.borderColor='var(--success)';
+    $('promoEstado').textContent='🟢 Escucha ACTIVA — Esperando respuestas (aceptar: "'+aceptar+'", rechazar: "'+rechazar+'")';
+    if(promoRefreshTimer)clearInterval(promoRefreshTimer);
+    promoRefreshTimer=setInterval(verRespuestasPromo,5000);
+  }else{toast('Error al activar','error')}
+}
+async function detenerPromo(){
+  if(promoRefreshTimer){clearInterval(promoRefreshTimer);promoRefreshTimer=null}
+  const r=await api('/api/promo/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  $('promoEstado').style.background='var(--bg)';$('promoEstado').style.color='var(--text2)';$('promoEstado').style.borderColor='var(--border)';
+  $('promoEstado').textContent='⏸ Escucha detenida';
+  if(r.ok){
+    const a=r.aceptados||[],re=r.rechazados||[];
+    toast('Escucha detenida. Aceptaron: '+a.length+', Rechazaron: '+re.length,'success');
+    renderPromoResultados(a,re);
+  }
+}
+async function verRespuestasPromo(){
+  const r=await api('/api/promo/respuestas?u='+userId);
+  if(!r.ok)return;
+  if(r.activo){
+    $('promoEstado').style.background='#0a3d0a';$('promoEstado').style.color='#4caf50';$('promoEstado').style.borderColor='var(--success)';
+    $('promoEstado').textContent='🟢 Escucha ACTIVA — Aceptados: '+(r.aceptados||[]).length+' | Rechazados: '+(r.rechazados||[]).length;
+  }
+  renderPromoResultados(r.aceptados||[],r.rechazados||[]);
+}
+function renderPromoResultados(aceptados,rechazados){
+  if(aceptados.length){
+    let h='';aceptados.forEach(x=>{h+='<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">✅ <b>'+(x.nombre||x.numero||x.jid||'Desconocido')+'</b>'+(x.numero?' ('+x.numero+')':'')+(x.fecha?' <span style="color:var(--text2);font-size:11px">'+x.fecha+'</span>':'')+'</div>'});
+    $('promoAceptados').innerHTML=h;
+  }else{$('promoAceptados').innerHTML='<p style="color:var(--text2)">Sin respuestas aun</p>'}
+  if(rechazados.length){
+    let h='';rechazados.forEach(x=>{h+='<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">❌ <b>'+(x.nombre||x.numero||x.jid||'Desconocido')+'</b>'+(x.numero?' ('+x.numero+')':'')+(x.fecha?' <span style="color:var(--text2);font-size:11px">'+x.fecha+'</span>':'')+'</div>'});
+    $('promoRechazados').innerHTML=h;
+  }else{$('promoRechazados').innerHTML='<p style="color:var(--text2)">Sin respuestas aun</p>'}
+}
+
+// --- ADMIN ---
+async function loadAdminUsuarios(){
+  if(!esAdmin){$('adminContent').innerHTML='<div class="empty-state"><p>No tienes permisos de admin</p></div>';return}
+  $('adminContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando usuarios...</div>';
+  const r=await api('/api/admin/usuarios?u='+userId);
+  if(!r.ok){$('adminContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
+  const users=r.usuarios||[];
+  if(!users.length){$('adminContent').innerHTML='<div class="empty-state"><div class="icon">\ud83d\udc51</div><p>No hay usuarios registrados</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>\ud83d\udc64 '+users.length+' Usuarios</h3></div>';
+  h+='<table><thead><tr><th>ID</th><th>Usuario</th><th>Plan</th><th>Tipo</th><th>Expira</th><th>Registro</th><th>Admin</th><th>Acciones</th></tr></thead><tbody>';
+  users.forEach(u=>{
+    const exp=u.plan==='permanente'?'\u221e':(u.fecha_expira?new Date(u.fecha_expira).toLocaleDateString('es'):'N/A');
+    const reg=u.fecha_registro?new Date(u.fecha_registro).toLocaleDateString('es'):'?';
+    const activo=u.es_admin||u.plan==='permanente'||(!u.fecha_expira?false:new Date(u.fecha_expira)>new Date());
+    const planBadge=u.es_admin?'<span class="badge badge-info">Admin</span>':u.plan==='permanente'?'<span class="badge badge-success">Permanente</span>':activo?'<span class="badge badge-success">'+u.plan+'</span>':'<span class="badge badge-danger">'+(u.plan||'sin plan')+' (exp)</span>';
+    const tipoBadge=(u.tipo_membresia||'wsp+tg');
+    const origenTag=u.origen==='bot'?' <span class="badge badge-info" style="font-size:9px">Bot</span>':'';
+    h+=`<tr><td style="font-size:11px">${u.telegram_id}${origenTag}</td><td>${u.username||'-'}</td><td>${planBadge}</td>`;
+    h+=`<td style="font-size:11px">${tipoBadge}</td>`;
+    h+=`<td style="font-size:11px">${exp}</td>`;
+    h+=`<td style="font-size:11px">${reg}</td>`;
+    h+=`<td>${u.es_admin?'Si':'No'}</td>`;
+    h+=`<td style="display:flex;gap:4px;flex-wrap:wrap">`;
+    h+=`<button class="btn btn-sm btn-primary" onclick="adminActivar('${u.telegram_id}','semanal',7)" title="Semanal 7 dias">7d</button>`;
+    h+=`<button class="btn btn-sm btn-success" onclick="adminActivar('${u.telegram_id}','mensual',30)" title="Mensual 30 dias">30d</button>`;
+    h+=`<button class="btn btn-sm btn-outline" onclick="adminActivar('${u.telegram_id}','permanente',36500)" title="Permanente" style="border-color:var(--success);color:var(--success)">\u221e</button>`;
+    h+=`<button class="btn btn-sm btn-outline" onclick="showAdminTipo('${u.telegram_id}')" title="Tipo WSP/TG">\ud83d\udcf1</button>`;
+    if(!u.es_admin)h+=`<button class="btn btn-sm btn-outline" onclick="adminSetAdmin('${u.telegram_id}',true)">+Admin</button>`;
+    else h+=`<button class="btn btn-sm btn-danger" onclick="adminSetAdmin('${u.telegram_id}',false)">-Admin</button>`;
+    h+=`</td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  $('adminContent').innerHTML=h;
+}
+function showAdminTipo(tid){
+  showModal(`<h3>\ud83d\udcf1 Tipo de Membresia</h3>
+    <p style="color:var(--text2);margin-bottom:15px">Selecciona para que plataforma(s) activar la membresia del usuario <b>${tid}</b>:</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:15px">
+      <button class="btn btn-success" onclick="adminSetTipo('${tid}','wsp')">\ud83d\udcf1 Solo WhatsApp</button>
+      <button class="btn btn-primary" onclick="adminSetTipo('${tid}','telegram')">\u2708\ufe0f Solo Telegram</button>
+      <button class="btn btn-outline" onclick="adminSetTipo('${tid}','wsp+tg')" style="border-color:var(--accent2);color:var(--accent2)">\ud83d\udcf1\u2708\ufe0f Ambas</button>
+    </div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button></div>`);
+}
+async function adminSetTipo(tid,tipo){
+  closeModal();
+  const r=await api('/api/admin/tipo_membresia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid,tipo})});
+  toast(r.ok?'Tipo actualizado a '+tipo:'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadAdminUsuarios();
+}
+async function adminActivar(tid,plan,dias){
+  const label=plan==='permanente'?'permanente':plan+' ('+dias+' dias)';
+  if(!confirm('Activar '+label+' para '+tid+'?'))return;
+  const r=await api('/api/admin/membresia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid,plan,dias})});
+  toast(r.ok?'Membresia activada':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadAdminUsuarios();
+}
+async function adminSetAdmin(tid,val){
+  if(!confirm((val?'Hacer':'Quitar')+' admin a '+tid+'?'))return;
+  const r=await api('/api/admin/set_admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid,es_admin:val})});
+  toast(r.ok?'Admin actualizado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadAdminUsuarios();
+}
+
+// --- THEME TOGGLE ---
+function toggleTheme(){
+  const cur=document.documentElement.getAttribute('data-theme');
+  const next=cur==='light'?'dark':'light';
+  document.documentElement.setAttribute('data-theme',next==='dark'?'':'light');
+  localStorage.setItem('panel_theme',next);
+  $('themeToggle').textContent=next==='light'?'☀️':'🌙';
+  if(window._chartInstance)loadChart();
+}
+(function(){
+  const t=localStorage.getItem('panel_theme');
+  if(t==='light'){document.documentElement.setAttribute('data-theme','light');document.getElementById('themeToggle').textContent='☀️'}
+})();
+
+// --- MULTI-LANGUAGE ---
+let currentLang='es';
+const LANG={
+  es:{dashboard:'Dashboard',cuentas:'Cuentas WSP',grupos:'Grupos',mensajes:'Mensajes',envios:'Envio Unico',enviopersonal:'Envio Personal',campanas:'Campanas',config:'Config Envio',stats:'Estadisticas',admin:'Admin Panel',plantillas:'Plantillas',historial:'Historial',actividad:'Actividad',logout:'Cerrar Sesion',login:'Iniciar Sesion',register:'Registrarse',send:'Enviar',cancel:'Cancelar',delete:'Eliminar',save:'Guardar',create:'Crear',loading:'Cargando...',nodata:'Sin datos'},
+  en:{dashboard:'Dashboard',cuentas:'WSP Accounts',grupos:'Groups',mensajes:'Messages',envios:'Single Send',enviopersonal:'Personal Send',campanas:'Campaigns',config:'Send Config',stats:'Statistics',admin:'Admin Panel',plantillas:'Templates',historial:'History',actividad:'Activity',logout:'Logout',login:'Login',register:'Register',send:'Send',cancel:'Cancel',delete:'Delete',save:'Save',create:'Create',loading:'Loading...',nodata:'No data'}
+};
+function toggleLang(){
+  currentLang=currentLang==='es'?'en':'es';
+  localStorage.setItem('panel_lang',currentLang);
+  $('langToggle').textContent=currentLang.toUpperCase();
+  applyLang();
+}
+function applyLang(){
+  const L=LANG[currentLang];
+  document.querySelectorAll('.sidebar nav a[data-section]').forEach(a=>{
+    const sec=a.dataset.section;
+    const key={dashboard:'dashboard',cuentas:'cuentas',cuentastg:'cuentas',grupos:'grupos',mensajes:'mensajes',envios:'envios',enviopersonal:'enviopersonal',enviomiembros:'enviopersonal',enviointeractivo:'envios',programados:'envios',campanas:'campanas',config:'config',listanegra:'config',autoresp:'config',stats:'stats',admin:'admin',adminlogs:'admin',plantillas:'plantillas',historial:'historial',actividad:'actividad'}[sec];
+    if(key&&L[key]){const sp=a.querySelectorAll('span');if(sp.length>1)sp[1].textContent=L[key]}
+  });
+}
+(function(){const l=localStorage.getItem('panel_lang');if(l){currentLang=l;document.getElementById('langToggle').textContent=l.toUpperCase()}})();
+
+// --- NOTIFICATIONS ---
+let notifications=[];
+let notifUnread=0;
+function toggleNotifs(){
+  const p=$('notifPanel');
+  p.classList.toggle('show');
+  if(p.classList.contains('show')){notifUnread=0;updateNotifBadge()}
+}
+function addNotification(msg,type){
+  notifications.unshift({msg,type:type||'info',time:new Date().toLocaleTimeString()});
+  if(notifications.length>50)notifications.pop();
+  notifUnread++;
+  updateNotifBadge();
+  renderNotifs();
+}
+function updateNotifBadge(){
+  const c=$('notifCount');
+  if(notifUnread>0){c.style.display='flex';c.textContent=notifUnread}
+  else{c.style.display='none'}
+}
+function renderNotifs(){
+  if(!notifications.length){$('notifList').innerHTML='<div class="notif-item" style="color:var(--text2)">Sin notificaciones</div>';return}
+  let h='';notifications.slice(0,20).forEach(n=>{
+    const icon=n.type==='error'?'❌':n.type==='success'?'✅':'ℹ️';
+    h+=`<div class="notif-item">${icon} ${esc(n.msg)}<div class="notif-time">${esc(n.time)}</div></div>`;
+  });
+  $('notifList').innerHTML=h;
+}
+let _notifInterval=null;
+function startNotifPolling(){
+  $('notifBell').style.display='flex';
+  _notifInterval=setInterval(async()=>{
+    const r=await api('/api/reporte_diario?u='+userId);
+    if(r.ok&&r.totalEnvios>0){
+      const last=notifications[0];
+      if(!last||!last.msg.includes('envios hoy')){
+        addNotification(r.totalEnvios+' envios hoy ('+r.exitosos+' ok, '+r.fallidos+' error)','info');
+      }
+    }
+  },30000);
+}
+
+// --- CSV EXPORT ---
+function downloadCSV(filename,rows){
+  if(!rows.length)return toast('No hay datos para exportar','error');
+  const headers=Object.keys(rows[0]);
+  let csv=headers.join(',')+'\n';
+  rows.forEach(r=>{csv+=headers.map(h=>{let v=String(r[h]||'');if(v.includes(',')||v.includes('"'))v='"'+v.replace(/"/g,'""')+'"';return v}).join(',')+'\n'});
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=filename;link.click();
+  toast('CSV descargado','success');
+}
+function exportarStatsCSV(){
+  api('/api/grupo_stats?u='+userId).then(r=>{if(r.ok&&r.stats)downloadCSV('stats_'+userId+'.csv',r.stats);else toast('Sin datos','error')});
+}
+
+// --- CHART ---
+let _chartInstance=null;
+async function loadChart(dias){
+  dias=dias||7;
+  const r=await api('/api/envios_chart?u='+userId+'&dias='+dias);
+  const canvas=$('enviosChart');
+  if(!canvas)return;
+  if(_chartInstance){_chartInstance.destroy();_chartInstance=null}
+  if(!r.ok||!r.data||!r.data.length){
+    canvas.parentElement.innerHTML='<div class="empty-state"><p>Sin datos de envios</p></div><canvas id="enviosChart"></canvas>';
+    return;
+  }
+  const emptyDiv=canvas.parentElement.querySelector('.empty-state');
+  if(emptyDiv)emptyDiv.style.display='none';
+  canvas.style.display='';
+  const isDark=!document.documentElement.getAttribute('data-theme');
+  const textColor=isDark?'#94a3b8':'#555770';
+  const gridColor=isDark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.08)';
+  _chartInstance=new Chart(canvas,{
+    type:'bar',
+    data:{
+      labels:r.data.map(d=>d.dia),
+      datasets:[
+        {label:'Exitosos',data:r.data.map(d=>d.ok||0),backgroundColor:'rgba(0,184,148,0.7)',borderRadius:4},
+        {label:'Fallidos',data:r.data.map(d=>d.err||0),backgroundColor:'rgba(233,69,96,0.7)',borderRadius:4}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:textColor}}},
+      scales:{x:{ticks:{color:textColor},grid:{color:gridColor}},y:{ticks:{color:textColor},grid:{color:gridColor},beginAtZero:true}}
+    }
+  });
+}
+
+// --- LIMITS ---
+async function loadLimites(){
+  const r=await api('/api/limites?u='+userId);
+  if(r.ok&&r.limites){
+    const l=r.limites;
+    const maxE=l.max_envios_dia>=999999?'Ilimitado':l.max_envios_dia;
+    const maxG=l.max_grupos>=999999?'Ilimitado':l.max_grupos;
+    $('limitesInfo').innerHTML=`<p>📤 Max envios/dia: <b style="color:var(--accent2)">${maxE}</b></p><p style="margin-top:5px">🌐 Max grupos: <b style="color:var(--accent2)">${maxG}</b></p>`;
+  }
+}
+
+// --- PLANTILLAS ---
+async function loadPlantillas(){
+  const r=await api('/api/plantillas?u='+userId);
+  if(!r.ok){$('plantillasContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const p=r.plantillas||[];
+  if(!p.length){$('plantillasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay plantillas. Crea una.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre</th><th>Mensaje</th><th>Acciones</th></tr></thead><tbody>';
+  p.forEach((x,i)=>{
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre||'?')}</b></td><td style="font-size:12px;color:var(--text2)">${esc((x.mensaje||'').slice(0,60))}</td>`;
+    h+=`<td style="white-space:nowrap"><button class="btn btn-sm btn-primary" onclick="usarPlantilla(${x.id})">📤 Usar</button> <button class="btn btn-sm btn-danger" onclick="eliminarPlantilla(${x.id})">🗑</button></td></tr>`;
+  });
+  h+='</tbody></table></div>';$('plantillasContent').innerHTML=h;
+}
+function showCrearPlantilla(){
+  showModal(`<h3>➕ Nueva Plantilla</h3>
+    <div class="form-group"><label>Nombre</label><input id="ptN" placeholder="Ej: Promo semanal"></div>
+    <div class="form-group"><label>Mensaje</label><textarea id="ptM" rows="5" placeholder="Tu mensaje reutilizable..."></textarea></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearPlantilla()">Guardar</button></div>`);
+}
+async function crearPlantilla(){
+  if(!requireMembresia())return;
+  const n=$('ptN').value.trim(),m=$('ptM').value.trim();
+  if(!n||!m){toast('Completa los campos','error');return}
+  closeModal();
+  const r=await api('/api/plantillas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,mensaje:m})});
+  toast(r.ok?'Plantilla guardada':'Error',r.ok?'success':'error');
+  if(r.ok)loadPlantillas();
+}
+async function eliminarPlantilla(id){
+  if(!confirm('Eliminar esta plantilla?'))return;
+  await api('/api/plantillas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});
+  toast('Eliminada','success');loadPlantillas();
+}
+let _plantillaClipboard='';
+async function usarPlantilla(id){
+  const r=await api('/api/plantillas?u='+userId);
+  const p=(r.plantillas||[]).find(x=>x.id===id);
+  if(!p)return;
+  _plantillaClipboard=p.mensaje||'';
+  showModal(`<h3>📤 Usar Plantilla: ${esc(p.nombre)}</h3>
+    <div style="background:var(--bg);padding:15px;border-radius:8px;margin-bottom:15px;font-size:14px;white-space:pre-wrap">${esc(p.mensaje)}</div>
+    <p style="color:var(--text2);font-size:13px">Texto copiado. Pegalo en la seccion de envio que necesites.</p>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="copyPlantilla()">📋 Copiar</button><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
+}
+function copyPlantilla(){try{navigator.clipboard.writeText(_plantillaClipboard);toast('Copiado!','success')}catch(e){toast('Error al copiar','error')}closeModal()}
+
+// --- HISTORIAL ---
+async function loadHistorial(){
+  let url='/api/historial_panel?u='+userId;
+  const tipo=$('histFiltroTipo')?.value;
+  const res=$('histFiltroRes')?.value;
+  const desde=$('histDesde')?.value;
+  const hasta=$('histHasta')?.value;
+  if(tipo)url+='&tipo='+tipo;
+  if(res)url+='&resultado='+res;
+  if(desde)url+='&desde='+desde;
+  if(hasta)url+='&hasta='+hasta;
+  const r=await api(url);
+  if(!r.ok){$('historialContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const h_data=r.historial||[];
+  if(!h_data.length){$('historialContent').innerHTML='<div class="empty-state"><div class="icon">📜</div><p>Sin historial de envios</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>📜 '+h_data.length+' registros</h3></div>';
+  h+='<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Destino</th><th>Mensaje</th><th>Total</th><th>OK</th><th>Error</th><th>Estado</th></tr></thead><tbody>';
+  h_data.forEach(x=>{
+    const badge=x.resultado==='exitoso'||x.resultado==='enviado'?'badge-success':x.resultado==='fallido'?'badge-danger':'badge-warn';
+    h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.tipo||'?'}</td><td style="font-size:11px">${(x.destino||'').slice(0,30)}</td><td style="font-size:11px;color:var(--text2)">${(x.mensaje_preview||'').slice(0,30)}</td>`;
+    h+=`<td>${x.total||0}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td>`;
+    h+=`<td><span class="badge ${badge}">${x.resultado||'?'}</span></td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  $('historialContent').innerHTML=h;
+  window._historialData=h_data;
+}
+function exportarHistorialCSV(){
+  const data=window._historialData||[];
+  if(!data.length){toast('Carga historial primero','error');return}
+  downloadCSV('historial_envios_'+userId+'.csv',data);
+}
+
+// --- ACTIVIDAD ---
+async function loadActividad(){
+  const r=await api('/api/actividad?u='+userId);
+  if(!r.ok){$('actividadContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const logs=r.logs||[];
+  if(!logs.length){$('actividadContent').innerHTML='<div class="empty-state"><div class="icon">📝</div><p>Sin actividad registrada</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Accion</th><th>Detalle</th></tr></thead><tbody>';
+  logs.forEach(l=>{
+    h+=`<tr><td style="font-size:11px">${esc(l.fecha||'?')}</td><td><b>${esc(l.accion||'?')}</b></td><td style="font-size:12px;color:var(--text2)">${esc(l.detalle||'')}</td></tr>`;
+  });
+  h+='</tbody></table></div>';$('actividadContent').innerHTML=h;
+  window._actividadData=logs;
+}
+function exportarActividadCSV(){
+  const data=window._actividadData||[];
+  if(!data.length){toast('Carga actividad primero','error');return}
+  downloadCSV('actividad_'+userId+'.csv',data);
+}
+
+// --- ADMIN LOGS ---
+async function loadAdminLogs(){
+  if(!esAdmin)return;
+  const r=await api('/api/actividad_admin?u='+userId);
+  if(!r.ok){$('adminLogsContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
+  const logs=r.logs||[];
+  if(!logs.length){$('adminLogsContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>Sin logs</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>📋 '+logs.length+' registros</h3></div>';
+  h+='<table><thead><tr><th>Fecha</th><th>Usuario</th><th>Accion</th><th>Detalle</th></tr></thead><tbody>';
+  logs.forEach(l=>{
+    h+=`<tr><td style="font-size:11px">${esc(l.fecha||'?')}</td><td style="font-size:11px">${esc(l.user_id||'?')}</td><td><b>${esc(l.accion||'?')}</b></td><td style="font-size:12px;color:var(--text2)">${esc(l.detalle||'')}</td></tr>`;
+  });
+  h+='</tbody></table></div>';$('adminLogsContent').innerHTML=h;
+  window._adminLogsData=logs;
+}
+function exportarAdminLogsCSV(){
+  const data=window._adminLogsData||[];
+  if(!data.length){toast('Carga logs primero','error');return}
+  downloadCSV('admin_logs.csv',data);
+}
+
+// --- INIT ---
+window.addEventListener('load',()=>{
+  const uid=localStorage.getItem('panel_uid'),token=localStorage.getItem('panel_token');
+  const savedPlatform=localStorage.getItem('panel_platform');
+  const urlP=new URLSearchParams(window.location.search),urlId=urlP.get('u');
+  if(uid&&token){
+    userId=uid;
+    if(savedPlatform)currentPlatform=savedPlatform;
+    showApp();
+  } else if(savedPlatform){
+    currentPlatform=savedPlatform;
+    selectPlatform(savedPlatform);
+    if(urlId)$('loginId').value=urlId;
+  } else if(urlId){
+    $('platformSelector').style.display='none';
+    $('authLogin').style.display='flex';
+    $('loginId').value=urlId;
+  }
+});
+</script>
+</body>
+</html>
