@@ -1003,6 +1003,96 @@ function detenerEnvioPersonal(userId) {
     return false;
 }
 
+// ============================================================
+// ENVIO A MIEMBROS DE GRUPO — Extraer miembros y enviar DM
+// ============================================================
+async function listarMiembrosGrupo(sock, groupJid) {
+    const miembros = [];
+    try {
+        const metadata = await sock.groupMetadata(groupJid);
+        if (!metadata || !metadata.participants) return miembros;
+        for (const p of metadata.participants) {
+            if (p.id && p.id.endsWith("@s.whatsapp.net") && p.id !== "status@broadcast") {
+                const num = p.id.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "");
+                miembros.push({
+                    jid: p.id,
+                    numero: num,
+                    admin: p.admin || null,
+                });
+            }
+        }
+    } catch (e) {
+        console.error(`Error listando miembros del grupo: ${e.message}`);
+    }
+    return miembros;
+}
+
+async function enviarAMiembrosGrupo(userId, groupJid, mensaje, imagenPath, sock) {
+    if (envioPersonalActivo[userId]) return false;
+    let cancelled = false;
+    const task = { running: true, cancel: () => { cancelled = true; } };
+    envioPersonalActivo[userId] = task;
+
+    try {
+        const miembros = await listarMiembrosGrupo(sock, groupJid);
+        if (!miembros.length) {
+            delete envioPersonalActivo[userId];
+            try { await sock.sendMessage(userId, { text: "\u274C No se encontraron miembros en el grupo." }); } catch (e) {}
+            return false;
+        }
+
+        const total = miembros.length;
+        let enviados = 0, errores = 0;
+
+        try {
+            await sock.sendMessage(userId, {
+                text: `\u{1F4E8} Enviando DM a ${total} miembro(s) del grupo...\nDelay: ${DELAY_ENTRE_ENVIOS / 1000}s entre cada envio.\nEscribe "cancelar envio" para detener.`
+            });
+        } catch (e) {}
+
+        for (const m of miembros) {
+            if (cancelled) break;
+            // No enviar al propio bot/usuario
+            if (m.jid === userId) { continue; }
+            try {
+                const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
+                if (imagenPath && fs.existsSync(imagenPath)) {
+                    await sock.sendMessage(m.jid, {
+                        image: fs.readFileSync(imagenPath),
+                        caption: textoFinal,
+                    });
+                } else {
+                    await sock.sendMessage(m.jid, { text: textoFinal });
+                }
+                enviados++;
+                db.registrarEnvio(userId, 0, m.jid, "enviado_miembro");
+            } catch (e) {
+                errores++;
+                db.registrarEnvio(userId, 0, m.jid, "error_miembro");
+            }
+            if (enviados % 10 === 0 && enviados > 0) {
+                try {
+                    await sock.sendMessage(userId, { text: `\u{1F4CA} Progreso: ${enviados}/${total}...` });
+                } catch (e) {}
+            }
+            if (!cancelled) {
+                await new Promise(r => setTimeout(r, DELAY_ENTRE_ENVIOS));
+            }
+        }
+
+        delete envioPersonalActivo[userId];
+        const resumen = cancelled
+            ? `\u{1F6D1} Envio a miembros cancelado.\n\n\u2705 Enviados: ${enviados}/${total}\n\u274C Errores: ${errores}`
+            : `\u2705 *Envio a miembros completado*\n\n\u{1F4E8} Enviados: ${enviados}/${total}\n\u274C Errores: ${errores}`;
+        try { await sock.sendMessage(userId, { text: resumen }); } catch (e) {}
+        return true;
+    } catch (e) {
+        delete envioPersonalActivo[userId];
+        console.error(`Error en envio a miembros: ${e.message}`);
+        return false;
+    }
+}
+
 module.exports = {
     tareasActivas,
     getCampanasActivas,
@@ -1035,4 +1125,6 @@ module.exports = {
     enviarAPersonales,
     enviarASeleccionados,
     detenerEnvioPersonal,
+    listarMiembrosGrupo,
+    enviarAMiembrosGrupo,
 };

@@ -750,6 +750,53 @@ poll();
                 return res.end(JSON.stringify({ ok: stopped }));
             }
 
+            // GET /api/miembros_grupo?u=USER_ID&grupo=GROUP_JID — Listar miembros de un grupo
+            if (url.pathname === "/api/miembros_grupo" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const grupoJid = url.searchParams.get("grupo");
+                if (!userId || !grupoJid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
+                let sock = botSock;
+                if (!sock) {
+                    const sesiones = db.getSesiones(userId);
+                    for (const s of sesiones) {
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); break; } catch (e) {}
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
+                try {
+                    const miembros = await motor.listarMiembrosGrupo(sock, grupoJid);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, total: miembros.length, miembros }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // POST /api/enviar_miembros — Enviar DM a miembros de un grupo
+            if (url.pathname === "/api/enviar_miembros" && req.method === "POST") {
+                const userId = body.u;
+                const grupoJid = body.grupo;
+                const mensaje = body.mensaje;
+                if (!userId || !grupoJid || !mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, grupo o mensaje" })); }
+                let sock = botSock;
+                if (!sock) {
+                    const sesiones = db.getSesiones(userId);
+                    for (const s of sesiones) {
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); break; } catch (e) {}
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
+                try {
+                    const started = await motor.enviarAMiembrosGrupo(userId, grupoJid, mensaje, null, sock);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: started, message: started ? "envio a miembros iniciado" : "ya hay un envio activo" }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));

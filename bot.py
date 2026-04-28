@@ -3346,7 +3346,8 @@ async def cb_sec_wsp(call: types.CallbackQuery):
         [InlineKeyboardButton(text="📋 Campañas WSP", callback_data="wsp_campanas")],
         [InlineKeyboardButton(text="🚀 Iniciar campaña", callback_data="wsp_iniciar"),
          InlineKeyboardButton(text="🛑 Detener", callback_data="wsp_detener")],
-        [InlineKeyboardButton(text="📨 Envio Personal", callback_data="wsp_personal")],
+        [InlineKeyboardButton(text="📨 Envio Personal", callback_data="wsp_personal"),
+         InlineKeyboardButton(text="👥 Envio a Miembros", callback_data="wsp_miembros")],
         [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial"),
          InlineKeyboardButton(text="📈 Stats Grupos", callback_data="wsp_grupo_stats")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
@@ -3624,6 +3625,107 @@ async def cb_wsp_cancelar_personal(call: types.CallbackQuery):
     else:
         await safe_edit(call.message, "No hay envio personal activo.", reply_markup=kb)
     await call.answer()
+
+
+# --- ENVIO A MIEMBROS DE GRUPO WSP ---
+@dp.callback_query(F.data == "wsp_miembros")
+async def cb_wsp_miembros(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_detectar(call.from_user.id)
+    botones_back = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
+    if not r.get("ok"):
+        await safe_edit(call.message, f"Error: {r.get('error')}", reply_markup=kb_back)
+        await call.answer()
+        return
+
+    grupos = r.get("grupos", [])
+    if not grupos:
+        await safe_edit(call.message, "No se encontraron grupos.", reply_markup=kb_back)
+        await call.answer()
+        return
+
+    texto = f"👥 *ENVIO A MIEMBROS*\n\nSelecciona un grupo para extraer sus miembros y enviarles DM:\n\n"
+    botones = []
+    for i, g in enumerate(grupos[:20], 1):
+        nombre = g.get("subject", "Sin nombre")[:30]
+        size = g.get("size", "?")
+        texto += f"  {i}. {nombre} ({size} miembros)\n"
+        botones.append([InlineKeyboardButton(
+            text=f"{i}. {nombre} ({size})",
+            callback_data=f"wsp_mgrp_{g['jid'][:40]}"
+        )])
+    if len(grupos) > 20:
+        texto += f"  ... y {len(grupos) - 20} grupos mas\n"
+    texto += "\nDelay: 10 seg entre cada DM (anti-ban)"
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wsp_mgrp_"))
+async def cb_wsp_miembros_grupo(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    grupo_jid = call.data.replace("wsp_mgrp_", "")
+    # Si el JID fue truncado, intentar completarlo
+    if not grupo_jid.endswith("@g.us"):
+        grupo_jid += "@g.us"
+    import wsp_bridge as wsp
+    r = await wsp.wsp_miembros_grupo(call.from_user.id, grupo_jid)
+    botones_back = [[InlineKeyboardButton(text="🔙 Volver a grupos", callback_data="wsp_miembros")]]
+    kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
+    if not r.get("ok"):
+        await safe_edit(call.message, f"Error: {r.get('error')}", reply_markup=kb_back)
+        await call.answer()
+        return
+
+    total = r.get("total", 0)
+    miembros = r.get("miembros", [])
+    texto = f"👥 *Miembros del grupo: {total}*\n\n"
+    for i, m in enumerate(miembros[:30], 1):
+        admin_tag = " (admin)" if m.get("admin") else ""
+        texto += f"  {i}. {m.get('numero', '?')}{admin_tag}\n"
+    if total > 30:
+        texto += f"  ... y {total - 30} mas\n"
+
+    texto += f"\nPara enviar DM a todos los miembros:\n/wspmiembros {grupo_jid} Tu mensaje aqui\n\nDelay: 10 seg entre cada envio (anti-ban)"
+    botones = [
+        [InlineKeyboardButton(text="🔙 Volver a grupos", callback_data="wsp_miembros")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.message(Command("wspmiembros"))
+async def cmd_wsp_miembros(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args or " " not in args:
+        return await msg.answer(
+            "Uso: /wspmiembros GRUPO_JID Tu mensaje aqui\n\n"
+            "Ejemplo: /wspmiembros 120363123456@g.us Hola, te contacto desde el grupo\n\n"
+            "Envia un DM a cada miembro del grupo con 10 seg de delay."
+        )
+    parts = args.split(" ", 1)
+    grupo_jid = parts[0]
+    mensaje = parts[1]
+    import wsp_bridge as wsp
+    r = await wsp.wsp_enviar_miembros(msg.from_user.id, grupo_jid, mensaje)
+    if r.get("ok"):
+        await msg.answer("Envio a miembros iniciado! Recibiras progreso en WhatsApp.\n\nUsa /wspcancelarpersonal para detener.")
+    else:
+        await msg.answer(f"Error: {r.get('error', r.get('message', 'error desconocido'))}")
 
 
 # --- CAMPAÑAS WSP ---

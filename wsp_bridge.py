@@ -101,6 +101,13 @@ async def wsp_enviar_personal(user_id, mensaje):
 async def wsp_cancelar_envio_personal(user_id):
     return await _post("/api/cancelar_envio_personal", {"u": str(user_id)})
 
+# --- ENVIO A MIEMBROS DE GRUPO ---
+async def wsp_miembros_grupo(user_id, grupo_jid):
+    return await _get("/api/miembros_grupo", {"u": str(user_id), "grupo": grupo_jid})
+
+async def wsp_enviar_miembros(user_id, grupo_jid, mensaje):
+    return await _post("/api/enviar_miembros", {"u": str(user_id), "grupo": grupo_jid, "mensaje": mensaje})
+
 # --- DETECTAR GRUPOS (VIA CUENTA CLIENTE) ---
 async def wsp_detectar_cliente(user_id, cuenta=None):
     params = {"u": str(user_id)}
