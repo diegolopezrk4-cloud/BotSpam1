@@ -90,3 +90,36 @@ async def wsp_activar(wsp_id, dias):
 
 async def wsp_desactivar(wsp_id):
     return await _post("/api/desactivar", {"wsp_id": str(wsp_id)})
+
+# --- DETECTAR GRUPOS (VIA CUENTA CLIENTE) ---
+async def wsp_detectar_cliente(user_id, cuenta=None):
+    params = {"u": str(user_id)}
+    if cuenta:
+        params["cuenta"] = cuenta
+    return await _get("/api/detectar_cliente", params)
+
+# --- MENSAJES ---
+async def wsp_mensajes(user_id):
+    return await _get("/api/mensajes", {"u": str(user_id)})
+
+async def wsp_crear_mensaje(user_id, nombre, texto, imagen_path=None):
+    data = {"u": str(user_id), "nombre": nombre, "texto": texto}
+    if imagen_path:
+        data["imagen_path"] = imagen_path
+    return await _post("/api/mensajes/crear", data)
+
+async def wsp_editar_mensaje(mensaje_id, texto, imagen_path=None):
+    data = {"id": mensaje_id, "texto": texto}
+    if imagen_path is not None:
+        data["imagen_path"] = imagen_path
+    return await _post("/api/mensajes/editar", data)
+
+async def wsp_eliminar_mensaje(mensaje_id):
+    return await _post("/api/mensajes/del", {"id": mensaje_id})
+
+# --- ENVIO UNICO ---
+async def wsp_enviar_unico(user_id, mensaje_id):
+    return await _post("/api/enviar_unico", {"u": str(user_id), "mensaje_id": mensaje_id})
+
+async def wsp_envios_unicos(user_id):
+    return await _get("/api/envios_unicos", {"u": str(user_id)})

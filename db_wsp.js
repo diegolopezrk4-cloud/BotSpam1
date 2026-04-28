@@ -167,6 +167,27 @@ function init() {
             alternativas TEXT,
             FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
         );
+        CREATE TABLE IF NOT EXISTS mensajes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            nombre TEXT,
+            texto TEXT,
+            imagen_path TEXT DEFAULT NULL,
+            fecha_creacion TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+        CREATE TABLE IF NOT EXISTS envios_unicos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            mensaje_id INTEGER,
+            grupos_total INTEGER DEFAULT 0,
+            grupos_ok INTEGER DEFAULT 0,
+            grupos_error INTEGER DEFAULT 0,
+            estado TEXT DEFAULT 'pendiente',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            FOREIGN KEY(mensaje_id) REFERENCES mensajes(id)
+        );
     `);
 
     // Migraciones
@@ -872,6 +893,50 @@ function exportarCampanas(userId) {
 
 function getDb() { return db; }
 
+// --- MENSAJES (CRUD) ---
+function getMensajes(userId) {
+    return db.prepare("SELECT * FROM mensajes WHERE user_id = ? ORDER BY fecha_creacion DESC").all(userId);
+}
+
+function getMensajeById(id) {
+    return db.prepare("SELECT * FROM mensajes WHERE id = ?").get(id);
+}
+
+function crearMensaje(userId, nombre, texto, imagenPath = null) {
+    const result = db.prepare("INSERT INTO mensajes (user_id, nombre, texto, imagen_path) VALUES (?, ?, ?, ?)").run(userId, nombre, texto, imagenPath);
+    return result.lastInsertRowid;
+}
+
+function editarMensaje(id, texto, imagenPath) {
+    if (imagenPath !== undefined) {
+        db.prepare("UPDATE mensajes SET texto = ?, imagen_path = ? WHERE id = ?").run(texto, imagenPath, id);
+    } else {
+        db.prepare("UPDATE mensajes SET texto = ? WHERE id = ?").run(texto, id);
+    }
+}
+
+function editarNombreMensaje(id, nombre) {
+    db.prepare("UPDATE mensajes SET nombre = ? WHERE id = ?").run(nombre, id);
+}
+
+function eliminarMensaje(id) {
+    db.prepare("DELETE FROM mensajes WHERE id = ?").run(id);
+}
+
+// --- ENVIOS UNICOS ---
+function crearEnvioUnico(userId, mensajeId, gruposTotal) {
+    const result = db.prepare("INSERT INTO envios_unicos (user_id, mensaje_id, grupos_total) VALUES (?, ?, ?)").run(userId, mensajeId, gruposTotal);
+    return result.lastInsertRowid;
+}
+
+function actualizarEnvioUnico(id, ok, error, estado) {
+    db.prepare("UPDATE envios_unicos SET grupos_ok = ?, grupos_error = ?, estado = ? WHERE id = ?").run(ok, error, estado, id);
+}
+
+function getEnviosUnicos(userId) {
+    return db.prepare("SELECT eu.*, m.nombre as mensaje_nombre FROM envios_unicos eu LEFT JOIN mensajes m ON eu.mensaje_id = m.id WHERE eu.user_id = ? ORDER BY eu.fecha DESC LIMIT 20").all(userId);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -899,4 +964,7 @@ module.exports = {
     getSinonimos, agregarSinonimo, eliminarSinonimo, limpiarSinonimos,
     getReporteDiario,
     exportarGrupos, importarGrupos, exportarCampanas,
+    // Mensajes y envios unicos
+    getMensajes, getMensajeById, crearMensaje, editarMensaje, editarNombreMensaje, eliminarMensaje,
+    crearEnvioUnico, actualizarEnvioUnico, getEnviosUnicos,
 };

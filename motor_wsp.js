@@ -872,4 +872,6 @@ module.exports = {
     detenerReporteDiario,
     iniciarResponder,
     detenerResponder,
+    resolveGroupJid,
+    sendToGroup,
 };

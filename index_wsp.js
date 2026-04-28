@@ -473,6 +473,130 @@ poll();
                 }
             }
 
+            // GET /api/detectar_cliente?u=USER_ID&cuenta=NOMBRE — Detectar grupos via cuenta cliente
+            if (url.pathname === "/api/detectar_cliente" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const cuenta = url.searchParams.get("cuenta");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                try {
+                    const sesiones = db.getSesiones(userId);
+                    if (!sesiones.length) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "sin cuentas vinculadas" })); }
+                    const nombre = cuenta || sesiones[0].nombre;
+                    const sock = await motor.getOrConnectClient(userId, nombre);
+                    const allGroups = await sock.groupFetchAllParticipating();
+                    const grupos = [];
+                    for (const [jid, meta] of Object.entries(allGroups)) {
+                        if (!motor.esGrupoReal(jid, meta)) continue;
+                        let link = null;
+                        try { link = "https://chat.whatsapp.com/" + (await sock.groupInviteCode(jid)); } catch (e) {}
+                        grupos.push({
+                            jid,
+                            subject: meta.subject || "Sin nombre",
+                            size: meta.participants?.length || 0,
+                            link,
+                        });
+                    }
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, grupos, cuenta: nombre }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // GET /api/mensajes?u=USER_ID — Lista de mensajes guardados
+            if (url.pathname === "/api/mensajes" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const mensajes = db.getMensajes(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, mensajes }));
+            }
+
+            // POST /api/mensajes/crear — Crear mensaje { u, nombre, texto }
+            if (url.pathname === "/api/mensajes/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre || !body.texto) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, nombre o texto" })); }
+                const id = db.crearMensaje(body.u, body.nombre, body.texto, body.imagen_path || null);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id }));
+            }
+
+            // POST /api/mensajes/editar — Editar mensaje { id, texto }
+            if (url.pathname === "/api/mensajes/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id || !body.texto) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id o texto" })); }
+                db.editarMensaje(body.id, body.texto, body.imagen_path);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/mensajes/del — Eliminar mensaje { id }
+            if (url.pathname === "/api/mensajes/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.eliminarMensaje(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/enviar_unico — Enviar mensaje a todos los grupos una sola vez
+            if (url.pathname === "/api/enviar_unico" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.mensaje_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje_id" })); }
+                const msg = db.getMensajeById(body.mensaje_id);
+                if (!msg) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "mensaje no encontrado" })); }
+                const grupos = db.getGrupos(body.u);
+                if (!grupos.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "sin grupos" })); }
+                const sesiones = db.getSesiones(body.u);
+                if (!sesiones.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "sin cuentas vinculadas" })); }
+
+                const envioId = db.crearEnvioUnico(body.u, body.mensaje_id, grupos.length);
+                res.writeHead(200);
+                res.end(JSON.stringify({ ok: true, envio_id: envioId, grupos: grupos.length }));
+
+                // Enviar en background
+                (async () => {
+                    let ok = 0, errores = 0;
+                    const socks = [];
+                    for (const s of sesiones) {
+                        try {
+                            const sock = await motor.getOrConnectClient(body.u, s.nombre);
+                            socks.push(sock);
+                        } catch (e) {}
+                    }
+                    if (!socks.length) {
+                        db.actualizarEnvioUnico(envioId, 0, grupos.length, "error");
+                        return;
+                    }
+                    let sockIdx = 0;
+                    for (const g of grupos) {
+                        const sock = socks[sockIdx % socks.length];
+                        sockIdx++;
+                        try {
+                            const groupJid = await motor.resolveGroupJid ? await motor.resolveGroupJid(sock, g.link) : null;
+                            if (!groupJid) { errores++; continue; }
+                            const texto = motor.variarMensaje(msg.texto, body.u);
+                            const result = await motor.sendToGroup(sock, groupJid, texto, msg.imagen_path);
+                            if (result.sent) { ok++; } else { errores++; }
+                        } catch (e) { errores++; }
+                        // Espera entre envios (5-15s)
+                        await new Promise(r => setTimeout(r, 5000 + Math.random() * 10000));
+                    }
+                    db.actualizarEnvioUnico(envioId, ok, errores, "completado");
+                })();
+                return;
+            }
+
+            // GET /api/envios_unicos?u=USER_ID — Historial de envios unicos
+            if (url.pathname === "/api/envios_unicos" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const envios = db.getEnviosUnicos(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, envios }));
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
