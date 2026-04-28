@@ -1239,7 +1239,30 @@ function checkMembresiPanel(telegramId) {
     return { activo, plan: user.plan, expira: user.fecha_expira, es_admin: false };
 }
 function getAllPanelUsers() {
-    return db.prepare("SELECT telegram_id, username, es_admin, plan, fecha_expira, fecha_registro, tipo_membresia FROM panel_users").all();
+    const panelUsers = db.prepare("SELECT telegram_id, username, es_admin, plan, fecha_expira, fecha_registro, tipo_membresia FROM panel_users").all();
+    let botDb;
+    try {
+        botDb = openBotDb();
+        if (!botDb) return panelUsers;
+        const botUsers = botDb.prepare("SELECT telegram_id, username, plan, fecha_expira, activo, fecha_registro FROM usuarios").all();
+        const panelIds = new Set(panelUsers.map(u => String(u.telegram_id)));
+        botUsers.forEach(bu => {
+            if (!panelIds.has(String(bu.telegram_id))) {
+                panelUsers.push({
+                    telegram_id: String(bu.telegram_id),
+                    username: bu.username || '',
+                    es_admin: 0,
+                    plan: bu.plan || 'sin_plan',
+                    fecha_expira: bu.fecha_expira || null,
+                    fecha_registro: bu.fecha_registro || null,
+                    tipo_membresia: 'tg',
+                    origen: 'bot'
+                });
+            }
+        });
+    } catch (e) {}
+    finally { if (botDb) botDb.close(); }
+    return panelUsers;
 }
 function setTipoMembresia(telegramId, tipo) {
     db.prepare("UPDATE panel_users SET tipo_membresia = ? WHERE telegram_id = ?").run(tipo, String(telegramId));
@@ -1382,15 +1405,16 @@ module.exports = {
 
 // --- Sesiones Telegram ---
 function getSesionesTgFromBot(userId) {
+    let botDb;
     try {
         const botDbPath = path.resolve(__dirname, "titan.db");
         const fs = require("fs");
         if (!fs.existsSync(botDbPath)) return [];
-        const botDb = new Database(botDbPath, { readonly: true });
+        botDb = new Database(botDbPath, { readonly: true });
         const rows = botDb.prepare("SELECT * FROM sesiones WHERE user_id = ? AND activa = 1 ORDER BY id DESC").all(Number(userId));
-        botDb.close();
         return rows;
     } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
 }
 function getSesionesTg(userId) {
     const panelSesiones = db.prepare("SELECT * FROM sesiones_tg WHERE user_id = ? AND activa = 1 ORDER BY id DESC").all(String(userId));
@@ -1487,26 +1511,27 @@ function openBotDb() {
 }
 
 function getTgGrupos(userId) {
+    let botDb;
     try {
-        const botDb = openBotDb(); if (!botDb) return [];
-        const rows = botDb.prepare("SELECT * FROM grupos WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
-        botDb.close();
-        return rows;
+        botDb = openBotDb(); if (!botDb) return [];
+        return botDb.prepare("SELECT * FROM grupos WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
     } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
 }
 
 function getTgMensajes(userId) {
+    let botDb;
     try {
-        const botDb = openBotDb(); if (!botDb) return [];
-        const rows = botDb.prepare("SELECT * FROM tg_mensajes WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
-        botDb.close();
-        return rows;
+        botDb = openBotDb(); if (!botDb) return [];
+        return botDb.prepare("SELECT * FROM tg_mensajes WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
     } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
 }
 
 function getTgCampanas(userId) {
+    let botDb;
     try {
-        const botDb = openBotDb(); if (!botDb) return [];
+        botDb = openBotDb(); if (!botDb) return [];
         const camps = botDb.prepare("SELECT * FROM campanas WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
         camps.forEach(c => {
             try {
@@ -1517,42 +1542,44 @@ function getTgCampanas(userId) {
                 c.intervalo_max = cfg ? cfg.intervalo_max : 60;
             } catch (e) {}
         });
-        botDb.close();
         return camps;
     } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
 }
 
 function getTgHistorialEnvios(userId, limite) {
+    let botDb;
     try {
-        const botDb = openBotDb(); if (!botDb) return [];
-        const rows = botDb.prepare("SELECT * FROM historial_envios WHERE user_id = ? ORDER BY id DESC LIMIT ?").all(Number(userId), limite || 50);
-        botDb.close();
-        return rows;
+        botDb = openBotDb(); if (!botDb) return [];
+        return botDb.prepare("SELECT * FROM historial_envios WHERE user_id = ? ORDER BY id DESC LIMIT ?").all(Number(userId), limite || 50);
     } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
 }
 
 function getTgProgramados(userId) {
+    let botDb;
     try {
-        const botDb = openBotDb(); if (!botDb) return [];
-        const rows = botDb.prepare("SELECT p.*, m.nombre as msg_nombre, m.texto as msg_texto FROM tg_envios_programados p LEFT JOIN tg_mensajes m ON p.mensaje_id = m.id WHERE p.user_id = ? ORDER BY p.id DESC").all(Number(userId));
-        botDb.close();
-        return rows;
+        botDb = openBotDb(); if (!botDb) return [];
+        return botDb.prepare("SELECT p.*, m.nombre as msg_nombre, m.texto as msg_texto FROM tg_envios_programados p LEFT JOIN tg_mensajes m ON p.mensaje_id = m.id WHERE p.user_id = ? ORDER BY p.id DESC").all(Number(userId));
     } catch (e) { return []; }
+    finally { if (botDb) botDb.close(); }
 }
 
 function getTgAutoResponder(userId) {
+    let botDb;
     try {
-        const botDb = openBotDb(); if (!botDb) return { config: null, keywords: [] };
+        botDb = openBotDb(); if (!botDb) return { config: null, keywords: [] };
         const config = botDb.prepare("SELECT * FROM responder_config WHERE user_id = ?").get(Number(userId));
         const keywords = botDb.prepare("SELECT * FROM responder_keywords WHERE user_id = ?").all(Number(userId));
-        botDb.close();
         return { config: config || null, keywords };
     } catch (e) { return { config: null, keywords: [] }; }
+    finally { if (botDb) botDb.close(); }
 }
 
 function getTgStats(userId) {
+    let botDb;
     try {
-        const botDb = openBotDb(); if (!botDb) return {};
+        botDb = openBotDb(); if (!botDb) return {};
         const totalEnvios = botDb.prepare("SELECT COUNT(*) as total FROM historial_envios WHERE user_id = ?").get(Number(userId));
         const exitosos = botDb.prepare("SELECT COUNT(*) as total FROM historial_envios WHERE user_id = ? AND resultado = 'enviado'").get(Number(userId));
         const fallidos = botDb.prepare("SELECT COUNT(*) as total FROM historial_envios WHERE user_id = ? AND resultado != 'enviado'").get(Number(userId));
@@ -1560,7 +1587,6 @@ function getTgStats(userId) {
         const cuentas = botDb.prepare("SELECT COUNT(*) as total FROM sesiones WHERE user_id = ? AND activa = 1").get(Number(userId));
         const campanas = botDb.prepare("SELECT COUNT(*) as total FROM campanas WHERE user_id = ?").get(Number(userId));
         const campanasActivas = botDb.prepare("SELECT COUNT(*) as total FROM campanas WHERE user_id = ? AND activa = 1").get(Number(userId));
-        botDb.close();
         return {
             total_envios: totalEnvios ? totalEnvios.total : 0,
             exitosos: exitosos ? exitosos.total : 0,
@@ -1571,4 +1597,5 @@ function getTgStats(userId) {
             campanas_activas: campanasActivas ? campanasActivas.total : 0,
         };
     } catch (e) { return {}; }
+    finally { if (botDb) botDb.close(); }
 }

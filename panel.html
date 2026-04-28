@@ -1499,7 +1499,8 @@ async function loadAdminUsuarios(){
     const activo=u.es_admin||u.plan==='permanente'||(!u.fecha_expira?false:new Date(u.fecha_expira)>new Date());
     const planBadge=u.es_admin?'<span class="badge badge-info">Admin</span>':u.plan==='permanente'?'<span class="badge badge-success">Permanente</span>':activo?'<span class="badge badge-success">'+u.plan+'</span>':'<span class="badge badge-danger">'+(u.plan||'sin plan')+' (exp)</span>';
     const tipoBadge=(u.tipo_membresia||'wsp+tg');
-    h+=`<tr><td style="font-size:11px">${u.telegram_id}</td><td>${u.username||'-'}</td><td>${planBadge}</td>`;
+    const origenTag=u.origen==='bot'?' <span class="badge badge-info" style="font-size:9px">Bot</span>':'';
+    h+=`<tr><td style="font-size:11px">${u.telegram_id}${origenTag}</td><td>${u.username||'-'}</td><td>${planBadge}</td>`;
     h+=`<td style="font-size:11px">${tipoBadge}</td>`;
     h+=`<td style="font-size:11px">${exp}</td>`;
     h+=`<td style="font-size:11px">${reg}</td>`;
