@@ -536,6 +536,19 @@ async def agregar_keywords(user_id, palabras):
                 )
         await db.commit()
 
+async def get_keywords_full(user_id):
+    async with _connect() as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, palabra FROM responder_keywords WHERE user_id=?", (user_id,)
+        ) as cur:
+            return await cur.fetchall()
+
+async def eliminar_keyword(kw_id):
+    async with _connect() as db:
+        await db.execute("DELETE FROM responder_keywords WHERE id=?", (kw_id,))
+        await db.commit()
+
 async def limpiar_keywords(user_id):
     async with _connect() as db:
         await db.execute(

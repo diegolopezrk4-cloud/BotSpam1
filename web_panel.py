@@ -500,14 +500,14 @@ async def api_tg_autoresponder(request):
     if not user_id:
         return web.json_response({"ok": False, "error": "falta u"}, status=400)
     config = await db.get_responder_config(user_id)
-    keywords = await db.get_keywords(user_id)
+    keywords = await db.get_keywords_full(user_id)
     activo = bool(config["activo"]) if config else False
     contacto = config["contacto"] if config else ""
     return web.json_response({
         "ok": True,
         "activo": activo,
         "contacto": contacto,
-        "keywords": [{"id": k["id"], "keyword": k["palabra"], "respuesta": k.get("respuesta", "")} for k in keywords]
+        "keywords": [{"id": k["id"], "keyword": k["palabra"], "respuesta": ""} for k in keywords]
     })
 
 
@@ -519,8 +519,11 @@ async def api_tg_autoresponder_toggle(request):
         return web.json_response({"ok": False, "error": "falta u"}, status=400)
     await db.toggle_responder(user_id, 1 if activo else 0)
     if activo:
+        config = await db.get_responder_config(user_id)
+        keywords = await db.get_keywords(user_id)
+        contacto = config["contacto"] if config else ""
         loop = asyncio.get_event_loop()
-        iniciar_responder(user_id, loop, aiogram_bot)
+        iniciar_responder(user_id, contacto, keywords, loop, aiogram_bot)
     else:
         detener_responder(user_id)
     return web.json_response({"ok": True})
@@ -533,7 +536,7 @@ async def api_tg_autoresponder_keyword_add(request):
     respuesta = body.get("respuesta", "").strip()
     if not user_id or not keyword:
         return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
-    await db.agregar_keywords(user_id, keyword)
+    await db.agregar_keywords(user_id, [keyword])
     return web.json_response({"ok": True})
 
 
@@ -543,6 +546,7 @@ async def api_tg_autoresponder_keyword_del(request):
     kw_id = int(body.get("id", 0))
     if not user_id or not kw_id:
         return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    await db.eliminar_keyword(kw_id)
     return web.json_response({"ok": True})
 
 
@@ -635,8 +639,8 @@ async def api_tg_stats(request):
         "campanas_activas": activas,
         "enviados_total": total_env,
         "errores_total": total_err,
-        "grupos": dashboard.get("total_grupos", 0),
-        "cuentas": dashboard.get("total_sesiones", 0),
+        "grupos": dashboard.get("grupos", 0),
+        "cuentas": dashboard.get("cuentas", 0),
     })
 
 
