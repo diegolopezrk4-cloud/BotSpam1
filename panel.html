@@ -354,6 +354,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="envios" data-plat="wsp"><span class="icon">📤</span><span>Envio Unico</span></a>
       <a href="#" data-section="enviopersonal" data-plat="wsp"><span class="icon">💬</span><span>Envio Personal</span></a>
       <a href="#" data-section="enviomiembros" data-plat="wsp"><span class="icon">👥</span><span>Envio a Miembros</span></a>
+      <a href="#" data-section="enviointeractivo" data-plat="wsp"><span class="icon">📨</span><span>Envio Interactivo</span></a>
       <a href="#" data-section="programados" data-plat="wsp"><span class="icon">⏰</span><span>Programados</span></a>
       <a href="#" data-section="campanas" data-plat="wsp"><span class="icon">📋</span><span>Campanas</span></a>
       <div class="nav-group" data-plat="tg">Mensajeria TG</div>
@@ -454,15 +455,20 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         </div>
         <button class="btn btn-primary" onclick="vincularCuentaWspQR()">📱 Vincular con QR</button>
       </div>
-      <div style="background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border);font-size:13px;color:var(--text2)">
-        <p>📱 <b>Como vincular:</b></p>
-        <ol style="margin:8px 0 0 15px;line-height:1.8">
-          <li>Escribe un nombre para tu cuenta (ej: "mi_wsp")</li>
-          <li>Haz clic en <b>"Vincular con QR"</b></li>
-          <li>Se abrira una pagina con el codigo QR</li>
-          <li>Abre WhatsApp > Ajustes > Dispositivos vinculados > Vincular dispositivo</li>
-          <li>Escanea el QR y listo!</li>
-        </ol>
+      <div id="wspQrInlineBox" style="display:none;background:var(--bg);padding:20px;border-radius:12px;margin-bottom:15px;border:2px solid var(--accent);text-align:center">
+        <h3 id="wspQrTitle" style="margin-bottom:10px">📱 Vinculando cuenta...</h3>
+        <div id="wspQrStatus" style="padding:8px 12px;border-radius:8px;margin-bottom:12px;font-weight:bold;background:#3d3d0a;color:#ffeb3b">⏳ Preparando QR...</div>
+        <div id="wspQrImg" style="margin:10px auto"></div>
+        <div style="text-align:left;margin:15px auto;max-width:350px;font-size:13px;color:var(--text2)">
+          <p><b>📲 Instrucciones:</b></p>
+          <ol style="margin:5px 0 0 15px;line-height:1.8">
+            <li>Abre <b>WhatsApp</b> en tu celular</li>
+            <li>Ve a <b>Ajustes > Dispositivos vinculados</b></li>
+            <li>Toca <b>Vincular dispositivo</b></li>
+            <li><b>Escanea este QR</b></li>
+          </ol>
+        </div>
+        <button class="btn btn-outline" onclick="cancelarQrInline()" style="margin-top:10px">❌ Cancelar</button>
       </div>
       <div id="cuentasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
@@ -593,6 +599,47 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Cancelar Envio</button>
       </div>
       <div id="miembrosContent" class="empty-state"><div class="icon">👥</div><p>Selecciona una cuenta y carga sus grupos</p></div>
+    </div>
+
+    <!-- ENVIO INTERACTIVO -->
+    <div class="section" id="sec-enviointeractivo">
+      <h2>📨 Envio Interactivo (Promo)</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia una promocion y el bot espera la respuesta de los clientes. Te notifica cuando aceptan o rechazan.</p>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent)">
+        <div class="form-group">
+          <label>Palabra para ACEPTAR (el cliente responde esto para aceptar)</label>
+          <input type="text" id="promoAceptar" placeholder="Ej: si" value="si">
+        </div>
+        <div class="form-group">
+          <label>Palabra para RECHAZAR (el cliente responde esto para ignorar)</label>
+          <input type="text" id="promoRechazar" placeholder="Ej: no" value="no">
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-success" onclick="iniciarPromo()">📨 Activar Escucha de Respuestas</button>
+          <button class="btn btn-danger" onclick="detenerPromo()">🛑 Detener Escucha</button>
+          <button class="btn btn-primary" onclick="verRespuestasPromo()">🔄 Actualizar Respuestas</button>
+        </div>
+      </div>
+      <div style="background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border);font-size:13px;color:var(--text2)">
+        <p>💡 <b>Como funciona:</b></p>
+        <ol style="margin:8px 0 0 15px;line-height:1.8">
+          <li>Configura las palabras de aceptar/rechazar (ej: "si" / "no")</li>
+          <li>Activa la escucha de respuestas</li>
+          <li>Envia tu mensaje de promo usando <b>Envio Unico</b>, <b>Envio Personal</b> o <b>Envio a Miembros</b></li>
+          <li>Cuando los clientes respondan con la palabra clave, el bot te notificara automaticamente en Telegram</li>
+        </ol>
+      </div>
+      <div id="promoEstado" style="padding:10px 15px;border-radius:8px;margin-bottom:15px;background:var(--bg);border:1px solid var(--border);font-weight:bold;text-align:center;color:var(--text2)">⏸ Escucha no iniciada</div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:15px">
+        <div style="background:var(--bg);padding:15px;border-radius:10px;border:1px solid var(--success)">
+          <h3 style="color:var(--success);margin-bottom:10px">✅ Aceptaron</h3>
+          <div id="promoAceptados" style="max-height:300px;overflow-y:auto;font-size:13px"><p style="color:var(--text2)">Sin respuestas aun</p></div>
+        </div>
+        <div style="background:var(--bg);padding:15px;border-radius:10px;border:1px solid var(--danger)">
+          <h3 style="color:var(--danger);margin-bottom:10px">❌ Rechazaron</h3>
+          <div id="promoRechazados" style="max-height:300px;overflow-y:auto;font-size:13px"><p style="color:var(--text2)">Sin respuestas aun</p></div>
+        </div>
+      </div>
     </div>
 
     <!-- STATS -->
@@ -1012,7 +1059,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:verRespuestasPromo,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra};
     if(loaders[sec])loaders[sec]();
   });
 });
@@ -1056,15 +1103,48 @@ async function loadCuentas(){
 }
 function eliminarCuenta(n){showModal(`<h3>⚠ Eliminar Cuenta</h3><p>Eliminar <b>'${n}'</b>?<br>Se desconectara y borrara.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarElimCuenta('${n}')">Eliminar</button></div>`)}
 async function confirmarElimCuenta(n){if(!requireMembresia())return;closeModal();const r=await api('/api/desvincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n})});toast(r.ok?'Cuenta eliminada':'Error','success');loadCuentas()}
+let wspQrPollTimer=null;
 function vincularCuentaWspQR(){
   if(!requireMembresia())return;
   const nombre=$('wspCuentaNombre').value.trim();
   if(!nombre){toast('Ingresa un nombre para la cuenta','error');return}
-  const linkUrl='/link?u='+encodeURIComponent(userId)+'&n='+encodeURIComponent(nombre);
-  window.open(linkUrl,'_blank');
-  toast('Se abrio la pagina del QR. Escanea con tu celular.','success');
+  $('wspQrInlineBox').style.display='block';
+  $('wspQrTitle').textContent='📱 Vinculando: '+nombre;
+  $('wspQrStatus').style.background='#3d3d0a';$('wspQrStatus').style.color='#ffeb3b';
+  $('wspQrStatus').textContent='⏳ Preparando QR...';
+  $('wspQrImg').innerHTML='<span class="spinner"></span>';
   $('wspCuentaNombre').value='';
-  setTimeout(()=>loadCuentas(),15000);
+  fetch('/link?u='+encodeURIComponent(userId)+'&n='+encodeURIComponent(nombre)).catch(()=>{});
+  let lastQr='';
+  function pollQr(){
+    fetch('/link-status?u='+encodeURIComponent(userId)+'&n='+encodeURIComponent(nombre))
+      .then(r=>r.json()).then(d=>{
+        if(d.status==='conectado'){
+          $('wspQrStatus').style.background='#0a3d0a';$('wspQrStatus').style.color='#4caf50';
+          $('wspQrStatus').textContent='✅ VINCULADO — Cuenta lista!';
+          $('wspQrImg').innerHTML='<div style="font-size:48px;margin:20px">✅</div>';
+          clearInterval(wspQrPollTimer);wspQrPollTimer=null;
+          setTimeout(()=>{$('wspQrInlineBox').style.display='none';loadCuentas()},3000);
+          return;
+        }
+        if(d.status==='esperando_qr'&&d.qr&&d.qr!==lastQr){
+          lastQr=d.qr;
+          $('wspQrStatus').textContent='⏳ Escanea el QR con tu celular';
+          $('wspQrImg').innerHTML='<img src="'+d.qr+'" width="280" height="280" style="border-radius:12px;border:2px solid var(--accent)">';
+        }
+        if(d.status==='error'||d.status==='timeout'){
+          $('wspQrStatus').style.background='#3d0a0a';$('wspQrStatus').style.color='#f44336';
+          $('wspQrStatus').textContent='❌ '+(d.error||'Error al vincular');
+          clearInterval(wspQrPollTimer);wspQrPollTimer=null;
+        }
+      }).catch(()=>{});
+  }
+  wspQrPollTimer=setInterval(pollQr,3000);
+  pollQr();
+}
+function cancelarQrInline(){
+  if(wspQrPollTimer){clearInterval(wspQrPollTimer);wspQrPollTimer=null}
+  $('wspQrInlineBox').style.display='none';
 }
 
 // --- TG BOT DATA LOADERS (FULL CRUD) ---
@@ -1581,7 +1661,7 @@ async function loadCuentasTg(){
     h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre)}</b>${origenBadge}</td><td>${esc(x.telefono||'—')}</td>`;
     h+=`<td><span class="badge badge-success">Activa</span></td>`;
     h+=`<td style="font-size:11px">${x.fecha||'—'}</td>`;
-    h+=`<td>${x.origen!=='bot'?'<button class="btn btn-sm btn-danger" onclick="eliminarCuentaTg('+JSON.stringify(x.nombre)+')">🗑 Eliminar</button>':'<span style="color:var(--text2);font-size:11px">Gestionada por bot</span>'}</td></tr>`;
+    h+=`<td><button class="btn btn-sm btn-danger" onclick="eliminarCuentaTg(${JSON.stringify(x.nombre)})">🗑 Eliminar</button></td></tr>`;
   });
   h+='</tbody></table></div>';
   $('cuentasTgContent').innerHTML=h;
@@ -1600,6 +1680,52 @@ async function eliminarCuentaTg(nombre){
   const r=await api('/api/sesiones_tg/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre})});
   toast(r.ok?'Cuenta eliminada':'Error',r.ok?'success':'error');
   if(r.ok)loadCuentasTg();
+}
+
+// --- ENVIO INTERACTIVO (PROMO) ---
+let promoRefreshTimer=null;
+async function iniciarPromo(){
+  if(!requireMembresia())return;
+  const aceptar=$('promoAceptar').value.trim()||'si';
+  const rechazar=$('promoRechazar').value.trim()||'no';
+  const r=await api('/api/promo/registrar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,palabra_aceptar:aceptar,palabra_rechazar:rechazar})});
+  if(r.ok){
+    toast('Escucha de respuestas activada! Ahora envia tu promo.','success');
+    $('promoEstado').style.background='#0a3d0a';$('promoEstado').style.color='#4caf50';$('promoEstado').style.borderColor='var(--success)';
+    $('promoEstado').textContent='🟢 Escucha ACTIVA — Esperando respuestas (aceptar: "'+aceptar+'", rechazar: "'+rechazar+'")';
+    if(promoRefreshTimer)clearInterval(promoRefreshTimer);
+    promoRefreshTimer=setInterval(verRespuestasPromo,5000);
+  }else{toast('Error al activar','error')}
+}
+async function detenerPromo(){
+  if(promoRefreshTimer){clearInterval(promoRefreshTimer);promoRefreshTimer=null}
+  const r=await api('/api/promo/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  $('promoEstado').style.background='var(--bg)';$('promoEstado').style.color='var(--text2)';$('promoEstado').style.borderColor='var(--border)';
+  $('promoEstado').textContent='⏸ Escucha detenida';
+  if(r.ok){
+    const a=r.aceptados||[],re=r.rechazados||[];
+    toast('Escucha detenida. Aceptaron: '+a.length+', Rechazaron: '+re.length,'success');
+    renderPromoResultados(a,re);
+  }
+}
+async function verRespuestasPromo(){
+  const r=await api('/api/promo/respuestas?u='+userId);
+  if(!r.ok)return;
+  if(r.activo){
+    $('promoEstado').style.background='#0a3d0a';$('promoEstado').style.color='#4caf50';$('promoEstado').style.borderColor='var(--success)';
+    $('promoEstado').textContent='🟢 Escucha ACTIVA — Aceptados: '+(r.aceptados||[]).length+' | Rechazados: '+(r.rechazados||[]).length;
+  }
+  renderPromoResultados(r.aceptados||[],r.rechazados||[]);
+}
+function renderPromoResultados(aceptados,rechazados){
+  if(aceptados.length){
+    let h='';aceptados.forEach(x=>{h+='<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">✅ <b>'+(x.nombre||x.numero||x.jid||'Desconocido')+'</b>'+(x.numero?' ('+x.numero+')':'')+(x.fecha?' <span style="color:var(--text2);font-size:11px">'+x.fecha+'</span>':'')+'</div>'});
+    $('promoAceptados').innerHTML=h;
+  }else{$('promoAceptados').innerHTML='<p style="color:var(--text2)">Sin respuestas aun</p>'}
+  if(rechazados.length){
+    let h='';rechazados.forEach(x=>{h+='<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">❌ <b>'+(x.nombre||x.numero||x.jid||'Desconocido')+'</b>'+(x.numero?' ('+x.numero+')':'')+(x.fecha?' <span style="color:var(--text2);font-size:11px">'+x.fecha+'</span>':'')+'</div>'});
+    $('promoRechazados').innerHTML=h;
+  }else{$('promoRechazados').innerHTML='<p style="color:var(--text2)">Sin respuestas aun</p>'}
 }
 
 // --- ADMIN ---
@@ -1696,7 +1822,7 @@ function applyLang(){
   const L=LANG[currentLang];
   document.querySelectorAll('.sidebar nav a[data-section]').forEach(a=>{
     const sec=a.dataset.section;
-    const key={dashboard:'dashboard',cuentas:'cuentas',cuentastg:'cuentas',grupos:'grupos',mensajes:'mensajes',envios:'envios',enviopersonal:'enviopersonal',enviomiembros:'enviopersonal',programados:'envios',campanas:'campanas',config:'config',listanegra:'config',autoresp:'config',stats:'stats',admin:'admin',adminlogs:'admin',plantillas:'plantillas',historial:'historial',actividad:'actividad'}[sec];
+    const key={dashboard:'dashboard',cuentas:'cuentas',cuentastg:'cuentas',grupos:'grupos',mensajes:'mensajes',envios:'envios',enviopersonal:'enviopersonal',enviomiembros:'enviopersonal',enviointeractivo:'envios',programados:'envios',campanas:'campanas',config:'config',listanegra:'config',autoresp:'config',stats:'stats',admin:'admin',adminlogs:'admin',plantillas:'plantillas',historial:'historial',actividad:'actividad'}[sec];
     if(key&&L[key]){const sp=a.querySelectorAll('span');if(sp.length>1)sp[1].textContent=L[key]}
   });
 }
