@@ -1000,9 +1000,10 @@ function dentroDeHorarioUsuario(userId) {
     return horaActual >= horario.hora_inicio || horaActual < horario.hora_fin;
 }
 
-// Helper: esperar hasta que estemos en horario
-async function esperarHorario(userId) {
+// Helper: esperar hasta que estemos en horario (con soporte de cancelación)
+async function esperarHorario(userId, isCancelled) {
     while (!dentroDeHorarioUsuario(userId)) {
+        if (isCancelled && isCancelled()) return;
         await delay(60000); // Revisar cada minuto
     }
 }
@@ -1020,17 +1021,22 @@ function reemplazarVariables(texto, contacto) {
     return result;
 }
 
-// Helper: delay inteligente con lotes
-async function delayConLotes(userId, enviados, cancelled) {
-    if (cancelled) return;
+// Helper: delay inteligente con lotes (con soporte de cancelación via callback)
+async function delayConLotes(userId, enviados, isCancelled) {
+    if (isCancelled && isCancelled()) return;
     const cfg = db.getEnvioConfig(userId);
     const delayMs = (cfg.delay_seg || 10) * 1000;
-    // Sistema de lotes: si lote_tamano > 0, pausa larga cada X envios
+    let totalMs;
     if (cfg.lote_tamano > 0 && enviados > 0 && enviados % cfg.lote_tamano === 0) {
-        const pausaMs = (cfg.lote_pausa_seg || 300) * 1000;
-        await delay(pausaMs);
+        totalMs = (cfg.lote_pausa_seg || 300) * 1000;
     } else {
-        await delay(delayMs);
+        totalMs = delayMs;
+    }
+    // Break long delays into 1-second chunks for responsive cancellation
+    const chunks = Math.ceil(totalMs / 1000);
+    for (let i = 0; i < chunks; i++) {
+        if (isCancelled && isCancelled()) return;
+        await delay(Math.min(1000, totalMs - i * 1000));
     }
 }
 
@@ -1143,7 +1149,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
         for (const chat of chatsFiltrados) {
             if (cancelled) break;
             // Verificar horario
-            await esperarHorario(userId);
+            await esperarHorario(userId, () => cancelled);
             if (cancelled) break;
             try {
                 let textoFinal = reemplazarVariables(mensaje, chat);
@@ -1160,7 +1166,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
                 try { await botSock.sendMessage(userId, { text: `\u{1F4CA} Progreso: ${enviados}/${total}...` }); } catch (e) {}
             }
             if (!cancelled) {
-                await delayConLotes(userId, enviados, cancelled);
+                await delayConLotes(userId, enviados, () => cancelled);
             }
         }
 
@@ -1202,7 +1208,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock) 
 
         for (const jid of jidsFiltrados) {
             if (cancelled) break;
-            await esperarHorario(userId);
+            await esperarHorario(userId, () => cancelled);
             if (cancelled) break;
             try {
                 const contacto = { jid, numero: jid.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "") };
@@ -1220,7 +1226,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock) 
                 try { await botSock.sendMessage(userId, { text: `\u{1F4CA} Progreso: ${enviados}/${total}...` }); } catch (e) {}
             }
             if (!cancelled) {
-                await delayConLotes(userId, enviados, cancelled);
+                await delayConLotes(userId, enviados, () => cancelled);
             }
         }
 
@@ -1309,7 +1315,7 @@ async function enviarAMiembrosGrupo(userId, groupJid, mensaje, imagenPath, sock)
 
         for (const m of miembrosFiltrados) {
             if (cancelled) break;
-            await esperarHorario(userId);
+            await esperarHorario(userId, () => cancelled);
             if (cancelled) break;
             try {
                 let textoFinal = reemplazarVariables(mensaje, m);
@@ -1326,7 +1332,7 @@ async function enviarAMiembrosGrupo(userId, groupJid, mensaje, imagenPath, sock)
                 try { await sock.sendMessage(userId, { text: `\u{1F4CA} Progreso: ${enviados}/${total}...` }); } catch (e) {}
             }
             if (!cancelled) {
-                await delayConLotes(userId, enviados, cancelled);
+                await delayConLotes(userId, enviados, () => cancelled);
             }
         }
 

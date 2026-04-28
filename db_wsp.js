@@ -1694,7 +1694,7 @@ function crearTgCampana(userId, nombre, mensajeId) {
     let botDb;
     try {
         botDb = openBotDbWrite(); if (!botDb) return null;
-        const r = botDb.prepare("INSERT INTO campanas (user_id, nombre, mensaje_id, activa) VALUES (?, ?, ?, 0)").run(Number(userId), nombre, mensajeId);
+        const r = botDb.prepare("INSERT INTO campanas (user_id, nombre, mensaje, activa) VALUES (?, ?, ?, 0)").run(Number(userId), nombre, mensajeId);
         return r.lastInsertRowid;
     } catch (e) { return null; }
     finally { if (botDb) botDb.close(); }
