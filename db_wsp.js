@@ -200,6 +200,16 @@ function init() {
             FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
             FOREIGN KEY(mensaje_id) REFERENCES mensajes(id)
         );
+        CREATE TABLE IF NOT EXISTS auto_respuestas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            palabra_clave TEXT,
+            respuesta TEXT,
+            activo INTEGER DEFAULT 1,
+            veces_usado INTEGER DEFAULT 0,
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            UNIQUE(user_id, palabra_clave)
+        );
         CREATE TABLE IF NOT EXISTS envio_config (
             user_id TEXT PRIMARY KEY,
             delay_seg INTEGER DEFAULT 10,
@@ -1014,6 +1024,34 @@ function getGrupoStatsResumen(userId) {
     `).all(userId);
 }
 
+// --- AUTO RESPUESTAS INTELIGENTES ---
+function getAutoRespuestas(userId) {
+    return db.prepare("SELECT * FROM auto_respuestas WHERE user_id = ? ORDER BY id").all(userId);
+}
+function agregarAutoRespuesta(userId, palabraClave, respuesta) {
+    try {
+        db.prepare("INSERT INTO auto_respuestas (user_id, palabra_clave, respuesta) VALUES (?, ?, ?)").run(userId, palabraClave.toLowerCase(), respuesta);
+        return true;
+    } catch (e) { return false; }
+}
+function eliminarAutoRespuesta(userId, id) {
+    return db.prepare("DELETE FROM auto_respuestas WHERE user_id = ? AND id = ?").run(userId, id).changes > 0;
+}
+function buscarAutoRespuesta(userId, texto) {
+    const respuestas = db.prepare("SELECT * FROM auto_respuestas WHERE user_id = ? AND activo = 1").all(userId);
+    const textoLower = texto.toLowerCase();
+    for (const r of respuestas) {
+        if (textoLower.includes(r.palabra_clave.toLowerCase())) {
+            db.prepare("UPDATE auto_respuestas SET veces_usado = veces_usado + 1 WHERE id = ?").run(r.id);
+            return r;
+        }
+    }
+    return null;
+}
+function limpiarAutoRespuestas(userId) {
+    return db.prepare("DELETE FROM auto_respuestas WHERE user_id = ?").run(userId).changes;
+}
+
 // --- ENVIO CONFIG (delay, lotes) ---
 function getEnvioConfig(userId) {
     return db.prepare("SELECT * FROM envio_config WHERE user_id = ?").get(userId) || { delay_seg: 10, lote_tamano: 0, lote_pausa_seg: 300 };
@@ -1098,4 +1136,6 @@ module.exports = {
     getListaNegra, agregarListaNegra, eliminarListaNegra, estaEnListaNegra, limpiarListaNegra,
     // Horarios envio
     getHorarioEnvio, setHorarioEnvio,
+    // Auto respuestas inteligentes
+    getAutoRespuestas, agregarAutoRespuesta, eliminarAutoRespuesta, buscarAutoRespuesta, limpiarAutoRespuestas,
 };

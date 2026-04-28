@@ -130,6 +130,15 @@ async def wsp_lista_negra_accion(user_id, accion, numero=None, razon=None):
     if razon: data["razon"] = razon
     return await _post("/api/lista_negra", data)
 
+# --- AUTO RESPUESTAS INTELIGENTES ---
+async def wsp_get_auto_respuestas(user_id):
+    return await _get("/api/auto_respuestas", {"u": str(user_id)})
+
+async def wsp_auto_respuesta_accion(user_id, accion, **kwargs):
+    data = {"u": str(user_id), "accion": accion}
+    data.update(kwargs)
+    return await _post("/api/auto_respuestas", data)
+
 # --- ENVIAR A LISTA DE NUMEROS ---
 async def wsp_enviar_a_lista(user_id, numeros, mensaje, media_path=None):
     data = {"u": str(user_id), "numeros": numeros, "mensaje": mensaje}

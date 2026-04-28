@@ -863,6 +863,38 @@ poll();
                 return res.end(JSON.stringify({ ok: false, error: "accion invalida" }));
             }
 
+            // GET /api/auto_respuestas?u=USER_ID — Listar auto respuestas
+            if (url.pathname === "/api/auto_respuestas" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const lista = db.getAutoRespuestas(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, total: lista.length, respuestas: lista }));
+            }
+
+            // POST /api/auto_respuestas — CRUD auto respuestas
+            if (url.pathname === "/api/auto_respuestas" && req.method === "POST") {
+                const body = await readBody();
+                const userId = body.u;
+                const accion = body.accion;
+                if (!userId || !accion) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o accion" })); }
+                if (accion === "agregar") {
+                    const ok = db.agregarAutoRespuesta(userId, body.palabra_clave, body.respuesta);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok, message: ok ? "agregado" : "ya existe" }));
+                } else if (accion === "eliminar") {
+                    const ok = db.eliminarAutoRespuesta(userId, body.id);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok }));
+                } else if (accion === "limpiar") {
+                    const count = db.limpiarAutoRespuestas(userId);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, eliminados: count }));
+                }
+                res.writeHead(400);
+                return res.end(JSON.stringify({ ok: false, error: "accion invalida" }));
+            }
+
             // POST /api/enviar_a_lista — Enviar a lista de numeros especificos
             if (url.pathname === "/api/enviar_a_lista" && req.method === "POST") {
                 const body = await readBody();

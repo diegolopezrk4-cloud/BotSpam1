@@ -3350,6 +3350,7 @@ async def cb_sec_wsp(call: types.CallbackQuery):
          InlineKeyboardButton(text="👥 Envio a Miembros", callback_data="wsp_miembros")],
         [InlineKeyboardButton(text="⚙ Config Envio", callback_data="wsp_config_envio"),
          InlineKeyboardButton(text="🚫 Lista Negra", callback_data="wsp_lista_negra")],
+        [InlineKeyboardButton(text="🤖 Auto-Responder", callback_data="wsp_auto_resp")],
         [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial"),
          InlineKeyboardButton(text="📈 Stats Grupos", callback_data="wsp_grupo_stats")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
@@ -3785,6 +3786,108 @@ async def cmd_wsp_limpiar_bloqueos(msg: types.Message, command: CommandObject):
     r = await wsp.wsp_lista_negra_accion(msg.from_user.id, "limpiar")
     eliminados = r.get("eliminados", 0)
     await msg.answer(f"🗑 Lista negra limpiada. {eliminados} numero(s) eliminados.")
+
+
+# --- AUTO-RESPONDER INTELIGENTE WSP ---
+@dp.callback_query(F.data == "wsp_auto_resp")
+async def cb_wsp_auto_resp(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    await call.answer()
+    r = await wsp.wsp_get_auto_respuestas(call.from_user.id)
+    respuestas = r.get("respuestas", [])
+    total = r.get("total", 0)
+    texto = f"🤖 *AUTO-RESPONDER INTELIGENTE* ({total} reglas)\n\n"
+    if respuestas:
+        for i, ar in enumerate(respuestas[:20], 1):
+            estado = "🟢" if ar.get("activo") else "🔴"
+            texto += f"  {i}. {estado} *{ar.get('palabra_clave', '?')}* → {ar.get('respuesta', '')[:50]}\n"
+            texto += f"      (usado {ar.get('veces_usado', 0)} veces)\n"
+        if total > 20:
+            texto += f"  ... y {total - 20} mas\n"
+    else:
+        texto += "No hay reglas. Cuando alguien te escriba un mensaje con la palabra clave, el bot respondera automaticamente.\n"
+    texto += (
+        "\n📝 *Comandos:*\n"
+        "`/wspautoagregar PALABRA | RESPUESTA`\n"
+        "`/wspautoquitar ID`\n"
+        "`/wspautolimpiar` — borrar todas\n"
+    )
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    botones = [
+        [InlineKeyboardButton(text="🗑 Limpiar todas las reglas", callback_data="wsp_ar_limpiar")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    await safe_edit(call.message, texto, reply_markup=InlineKeyboardMarkup(inline_keyboard=botones))
+
+
+@dp.callback_query(F.data == "wsp_ar_limpiar")
+async def cb_wsp_ar_limpiar(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_auto_respuesta_accion(call.from_user.id, "limpiar")
+    eliminados = r.get("eliminados", 0)
+    await call.answer(f"Reglas limpiadas ({eliminados} eliminadas)")
+    call.data = "wsp_auto_resp"
+    await cb_wsp_auto_resp(call)
+
+
+@dp.message(Command("wspautoagregar"))
+async def cmd_wsp_auto_agregar(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args or "|" not in args:
+        return await msg.answer(
+            "Uso: `/wspautoagregar PALABRA_CLAVE | RESPUESTA`\n\n"
+            "Ejemplo:\n"
+            "`/wspautoagregar precio | Nuestros precios son: Plan Basico $10, Plan Pro $25`\n"
+            "`/wspautoagregar hola | Hola! Gracias por escribirnos. En que podemos ayudarte?`"
+        )
+    parts = args.split("|", 1)
+    palabra = parts[0].strip()
+    respuesta = parts[1].strip()
+    if not palabra or not respuesta:
+        return await msg.answer("Faltan datos. Uso: /wspautoagregar PALABRA | RESPUESTA")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_auto_respuesta_accion(msg.from_user.id, "agregar",
+        palabra_clave=palabra, respuesta=respuesta)
+    if r.get("ok"):
+        await msg.answer(f"🤖 Auto-respuesta agregada!\n\nCuando alguien escriba *{palabra}*, el bot respondera automaticamente.")
+    else:
+        await msg.answer(f"Error: {r.get('message', 'ya existe esta palabra clave')}")
+
+
+@dp.message(Command("wspautoquitar"))
+async def cmd_wsp_auto_quitar(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    args = command.args
+    if not args:
+        return await msg.answer("Uso: /wspautoquitar ID\n\nVe las IDs en el panel Auto-Responder (/wsp)")
+    try:
+        ar_id = int(args.strip())
+    except ValueError:
+        return await msg.answer("El ID debe ser un numero.")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_auto_respuesta_accion(msg.from_user.id, "eliminar", id=ar_id)
+    if r.get("ok"):
+        await msg.answer("Regla eliminada.")
+    else:
+        await msg.answer("No se encontro la regla.")
+
+
+@dp.message(Command("wspautolimpiar"))
+async def cmd_wsp_auto_limpiar(msg: types.Message, command: CommandObject):
+    if not await verificar_membresia(msg):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_auto_respuesta_accion(msg.from_user.id, "limpiar")
+    eliminados = r.get("eliminados", 0)
+    await msg.answer(f"🗑 {eliminados} regla(s) eliminadas.")
 
 
 # --- ENVIO PERSONAL WSP ---

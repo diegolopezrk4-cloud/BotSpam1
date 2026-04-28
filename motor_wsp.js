@@ -877,6 +877,18 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
                             || "";
                         const lower = text.toLowerCase();
 
+                        // Primero verificar auto-respuestas inteligentes
+                        const autoResp = db.buscarAutoRespuesta(userId, text);
+                        if (autoResp) {
+                            try {
+                                await sock.sendMessage(jid, { text: autoResp.respuesta }, { quoted: msg });
+                                db.registrarRespuesta(userId, jid, autoResp.palabra_clave);
+                            } catch (e) {
+                                console.error(`Auto-respuesta error: ${e.message}`);
+                            }
+                            continue;
+                        }
+                        // Luego verificar keywords clasicas
                         for (const kw of keywordsLower) {
                             if (lower.includes(kw)) {
                                 try {
