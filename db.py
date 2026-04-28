@@ -648,3 +648,12 @@ async def get_dashboard(user_id):
         "keywords": len(keywords),
     }
 
+
+async def get_all_users_with_active_campaigns():
+    """Retorna lista de (user_id, campana_id) de campanas activas."""
+    async with _connect() as db:
+        async with db.execute(
+            "SELECT user_id, id FROM campanas WHERE activa=1"
+        ) as cur:
+            return await cur.fetchall()
+

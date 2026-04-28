@@ -24,6 +24,7 @@ from motor import (iniciar_campana, detener_campana, tareas_activas, get_session
                    iniciar_responder, detener_responder, responder_activos,
                    detectar_grupos_telegram, detectar_carpetas_telegram,
                    detectar_grupos_carpeta, verificar_grupos_estado)
+import web_panel
 
 # ─────────────────────────────────────────
 #   CONFIGURACIÓN CENTRAL
@@ -383,8 +384,9 @@ async def procesar_login_cuenta(msg: types.Message, state: FSMContext, telefono:
         )
         await state.set_state(CuentaState.esperando_codigo)
         await msg.answer(
-            f"📨 Codigo enviado a {telefono}\n\n"
-            f"🔑 Ingresa el codigo:\n"
+            f"📨 Codigo enviado a tu APP de Telegram (no por SMS)\n\n"
+            f"📱 Revisa los mensajes en tu Telegram ({telefono})\n"
+            f"🔑 Ingresa el codigo que recibiste:\n"
             f"(Ej: 12345)\n\n"
             f"⚠ Tienes 5 minutos.",
             reply_markup=ReplyKeyboardRemove()
@@ -3631,7 +3633,11 @@ async def main():
             logger.info(f"Reset campaña {cid} (user {uid}) que quedó activa por crash.")
     except Exception:
         pass
+    # Iniciar panel web
+    web_panel.set_bot_reference(bot)
+    await web_panel.start_web_panel()
     logger.info("🚀 Bot de Spam J&D v2.0 iniciado correctamente.")
+    logger.info(f"🌐 Panel web disponible en http://0.0.0.0:{web_panel.WEB_PORT}")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
