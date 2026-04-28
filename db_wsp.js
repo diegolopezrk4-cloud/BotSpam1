@@ -1376,6 +1376,8 @@ module.exports = {
     getEnviosPorDia,
     // Sesiones Telegram
     getSesionesTg, agregarSesionTg, eliminarSesionTg, getAllSesionesTg,
+    // TG Bot data (read from titan.db)
+    getTgGrupos, getTgMensajes, getTgCampanas, getTgHistorialEnvios, getTgProgramados, getTgAutoResponder, getTgStats,
 };
 
 // --- Sesiones Telegram ---
@@ -1474,4 +1476,99 @@ function getLimitesMembresia(userId) {
 // --- Dashboard chart data ---
 function getEnviosPorDia(userId, dias) {
     return db.prepare(`SELECT date(fecha) as dia, COUNT(*) as total, SUM(CASE WHEN resultado='enviado' OR resultado='exitoso' THEN exitosos ELSE 0 END) as ok, SUM(fallidos) as err FROM historial_envios_panel WHERE user_id = ? AND fecha >= date('now', '-' || ? || ' days') GROUP BY date(fecha) ORDER BY dia ASC`).all(String(userId), dias || 7);
+}
+
+// --- TG Bot data (read from titan.db) ---
+function openBotDb() {
+    const botDbPath = path.resolve(__dirname, "titan.db");
+    const fs = require("fs");
+    if (!fs.existsSync(botDbPath)) return null;
+    return new Database(botDbPath, { readonly: true });
+}
+
+function getTgGrupos(userId) {
+    try {
+        const botDb = openBotDb(); if (!botDb) return [];
+        const rows = botDb.prepare("SELECT * FROM grupos WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
+        botDb.close();
+        return rows;
+    } catch (e) { return []; }
+}
+
+function getTgMensajes(userId) {
+    try {
+        const botDb = openBotDb(); if (!botDb) return [];
+        const rows = botDb.prepare("SELECT * FROM tg_mensajes WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
+        botDb.close();
+        return rows;
+    } catch (e) { return []; }
+}
+
+function getTgCampanas(userId) {
+    try {
+        const botDb = openBotDb(); if (!botDb) return [];
+        const camps = botDb.prepare("SELECT * FROM campanas WHERE user_id = ? ORDER BY id DESC").all(Number(userId));
+        camps.forEach(c => {
+            try {
+                c.sesiones = botDb.prepare("SELECT sesion_nombre FROM campana_sesiones WHERE campana_id = ?").all(c.id).map(s => s.sesion_nombre);
+                c.grupos = botDb.prepare("SELECT grupo_link FROM campana_grupos WHERE campana_id = ?").all(c.id).map(g => g.grupo_link);
+                const cfg = botDb.prepare("SELECT * FROM campana_config WHERE campana_id = ?").get(c.id);
+                c.intervalo_min = cfg ? cfg.intervalo_min : 30;
+                c.intervalo_max = cfg ? cfg.intervalo_max : 60;
+            } catch (e) {}
+        });
+        botDb.close();
+        return camps;
+    } catch (e) { return []; }
+}
+
+function getTgHistorialEnvios(userId, limite) {
+    try {
+        const botDb = openBotDb(); if (!botDb) return [];
+        const rows = botDb.prepare("SELECT * FROM historial_envios WHERE user_id = ? ORDER BY id DESC LIMIT ?").all(Number(userId), limite || 50);
+        botDb.close();
+        return rows;
+    } catch (e) { return []; }
+}
+
+function getTgProgramados(userId) {
+    try {
+        const botDb = openBotDb(); if (!botDb) return [];
+        const rows = botDb.prepare("SELECT p.*, m.nombre as msg_nombre, m.texto as msg_texto FROM tg_envios_programados p LEFT JOIN tg_mensajes m ON p.mensaje_id = m.id WHERE p.user_id = ? ORDER BY p.id DESC").all(Number(userId));
+        botDb.close();
+        return rows;
+    } catch (e) { return []; }
+}
+
+function getTgAutoResponder(userId) {
+    try {
+        const botDb = openBotDb(); if (!botDb) return { config: null, keywords: [] };
+        const config = botDb.prepare("SELECT * FROM responder_config WHERE user_id = ?").get(Number(userId));
+        const keywords = botDb.prepare("SELECT * FROM responder_keywords WHERE user_id = ?").all(Number(userId));
+        botDb.close();
+        return { config: config || null, keywords };
+    } catch (e) { return { config: null, keywords: [] }; }
+}
+
+function getTgStats(userId) {
+    try {
+        const botDb = openBotDb(); if (!botDb) return {};
+        const totalEnvios = botDb.prepare("SELECT COUNT(*) as total FROM historial_envios WHERE user_id = ?").get(Number(userId));
+        const exitosos = botDb.prepare("SELECT COUNT(*) as total FROM historial_envios WHERE user_id = ? AND resultado = 'enviado'").get(Number(userId));
+        const fallidos = botDb.prepare("SELECT COUNT(*) as total FROM historial_envios WHERE user_id = ? AND resultado != 'enviado'").get(Number(userId));
+        const grupos = botDb.prepare("SELECT COUNT(*) as total FROM grupos WHERE user_id = ?").get(Number(userId));
+        const cuentas = botDb.prepare("SELECT COUNT(*) as total FROM sesiones WHERE user_id = ? AND activa = 1").get(Number(userId));
+        const campanas = botDb.prepare("SELECT COUNT(*) as total FROM campanas WHERE user_id = ?").get(Number(userId));
+        const campanasActivas = botDb.prepare("SELECT COUNT(*) as total FROM campanas WHERE user_id = ? AND activa = 1").get(Number(userId));
+        botDb.close();
+        return {
+            total_envios: totalEnvios ? totalEnvios.total : 0,
+            exitosos: exitosos ? exitosos.total : 0,
+            fallidos: fallidos ? fallidos.total : 0,
+            grupos: grupos ? grupos.total : 0,
+            cuentas: cuentas ? cuentas.total : 0,
+            campanas: campanas ? campanas.total : 0,
+            campanas_activas: campanasActivas ? campanasActivas.total : 0,
+        };
+    } catch (e) { return {}; }
 }

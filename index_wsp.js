@@ -1313,6 +1313,72 @@ if(uid())loadAll();
                 return res.end(JSON.stringify({ ok: true }));
             }
 
+            // === TG BOT DATA ENDPOINTS (read from titan.db) ===
+
+            // GET /api/tg/grupos?u=ID — TG groups
+            if (url.pathname === "/api/tg/grupos" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const grupos = db.getTgGrupos(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, grupos }));
+            }
+
+            // GET /api/tg/mensajes?u=ID — TG messages
+            if (url.pathname === "/api/tg/mensajes" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const mensajes = db.getTgMensajes(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, mensajes }));
+            }
+
+            // GET /api/tg/campanas?u=ID — TG campaigns
+            if (url.pathname === "/api/tg/campanas" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const campanas = db.getTgCampanas(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, campanas }));
+            }
+
+            // GET /api/tg/historial?u=ID — TG send history
+            if (url.pathname === "/api/tg/historial" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const limite = parseInt(url.searchParams.get("limite")) || 50;
+                const historial = db.getTgHistorialEnvios(uid, limite);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, historial }));
+            }
+
+            // GET /api/tg/programados?u=ID — TG scheduled sends
+            if (url.pathname === "/api/tg/programados" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const programados = db.getTgProgramados(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, programados }));
+            }
+
+            // GET /api/tg/autoresponder?u=ID — TG auto responder config
+            if (url.pathname === "/api/tg/autoresponder" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const data = db.getTgAutoResponder(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...data }));
+            }
+
+            // GET /api/tg/stats?u=ID — TG statistics
+            if (url.pathname === "/api/tg/stats" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const stats = db.getTgStats(uid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, stats }));
+            }
+
             // GET /api/actividad?u=ID&limite=50 — Activity logs
             if (url.pathname === "/api/actividad" && req.method === "GET") {
                 const uid = url.searchParams.get("u");

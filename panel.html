@@ -348,6 +348,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="cuentas" data-plat="wsp"><span class="icon">👤</span><span>Cuentas WSP</span></a>
       <a href="#" data-section="cuentastg" data-plat="tg"><span class="icon">✈️</span><span>Cuentas Telegram</span></a>
       <a href="#" data-section="grupos" data-plat="wsp"><span class="icon">🌐</span><span>Grupos</span></a>
+      <a href="#" data-section="tggrupos" data-plat="tg"><span class="icon">🌐</span><span>Grupos TG</span></a>
       <div class="nav-group" data-plat="wsp">Mensajeria WSP</div>
       <a href="#" data-section="mensajes" data-plat="wsp"><span class="icon">✉</span><span>Mensajes</span></a>
       <a href="#" data-section="envios" data-plat="wsp"><span class="icon">📤</span><span>Envio Unico</span></a>
@@ -355,13 +356,20 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="enviomiembros" data-plat="wsp"><span class="icon">👥</span><span>Envio a Miembros</span></a>
       <a href="#" data-section="programados" data-plat="wsp"><span class="icon">⏰</span><span>Programados</span></a>
       <a href="#" data-section="campanas" data-plat="wsp"><span class="icon">📋</span><span>Campanas</span></a>
+      <div class="nav-group" data-plat="tg">Mensajeria TG</div>
+      <a href="#" data-section="tgmensajes" data-plat="tg"><span class="icon">✉</span><span>Mensajes TG</span></a>
+      <a href="#" data-section="tgcampanas" data-plat="tg"><span class="icon">📋</span><span>Campanas TG</span></a>
+      <a href="#" data-section="tgprogramados" data-plat="tg"><span class="icon">⏰</span><span>Programados TG</span></a>
+      <a href="#" data-section="tghistorial" data-plat="tg"><span class="icon">📜</span><span>Historial TG</span></a>
       <div class="nav-group">Herramientas</div>
       <a href="#" data-section="plantillas"><span class="icon">📋</span><span>Plantillas</span></a>
-      <a href="#" data-section="historial"><span class="icon">📜</span><span>Historial</span></a>
+      <a href="#" data-section="historial" data-plat="wsp"><span class="icon">📜</span><span>Historial WSP</span></a>
       <div class="nav-group" data-plat="wsp">Config WSP</div>
       <a href="#" data-section="config" data-plat="wsp"><span class="icon">⚙</span><span>Config Envio</span></a>
       <a href="#" data-section="listanegra" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra</span></a>
       <a href="#" data-section="autoresp" data-plat="wsp"><span class="icon">🤖</span><span>Auto-Responder</span></a>
+      <div class="nav-group" data-plat="tg">Config TG</div>
+      <a href="#" data-section="tgautoresp" data-plat="tg"><span class="icon">🤖</span><span>Auto-Responder TG</span></a>
       <div class="nav-group">General</div>
       <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas</span></a>
       <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
@@ -376,6 +384,31 @@ table tr:hover { background: rgba(108,92,231,0.05); }
   </div>
 
   <div class="main">
+    <!-- BANNER MEMBRESIA EXPIRADA -->
+    <div id="membresiaBanner" style="display:none;background:linear-gradient(135deg,#e94560,#7c2d12);padding:15px 20px;border-radius:12px;margin-bottom:20px;color:#fff">
+      <div style="display:flex;align-items:center;gap:15px;flex-wrap:wrap">
+        <div style="font-size:32px">🔒</div>
+        <div style="flex:1;min-width:200px">
+          <h3 style="margin:0 0 5px;color:#fff">Membresia Requerida</h3>
+          <p style="margin:0;font-size:13px;opacity:0.9" id="membresiaMsg">Tu periodo de prueba ha terminado. Puedes ver todo pero no usar las funciones hasta activar una membresia.</p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="background:rgba(255,255,255,0.15);padding:8px 15px;border-radius:8px;text-align:center">
+            <div style="font-size:11px;opacity:0.8">Semanal</div>
+            <div style="font-weight:bold;font-size:16px">S/ 15</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.15);padding:8px 15px;border-radius:8px;text-align:center">
+            <div style="font-size:11px;opacity:0.8">Mensual</div>
+            <div style="font-weight:bold;font-size:16px">S/ 30</div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:15px;align-items:center;flex-wrap:wrap;font-size:13px">
+        <span>💳 Yape: <b>9776680776</b></span>
+        <span>📱 WSP: <a href="https://wa.me/51976680776" target="_blank" style="color:#fff;font-weight:bold">+51 976 680 776</a></span>
+        <span>✈️ TG: <a href="https://t.me/JhonnyVip05" target="_blank" style="color:#fff;font-weight:bold">@JhonnyVip05</a></span>
+      </div>
+    </div>
     <!-- DASHBOARD -->
     <div class="section active" id="sec-dashboard">
       <h2>📊 Dashboard</h2>
@@ -623,6 +656,48 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div id="cuentasTgContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
+    <!-- GRUPOS TG -->
+    <div class="section" id="sec-tggrupos">
+      <h2>🌐 Grupos Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Grupos registrados en tu bot de Telegram.</p>
+      <div id="tgGruposContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- MENSAJES TG -->
+    <div class="section" id="sec-tgmensajes">
+      <h2>✉ Mensajes Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Mensajes creados para enviar a grupos de Telegram.</p>
+      <div id="tgMensajesContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- CAMPANAS TG -->
+    <div class="section" id="sec-tgcampanas">
+      <h2>📋 Campanas Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Campanas de spam activas y configuradas para Telegram.</p>
+      <div id="tgCampanasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- PROGRAMADOS TG -->
+    <div class="section" id="sec-tgprogramados">
+      <h2>⏰ Programados Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envios programados automaticos para Telegram.</p>
+      <div id="tgProgramadosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- HISTORIAL TG -->
+    <div class="section" id="sec-tghistorial">
+      <h2>📜 Historial Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Historial de envios realizados por Telegram.</p>
+      <div id="tgHistorialContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- AUTO-RESPONDER TG -->
+    <div class="section" id="sec-tgautoresp">
+      <h2>🤖 Auto-Responder Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Configuracion del auto-responder para grupos de Telegram.</p>
+      <div id="tgAutoRespContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
     <!-- PLANTILLAS -->
     <div class="section" id="sec-plantillas">
       <h2>📋 Plantillas de Mensajes</h2>
@@ -687,36 +762,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div id="adminLogsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
-    <!-- MEMBRESIA BLOQUEADA OVERLAY -->
-    <div id="membresiaOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:9999;display:none;align-items:center;justify-content:center">
-      <div style="background:var(--bg2);padding:40px;border-radius:15px;text-align:center;max-width:500px;margin:20px">
-        <div style="font-size:48px;margin-bottom:15px">🔒</div>
-        <h2 style="margin-bottom:15px">Membresia Requerida</h2>
-        <p style="color:var(--text2);margin-bottom:20px" id="membresiaMsg">Tu periodo de prueba ha terminado. Adquiere una membresia para usar todas las funciones.</p>
-        <div style="display:flex;gap:15px;justify-content:center;flex-wrap:wrap;margin-bottom:20px">
-          <div style="background:var(--bg);padding:15px 25px;border-radius:10px;border:1px solid var(--accent)">
-            <div style="color:var(--accent);font-weight:bold">Semanal</div>
-            <div style="font-size:22px;font-weight:bold;margin:5px 0">S/ 15</div>
-          </div>
-          <div style="background:var(--bg);padding:15px 25px;border-radius:10px;border:1px solid var(--accent2)">
-            <div style="color:var(--accent2);font-weight:bold">Mensual</div>
-            <div style="font-size:22px;font-weight:bold;margin:5px 0">S/ 30</div>
-          </div>
-        </div>
-        <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--success)">
-          <p style="color:var(--success);font-weight:bold;margin-bottom:8px">💳 Pagar con Yape</p>
-          <p style="color:var(--text);font-size:14px;margin-bottom:5px">Envia el monto al numero Yape:</p>
-          <p style="font-size:22px;font-weight:bold;color:var(--success);margin:8px 0">9776680776</p>
-          <p style="color:var(--text2);font-size:12px">Luego envia el comprobante al creador para activar tu cuenta.</p>
-        </div>
-        <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
-          <p style="color:var(--accent2);font-weight:bold;margin-bottom:8px">📞 Contactar al Creador</p>
-          <p style="color:var(--text);font-size:14px;margin-bottom:5px">📱 WhatsApp: <a href="https://wa.me/51976680776" target="_blank" style="color:var(--success);text-decoration:none;font-weight:bold">+51 976 680 776</a></p>
-          <p style="color:var(--text);font-size:14px">✈️ Telegram: <a href="https://t.me/JhonnyVip05" target="_blank" style="color:var(--accent2);text-decoration:none;font-weight:bold">@JhonnyVip05</a></p>
-        </div>
-        <button class="btn btn-outline" style="margin-top:10px" onclick="doLogout()">Cerrar Sesion</button>
-      </div>
-    </div>
+    <!-- (membresia banner moved to top of main) -->
   </div>
 </div>
 
@@ -744,6 +790,14 @@ function toast(msg,type='success'){
 }
 function showModal(html){$('modalContent').innerHTML=html;$('modal').classList.add('show')}
 function closeModal(){$('modal').classList.remove('show')}
+function requireMembresia(){
+  if(esAdmin)return true;
+  if(!membresiaActiva){
+    toast('Necesitas una membresia activa para usar esta funcion. Contacta al creador.','error');
+    return false;
+  }
+  return true;
+}
 $('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
 
 // --- PLATFORM SELECTOR ---
@@ -875,9 +929,10 @@ async function showApp(){
     if(m.membresia){
       const info=m.membresia;
       if(!info.activo && !esAdmin){
-        $('membresiaOverlay').style.display='flex';
-        if(info.plan==='demo')$('membresiaMsg').textContent='Tu demo de 1 dia ha terminado. Adquiere una membresia para continuar.';
-        else $('membresiaMsg').textContent='Tu membresia '+info.plan+' ha expirado. Renueva para seguir usando el panel.';
+        membresiaActiva=false;
+        $('membresiaBanner').style.display='block';
+        if(info.plan==='demo')$('membresiaMsg').textContent='Tu demo de 1 dia ha terminado. Puedes ver todo pero no usar las funciones hasta activar una membresia.';
+        else $('membresiaMsg').textContent='Tu membresia '+info.plan+' ha expirado. Puedes ver todo pero no usar las funciones hasta renovar.';
       }
     }
   }
@@ -920,7 +975,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp};
     if(loaders[sec])loaders[sec]();
   });
 });
@@ -963,14 +1018,105 @@ async function loadCuentas(){
   h+='</tbody></table></div>';$('cuentasContent').innerHTML=h;
 }
 function eliminarCuenta(n){showModal(`<h3>⚠ Eliminar Cuenta</h3><p>Eliminar <b>'${n}'</b>?<br>Se desconectara y borrara.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarElimCuenta('${n}')">Eliminar</button></div>`)}
-async function confirmarElimCuenta(n){closeModal();const r=await api('/api/desvincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n})});toast(r.ok?'Cuenta eliminada':'Error','success');loadCuentas()}
+async function confirmarElimCuenta(n){if(!requireMembresia())return;closeModal();const r=await api('/api/desvincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n})});toast(r.ok?'Cuenta eliminada':'Error','success');loadCuentas()}
 async function agregarCuentaWsp(){
+  if(!requireMembresia())return;
   const nombre=$('wspCuentaNombre').value.trim();
   const tel=$('wspCuentaTel').value.trim();
   if(!nombre){toast('Ingresa un nombre para la cuenta','error');return}
   const r=await api('/api/vincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre,telefono:tel})});
   toast(r.ok?'Cuenta WSP registrada':'Error: '+(r.error||''),r.ok?'success':'error');
   if(r.ok){$('wspCuentaNombre').value='';$('wspCuentaTel').value='';loadCuentas()}
+}
+
+// --- TG BOT DATA LOADERS ---
+async function loadTgGrupos(){
+  const r=await api('/api/tg/grupos?u='+userId);
+  if(!r.ok){$('tgGruposContent').innerHTML='<div class="empty-state"><p>Error al cargar grupos</p></div>';return}
+  const g=r.grupos||[];
+  if(!g.length){$('tgGruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos registrados.<br>Usa el bot de Telegram para agregar grupos.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+')</h3></div><table><thead><tr><th>#</th><th>Link del Grupo</th></tr></thead><tbody>';
+  g.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><a href="${esc(x.link)}" target="_blank" style="color:var(--accent2)">${esc(x.link)}</a></td></tr>`});
+  h+='</tbody></table></div>';$('tgGruposContent').innerHTML=h;
+}
+
+async function loadTgMensajes(){
+  const r=await api('/api/tg/mensajes?u='+userId);
+  if(!r.ok){$('tgMensajesContent').innerHTML='<div class="empty-state"><p>Error al cargar mensajes</p></div>';return}
+  const m=r.mensajes||[];
+  if(!m.length){$('tgMensajesContent').innerHTML='<div class="empty-state"><div class="icon">✉</div><p>No hay mensajes creados.<br>Usa el bot de Telegram para crear mensajes.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Mensajes ('+m.length+')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Texto</th><th>Foto</th><th>Fecha</th></tr></thead><tbody>';
+  m.forEach((x,i)=>{
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre||'?')}</b></td><td style="font-size:12px;color:var(--text2);max-width:300px;overflow:hidden;text-overflow:ellipsis">${esc((x.texto||'').slice(0,80))}</td><td>${x.foto_path?'<span class="badge badge-success">Si</span>':'<span class="badge" style="background:var(--bg3)">No</span>'}</td><td style="font-size:11px">${esc(x.fecha_creacion||'—')}</td></tr>`;
+  });
+  h+='</tbody></table></div>';$('tgMensajesContent').innerHTML=h;
+}
+
+async function loadTgCampanas(){
+  const r=await api('/api/tg/campanas?u='+userId);
+  if(!r.ok){$('tgCampanasContent').innerHTML='<div class="empty-state"><p>Error al cargar campanas</p></div>';return}
+  const c=r.campanas||[];
+  if(!c.length){$('tgCampanasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay campanas creadas.<br>Usa el bot de Telegram para crear campanas.</p></div>';return}
+  let h='';
+  c.forEach(x=>{
+    const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
+    h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
+    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3>${estado}</div>`;
+    h+=`<p style="font-size:12px;color:var(--text2);margin-bottom:5px">${esc((x.mensaje||'').slice(0,100))}</p>`;
+    h+=`<div style="display:flex;gap:15px;font-size:12px;color:var(--text2)"><span>📤 Enviados: <b style="color:var(--success)">${x.enviados||0}</b></span><span>❌ Errores: <b style="color:var(--danger)">${x.errores||0}</b></span>`;
+    h+=`<span>⏱ Intervalo: ${x.intervalo_min||30}s - ${x.intervalo_max||60}s</span></div>`;
+    if(x.sesiones&&x.sesiones.length)h+=`<p style="font-size:11px;color:var(--text2);margin-top:5px">Sesiones: ${x.sesiones.map(s=>esc(s)).join(', ')}</p>`;
+    if(x.grupos&&x.grupos.length)h+=`<p style="font-size:11px;color:var(--text2);margin-top:3px">Grupos: ${x.grupos.length} asignados</p>`;
+    h+=`</div>`;
+  });
+  $('tgCampanasContent').innerHTML=h;
+}
+
+async function loadTgProgramados(){
+  const r=await api('/api/tg/programados?u='+userId);
+  if(!r.ok){$('tgProgramadosContent').innerHTML='<div class="empty-state"><p>Error al cargar programados</p></div>';return}
+  const p=r.programados||[];
+  if(!p.length){$('tgProgramadosContent').innerHTML='<div class="empty-state"><div class="icon">⏰</div><p>No hay envios programados.<br>Usa el bot de Telegram para programar envios.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Mensaje</th><th>Hora</th><th>Repetir</th><th>Estado</th></tr></thead><tbody>';
+  p.forEach((x,i)=>{
+    const hora=String(x.hora||0).padStart(2,'0')+':'+String(x.minuto||0).padStart(2,'0');
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.msg_nombre||'Mensaje #'+x.mensaje_id)}</b></td><td>${hora}</td><td>${x.repetir?'<span class="badge badge-success">Si</span>':'<span class="badge" style="background:var(--bg3)">No</span>'}</td><td>${x.activo?'<span class="badge badge-success">Activo</span>':'<span class="badge badge-danger">Pausado</span>'}</td></tr>`;
+  });
+  h+='</tbody></table></div>';$('tgProgramadosContent').innerHTML=h;
+}
+
+async function loadTgHistorial(){
+  const r=await api('/api/tg/historial?u='+userId);
+  if(!r.ok){$('tgHistorialContent').innerHTML='<div class="empty-state"><p>Error al cargar historial</p></div>';return}
+  const h_data=r.historial||[];
+  if(!h_data.length){$('tgHistorialContent').innerHTML='<div class="empty-state"><div class="icon">📜</div><p>No hay historial de envios.</p></div>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Grupo</th><th>Resultado</th><th>Fecha</th></tr></thead><tbody>';
+  h_data.forEach((x,i)=>{
+    const res_badge=x.resultado==='enviado'?'<span class="badge badge-success">Enviado</span>':'<span class="badge badge-danger">'+esc(x.resultado||'Error')+'</span>';
+    h+=`<tr><td>${i+1}</td><td style="font-size:12px;max-width:250px;overflow:hidden;text-overflow:ellipsis">${esc(x.grupo_link||'?')}</td><td>${res_badge}</td><td style="font-size:11px">${esc(x.fecha||'—')}</td></tr>`;
+  });
+  h+='</tbody></table></div>';$('tgHistorialContent').innerHTML=h;
+}
+
+async function loadTgAutoResp(){
+  const r=await api('/api/tg/autoresponder?u='+userId);
+  if(!r.ok){$('tgAutoRespContent').innerHTML='<div class="empty-state"><p>Error al cargar auto-responder</p></div>';return}
+  let h='';
+  if(r.config){
+    h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">`;
+    h+=`<h3 style="margin:0 0 10px">Estado: ${r.config.activo?'<span class="badge badge-success">Activo</span>':'<span class="badge badge-danger">Desactivado</span>'}</h3>`;
+    if(r.config.contacto)h+=`<p style="font-size:13px;color:var(--text2)">Contacto: <b>${esc(r.config.contacto)}</b></p>`;
+    h+=`</div>`;
+  }else{
+    h+=`<div class="empty-state"><div class="icon">🤖</div><p>Auto-responder no configurado.<br>Usa el bot de Telegram para configurarlo.</p></div>`;
+  }
+  if(r.keywords&&r.keywords.length){
+    h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;border:1px solid var(--border)"><h3 style="margin:0 0 10px">Palabras Clave (${r.keywords.length})</h3>`;
+    h+=`<div style="display:flex;flex-wrap:wrap;gap:8px">`;
+    r.keywords.forEach(k=>{h+=`<span style="background:var(--bg3);padding:4px 10px;border-radius:6px;font-size:13px">${esc(k.palabra)}</span>`});
+    h+=`</div></div>`;
+  }
+  $('tgAutoRespContent').innerHTML=h||'<div class="empty-state"><div class="icon">🤖</div><p>Sin configuracion de auto-responder.</p></div>';
 }
 
 // --- GRUPOS ---
@@ -983,8 +1129,9 @@ async function loadGrupos(){
   g.forEach((x,i)=>{const l=x.link||x.jid||'?';h+=`<tr><td>${i+1}</td><td style="font-size:12px">${l.length>50?l.slice(0,50)+'...':l}</td><td><button class="btn btn-danger btn-sm" onclick="eliminarGrupo('${encodeURIComponent(l)}')">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('gruposContent').innerHTML=h;
 }
-async function eliminarGrupo(l){const r=await api('/api/grupos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:decodeURIComponent(l)})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadGrupos()}
+async function eliminarGrupo(l){if(!requireMembresia())return;const r=await api('/api/grupos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:decodeURIComponent(l)})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadGrupos()}
 async function detectarGrupos(){
+  if(!requireMembresia())return;
   $('gruposContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Detectando...</div>';
   const r=await api('/api/detectar_cliente?u='+userId);
   if(!r.ok){toast('Error: '+(r.error||''),'error');loadGrupos();return}
@@ -993,7 +1140,7 @@ async function detectarGrupos(){
   g.forEach((x,i)=>{h+=`<tr><td><input type="checkbox" class="dch" value="${i}" checked></td><td>${i+1}</td><td>${x.subject||'?'}</td><td>${x.size||'?'}</td></tr>`});
   h+='</tbody></table></div>';window._dg=g;$('gruposContent').innerHTML=h;
 }
-async function agregarTodos(){const ch=document.querySelectorAll('.dch:checked'),g=window._dg||[];let n=0;for(const c of ch){const x=g[parseInt(c.value)];if(x&&x.id){await api('/api/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:x.id})});n++}}toast(n+' grupos agregados','success');loadGrupos()}
+async function agregarTodos(){if(!requireMembresia())return;const ch=document.querySelectorAll('.dch:checked'),g=window._dg||[];let n=0;for(const c of ch){const x=g[parseInt(c.value)];if(x&&x.id){await api('/api/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:x.id})});n++}}toast(n+' grupos agregados','success');loadGrupos()}
 
 // --- MENSAJES ---
 async function loadMensajes(){
@@ -1006,12 +1153,12 @@ async function loadMensajes(){
   h+='</tbody></table></div>';$('mensajesContent').innerHTML=h;
 }
 function showCrearMensaje(){showModal(`<h3>➕ Crear Mensaje</h3><div class="form-group"><label>Nombre</label><input id="msgN" placeholder="Ej: Promo Enero"></div><div class="form-group"><label>Texto</label><textarea id="msgT" rows="5" placeholder="Tu mensaje...&#10;Variables: {nombre} {numero}"></textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearMensaje()">Crear</button></div>`)}
-async function crearMensaje(){const n=$('msgN').value.trim(),t=$('msgT').value.trim();if(!n||!t){toast('Completa campos','error');return}closeModal();const r=await api('/api/mensajes/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,texto:t})});toast(r.ok?'Creado':'Error',r.ok?'success':'error');loadMensajes()}
+async function crearMensaje(){if(!requireMembresia())return;const n=$('msgN').value.trim(),t=$('msgT').value.trim();if(!n||!t){toast('Completa campos','error');return}closeModal();const r=await api('/api/mensajes/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,texto:t})});toast(r.ok?'Creado':'Error',r.ok?'success':'error');loadMensajes()}
 async function editarMensaje(id){const r=await api('/api/mensajes?u='+userId);const m=(r.mensajes||[]).find(x=>x.id===id);if(!m)return;showModal(`<h3>✏ Editar</h3><div class="form-group"><label>Nombre</label><input id="eN" value="${m.nombre||''}"></div><div class="form-group"><label>Texto</label><textarea id="eT" rows="5">${m.texto||''}</textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="guardarMsg(${id})">Guardar</button></div>`)}
-async function guardarMsg(id){closeModal();const r=await api('/api/mensajes/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id,nombre:$('eN').value.trim(),texto:$('eT').value.trim()})});toast(r.ok?'Editado':'Error',r.ok?'success':'error');loadMensajes()}
-async function duplicarMensaje(id){const r=await api('/api/mensajes/duplicar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Duplicado':'Error',r.ok?'success':'error');loadMensajes()}
+async function guardarMsg(id){if(!requireMembresia())return;closeModal();const r=await api('/api/mensajes/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id,nombre:$('eN').value.trim(),texto:$('eT').value.trim()})});toast(r.ok?'Editado':'Error',r.ok?'success':'error');loadMensajes()}
+async function duplicarMensaje(id){if(!requireMembresia())return;const r=await api('/api/mensajes/duplicar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Duplicado':'Error',r.ok?'success':'error');loadMensajes()}
 function eliminarMensaje(id){showModal(`<h3>🗑 Eliminar?</h3><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confElimMsg(${id})">Eliminar</button></div>`)}
-async function confElimMsg(id){closeModal();await api('/api/mensajes/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminado','success');loadMensajes()}
+async function confElimMsg(id){if(!requireMembresia())return;closeModal();await api('/api/mensajes/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminado','success');loadMensajes()}
 
 // --- ENVIOS ---
 async function loadEnvios(){
@@ -1023,8 +1170,8 @@ async function loadEnvios(){
   if(!e.length){$('enviosHistorial').innerHTML='<div class="empty-state"><p>Sin envios</p></div>'}
   else{let h='<table><thead><tr><th>Fecha</th><th>Mensaje</th><th>Grupos</th><th>OK</th><th>Error</th></tr></thead><tbody>';e.slice(0,20).forEach(x=>{h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.nombre||x.mensaje_id||'?'}</td><td>${x.total_grupos||'?'}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td></tr>`});h+='</tbody></table>';$('enviosHistorial').innerHTML=h}
 }
-function enviarUnico(id,n){showModal(`<h3>📤 Enviar</h3><p>Enviar <b>"${n}"</b> a todos tus grupos?</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="confEnvio(${id})">Enviar</button></div>`)}
-async function confEnvio(id){closeModal();toast('Enviando...','success');const r=await api('/api/enviar_unico',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje_id:id})});toast(r.ok?'Envio: '+(r.exitosos||0)+' ok, '+(r.fallidos||0)+' error':'Error: '+(r.error||''),r.ok?'success':'error');loadEnvios()}
+function enviarUnico(id,n){if(!requireMembresia())return;showModal(`<h3>📤 Enviar</h3><p>Enviar <b>"${n}"</b> a todos tus grupos?</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="confEnvio(${id})">Enviar</button></div>`)}
+async function confEnvio(id){if(!requireMembresia())return;closeModal();toast('Enviando...','success');const r=await api('/api/enviar_unico',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje_id:id})});toast(r.ok?'Envio: '+(r.exitosos||0)+' ok, '+(r.fallidos||0)+' error':'Error: '+(r.error||''),r.ok?'success':'error');loadEnvios()}
 
 // --- PROGRAMADOS ---
 async function loadProgramados(){
@@ -1069,6 +1216,7 @@ async function loadConfig(){
   </div><button class="btn btn-primary" onclick="guardarConfig()">💾 Guardar</button>`;
 }
 async function guardarConfig(){
+  if(!requireMembresia())return;
   const r=await api('/api/envio_config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,delay_seg:parseInt($('cd').value)||10,lote_tamano:parseInt($('cl').value)||0,lote_pausa_seg:parseInt($('cp').value)||30,hora_inicio:parseInt($('chi').value)||0,hora_fin:parseInt($('chf').value)||24})});
   toast(r.ok?'Guardado':'Error',r.ok?'success':'error');
 }
@@ -1182,6 +1330,7 @@ async function agregarNumeroManual(){
   else{toast('Error','error')}
 }
 async function enviarPersonal(){
+  if(!requireMembresia())return;
   const msg=$('epMensaje').value.trim();
   if(!msg){toast('Escribe un mensaje primero','error');return}
   const cuenta=$('epCuenta').value;
@@ -1249,6 +1398,7 @@ async function cargarMiembros(){
   $('miembrosContent').innerHTML=h;
 }
 async function enviarAMiembros(){
+  if(!requireMembresia())return;
   const grupo=$('emGrupo').value,msg=$('emMensaje').value.trim();
   if(!grupo){toast('Selecciona un grupo','error');return}
   if(!msg){toast('Escribe un mensaje','error');return}
@@ -1257,7 +1407,7 @@ async function enviarAMiembros(){
   const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,grupo,mensaje:msg})});
   toast(r.ok?'Envio a miembros iniciado':'Error: '+(r.error||''),r.ok?'success':'error');
 }
-async function agregarMiembrosAGrupo(){
+async function agregarMiembrosAGrupo(){if(!requireMembresia())return;
   const origen=$('emGrupo').value,destino=$('emDestino').value;
   if(!origen){toast('Selecciona grupo origen','error');return}
   if(!destino){toast('Selecciona grupo destino','error');return}
@@ -1271,6 +1421,19 @@ async function agregarMiembrosAGrupo(){
 // --- STATS ---
 async function loadStats(){
   if(!userId){$('statsContent').innerHTML='<div class="empty-state"><p>Inicia sesion primero</p></div>';return}
+  if(currentPlatform==='tg'){
+    const r=await api('/api/tg/stats?u='+userId);
+    if(!r.ok||!r.stats){$('statsContent').innerHTML='<div class="empty-state"><div class="icon">📈</div><p>Sin estadisticas TG disponibles.</p></div>';return}
+    const s=r.stats;
+    let h='<div class="grid">';
+    h+=`<div class="card"><div class="card-title">📤 Total Envios</div><div style="font-size:28px;font-weight:bold;color:var(--accent)">${s.total_envios||0}</div></div>`;
+    h+=`<div class="card"><div class="card-title">Exitosos</div><div style="font-size:28px;font-weight:bold;color:var(--success)">${s.exitosos||0}</div></div>`;
+    h+=`<div class="card"><div class="card-title">Fallidos</div><div style="font-size:28px;font-weight:bold;color:var(--danger)">${s.fallidos||0}</div></div>`;
+    h+=`<div class="card"><div class="card-title">🌐 Grupos</div><div style="font-size:28px;font-weight:bold;color:var(--accent2)">${s.grupos||0}</div></div>`;
+    h+=`<div class="card"><div class="card-title">👤 Cuentas</div><div style="font-size:28px;font-weight:bold">${s.cuentas||0}</div></div>`;
+    h+=`<div class="card"><div class="card-title">📋 Campanas</div><div style="font-size:28px;font-weight:bold">${s.campanas||0} <span style="font-size:14px;color:var(--success)">(${s.campanas_activas||0} activas)</span></div></div>`;
+    h+='</div>';$('statsContent').innerHTML=h;return;
+  }
   const r=await api('/api/grupo_stats?u='+userId);
   if(!r.ok){$('statsContent').innerHTML='<div class="empty-state"><div class="icon">\ud83d\udcca</div><p>Sin estadisticas disponibles.</p></div>';return}
   const s=r.stats||[];
@@ -1305,6 +1468,7 @@ async function loadCuentasTg(){
   $('cuentasTgContent').innerHTML=h;
 }
 async function agregarCuentaTg(){
+  if(!requireMembresia())return;
   const nombre=$('tgCuentaNombre').value.trim();
   const tel=$('tgCuentaTel').value.trim();
   if(!nombre){toast('Ingresa un nombre para la cuenta','error');return}
@@ -1540,6 +1704,7 @@ function showCrearPlantilla(){
     <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearPlantilla()">Guardar</button></div>`);
 }
 async function crearPlantilla(){
+  if(!requireMembresia())return;
   const n=$('ptN').value.trim(),m=$('ptM').value.trim();
   if(!n||!m){toast('Completa los campos','error');return}
   closeModal();
