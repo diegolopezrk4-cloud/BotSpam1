@@ -365,6 +365,10 @@ function esGrupoReal(groupId, groupMetadata) {
     if (groupMetadata) {
         if (groupMetadata.isCommunityAnnounce) return false;
         if (groupMetadata.isCommunity && groupMetadata.linkedParent) return false;
+        // Filtrar grupos de solo lectura (solo admins pueden escribir)
+        if (groupMetadata.announce === true) return false;
+        // Filtrar newsletters/canales
+        if (groupMetadata.isNewsletter) return false;
     }
     return true;
 }

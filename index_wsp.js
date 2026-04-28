@@ -440,7 +440,7 @@ poll();
                 return res.end(JSON.stringify({ ok: true, activas }));
             }
 
-            // GET /api/detectar?u=USER_ID — Detectar grupos de WhatsApp
+            // GET /api/detectar?u=USER_ID — Detectar grupos de WhatsApp (solo donde se puede comentar)
             if (url.pathname === "/api/detectar" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
@@ -448,8 +448,12 @@ poll();
                 try {
                     const allGroups = await botSock.groupFetchAllParticipating();
                     const grupos = [];
+                    let filtrados = 0;
                     for (const [jid, meta] of Object.entries(allGroups)) {
-                        if (!jid.endsWith("@g.us")) continue;
+                        if (!motor.esGrupoReal(jid, meta)) {
+                            filtrados++;
+                            continue;
+                        }
                         grupos.push({
                             jid,
                             subject: meta.subject || "Sin nombre",
@@ -458,7 +462,7 @@ poll();
                         });
                     }
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, grupos }));
+                    return res.end(JSON.stringify({ ok: true, grupos, filtrados }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -1585,7 +1589,7 @@ async function handleFSM(jid, msg, text, trimmed, state) {
                 // ============================================================
                 // CAMBIO: Detectar solo GRUPOS reales (no canales/newsletters)
                 // ============================================================
-                await send(jid, "\u{1F50D} Buscando grupos en el WhatsApp del bot...\n\u26A0 Solo se mostraran *grupos reales* (no canales).");
+                await send(jid, "\u{1F50D} Buscando grupos en el WhatsApp del bot...\n\u26A0 Solo se mostraran *grupos donde se puede comentar* (no canales, ni solo lectura).");
                 try {
                     const allGroups = await botSock.groupFetchAllParticipating();
                     const groupIds = Object.keys(allGroups);
@@ -1600,11 +1604,12 @@ async function handleFSM(jid, msg, text, trimmed, state) {
                     }
 
                     if (!realGroups.length) {
-                        return await send(jid, "\u274C El bot no esta en ningun grupo real (solo canales/newsletters encontrados).\n\nEscribe *0* para volver.");
+                        return await send(jid, "\u274C No se encontraron grupos donde se pueda comentar.\n\nSolo se encontraron canales, grupos de solo lectura o newsletters.\n\nEscribe *0* para volver.");
                     }
 
+                    const filtrados = groupIds.length - realGroups.length;
                     let texto = `\u{1F50D} *${realGroups.length} GRUPOS ENCONTRADOS*\n`;
-                    texto += `(${groupIds.length - realGroups.length} canales/newsletters filtrados)\n\n`;
+                    texto += `(${filtrados} canales/solo lectura/newsletters filtrados)\n\n`;
                     for (let i = 0; i < realGroups.length; i++) {
                         texto += `*${i + 1}.* ${realGroups[i].name} (${realGroups[i].members})\n`;
                     }
