@@ -362,6 +362,8 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="tgcampanas" data-plat="tg"><span class="icon">📋</span><span>Campanas TG</span></a>
       <a href="#" data-section="tgprogramados" data-plat="tg"><span class="icon">⏰</span><span>Programados TG</span></a>
       <a href="#" data-section="tghistorial" data-plat="tg"><span class="icon">📜</span><span>Historial TG</span></a>
+      <a href="#" data-section="tgdetectar" data-plat="tg"><span class="icon">🔍</span><span>Detectar Grupos TG</span></a>
+      <a href="#" data-section="tgstats" data-plat="tg"><span class="icon">📈</span><span>Stats TG</span></a>
       <div class="nav-group">Herramientas</div>
       <a href="#" data-section="plantillas"><span class="icon">📋</span><span>Plantillas</span></a>
       <a href="#" data-section="historial" data-plat="wsp"><span class="icon">📜</span><span>Historial WSP</span></a>
@@ -807,6 +809,41 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div id="tgListaNegraContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
+    <!-- DETECTAR GRUPOS TG -->
+    <div class="section" id="sec-tgdetectar">
+      <h2>🔍 Detectar Grupos Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Escanea tus grupos de Telegram automaticamente usando una de tus cuentas vinculadas.</p>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent)">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+            <label>Selecciona cuenta para escanear</label>
+            <select id="tgDetectCuenta" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%">
+              <option value="">-- Seleccionar cuenta --</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="detectarGruposTg()">🔍 Detectar Todos</button>
+        </div>
+      </div>
+      <div id="tgDetectarResult" style="display:none;background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3 style="margin:0;font-size:16px">Grupos detectados</h3>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-success btn-sm" onclick="agregarTodosDetectados()">✅ Agregar Todos</button>
+            <button class="btn btn-outline btn-sm" onclick="agregarSeleccionados()">➕ Agregar Seleccionados</button>
+          </div>
+        </div>
+        <div id="tgDetectarList"></div>
+      </div>
+      <div id="tgDetectarLoading" style="display:none" class="loading-overlay"><span class="spinner"></span> Escaneando grupos... esto puede tardar unos segundos</div>
+    </div>
+
+    <!-- STATS TG -->
+    <div class="section" id="sec-tgstats">
+      <h2>📈 Estadisticas Telegram</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Resumen de tu actividad en Telegram.</p>
+      <div class="grid" id="tgStatsCards"></div>
+    </div>
+
     <!-- PLANTILLAS -->
     <div class="section" id="sec-plantillas">
       <h2>📋 Plantillas de Mensajes</h2>
@@ -1084,7 +1121,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:verRespuestasPromo,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:verRespuestasPromo,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
     if(loaders[sec])loaders[sec]();
   });
 });
@@ -1230,12 +1267,11 @@ async function loadTgCampanas(){
   c.forEach(x=>{
     const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
     h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
-    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div>${estado} <button class="btn btn-danger btn-sm" onclick="delTgCampanaPanel(${x.id})" style="margin-left:8px">🗑 Eliminar</button></div></div>`;
-    h+=`<p style="font-size:12px;color:var(--text2);margin-bottom:5px">${esc((x.mensaje||'').slice(0,100))}</p>`;
-    h+=`<div style="display:flex;gap:15px;font-size:12px;color:var(--text2)"><span>📤 Enviados: <b style="color:var(--success)">${x.enviados||0}</b></span><span>❌ Errores: <b style="color:var(--danger)">${x.errores||0}</b></span>`;
-    h+=`<span>⏱ Intervalo: ${x.intervalo_min||30}s - ${x.intervalo_max||60}s</span></div>`;
-    if(x.sesiones&&x.sesiones.length)h+=`<p style="font-size:11px;color:var(--text2);margin-top:5px">Sesiones: ${x.sesiones.map(s=>esc(s)).join(', ')}</p>`;
-    if(x.grupos&&x.grupos.length)h+=`<p style="font-size:11px;color:var(--text2);margin-top:3px">Grupos: ${x.grupos.length} asignados</p>`;
+    const runBtn=x.en_ejecucion?`<button class="btn btn-danger btn-sm" onclick="detenerTgCampana(${x.id})">⏹ Detener</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarTgCampana(${x.id})">🚀 Iniciar</button>`;
+    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div style="display:flex;gap:6px;align-items:center">${estado} ${runBtn} <button class="btn btn-primary btn-sm" onclick="showEditTgCampMsg(${x.id},${JSON.stringify(esc(x.mensaje||''))})">✏ Editar</button> <button class="btn btn-danger btn-sm" onclick="delTgCampanaPanel(${x.id})">🗑</button></div></div>`;
+    h+=`<p style="font-size:12px;color:var(--text2);margin-bottom:5px">${x.mensaje?esc(x.mensaje.slice(0,100)):'<i style="color:var(--danger)">Sin mensaje - haz click en Editar</i>'}</p>`;
+    h+=`<div style="display:flex;gap:15px;font-size:12px;color:var(--text2);flex-wrap:wrap"><span>📤 Enviados: <b style="color:var(--success)">${x.enviados||0}</b></span><span>❌ Errores: <b style="color:var(--danger)">${x.errores||0}</b></span>`;
+    h+=`<span>⏱ Intervalo: ${x.intervalo_min||30}s - ${x.intervalo_max||60}s</span><span>🌐 Grupos: ${x.grupos||0}</span><span>👤 Cuentas: ${x.sesiones||0}</span></div>`;
     h+=`</div>`;
   });
   $('tgCampanasContent').innerHTML=h;
@@ -1249,6 +1285,27 @@ async function crearTgCampanaPanel(){
 }
 async function delTgCampanaPanel(id){if(!requireMembresia())return;showModal('<h3>Eliminar Campana?</h3><p>Se eliminara la campana y sus configuraciones.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarDelTgCamp('+id+')">Eliminar</button></div>')}
 async function confirmarDelTgCamp(id){closeModal();const r=await api('/api/tg/campanas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Eliminada':'Error',r.ok?'success':'error');loadTgCampanas()}
+async function iniciarTgCampana(id){
+  if(!requireMembresia())return;
+  const r=await api('/api/tg/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});
+  toast(r.ok?(r.msg||'Campana iniciada'):(r.error||'Error'),r.ok?'success':'error');loadTgCampanas();
+}
+async function detenerTgCampana(id){
+  if(!requireMembresia())return;
+  const r=await api('/api/tg/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});
+  toast(r.ok?'Campana detenida':(r.error||'Error'),r.ok?'success':'error');loadTgCampanas();
+}
+function showEditTgCampMsg(id,msg){
+  if(!requireMembresia())return;
+  showModal('<h3>Editar Campana TG</h3><div class="form-group"><label>Mensaje a enviar</label><textarea id="tgCampEditMsg" rows="6" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">'+msg+'</textarea></div><div class="form-group"><label>Foto (opcional)</label><input type="file" id="tgCampEditFoto" accept="image/*" style="padding:5px"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="editTgCampMsgPanel('+id+')">Guardar</button></div>');
+}
+async function editTgCampMsgPanel(id){
+  const msg=$('tgCampEditMsg').value.trim();
+  if(!msg){toast('Escribe un mensaje','error');return}
+  closeModal();
+  const r=await api('/api/tg/mensajes/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id,nombre:'',texto:msg})});
+  toast(r.ok?'Campana actualizada':'Error',r.ok?'success':'error');loadTgCampanas();
+}
 
 async function loadTgProgramados(){
   const r=await api('/api/tg/programados?u='+userId);
@@ -1342,6 +1399,79 @@ async function loadTgListaNegra(){
 async function addTgListaNegraPanel(){if(!requireMembresia())return;const g=$('tgListaNegraInput').value.trim();if(!g){toast('Ingresa el grupo','error');return}const r=await api('/api/tg/listanegra/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,grupo:g})});toast(r.ok?'Bloqueado':'Error',r.ok?'success':'error');if(r.ok){$('tgListaNegraInput').value='';loadTgListaNegra()}}
 async function delTgLnPanel(g){if(!requireMembresia())return;const r=await api('/api/tg/listanegra/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,grupo:decodeURIComponent(g)})});toast(r.ok?'Desbloqueado':'Error',r.ok?'success':'error');loadTgListaNegra()}
 async function limpiarTgListaNegraPanel(){if(!requireMembresia())return;const r=await api('/api/tg/listanegra/limpiar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});toast(r.ok?'Limpiado':'Error',r.ok?'success':'error');loadTgListaNegra()}
+
+// --- DETECTAR GRUPOS TG ---
+let tgDetectedGroups=[];
+async function loadTgDetectar(){
+  const sel=$('tgDetectCuenta');
+  sel.innerHTML='<option value="">-- Seleccionar cuenta --</option>';
+  const r=await api('/api/sesiones_tg?u='+userId);
+  if(r.ok&&r.sesiones){
+    r.sesiones.forEach(s=>{sel.innerHTML+='<option value="'+s.nombre+'">'+s.nombre+' ('+s.telefono+')</option>'});
+  }
+  $('tgDetectarResult').style.display='none';
+  $('tgDetectarLoading').style.display='none';
+}
+async function detectarGruposTg(){
+  if(!requireMembresia())return;
+  const cuenta=$('tgDetectCuenta').value;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
+  $('tgDetectarLoading').style.display='flex';
+  $('tgDetectarResult').style.display='none';
+  const r=await api('/api/tg/detectar?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
+  $('tgDetectarLoading').style.display='none';
+  if(!r.ok){toast('Error: '+(r.error||'No se pudo detectar'),'error');return}
+  tgDetectedGroups=r.grupos||[];
+  if(!tgDetectedGroups.length){toast('No se detectaron grupos','info');return}
+  $('tgDetectarResult').style.display='block';
+  let html='';
+  tgDetectedGroups.forEach((g,i)=>{
+    html+='<div style="display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid var(--border)">';
+    html+='<input type="checkbox" id="tgDetGrp'+i+'" checked style="width:18px;height:18px">';
+    html+='<div style="flex:1"><b>'+esc(g.title||'Sin nombre')+'</b><br><span style="font-size:12px;color:var(--text2)">'+esc(g.link||'ID: '+g.id)+'</span></div>';
+    html+='</div>';
+  });
+  $('tgDetectarList').innerHTML=html;
+  toast(tgDetectedGroups.length+' grupos detectados','success');
+}
+async function agregarTodosDetectados(){
+  if(!requireMembresia())return;
+  let added=0;
+  for(const g of tgDetectedGroups){
+    const link=g.link||('https://t.me/c/'+g.id);
+    const r=await api('/api/tg/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link})});
+    if(r.ok)added++;
+  }
+  toast(added+' grupos agregados','success');
+  $('tgDetectarResult').style.display='none';
+}
+async function agregarSeleccionados(){
+  if(!requireMembresia())return;
+  let added=0;
+  for(let i=0;i<tgDetectedGroups.length;i++){
+    const cb=$('tgDetGrp'+i);
+    if(cb&&cb.checked){
+      const g=tgDetectedGroups[i];
+      const link=g.link||('https://t.me/c/'+g.id);
+      const r=await api('/api/tg/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link})});
+      if(r.ok)added++;
+    }
+  }
+  toast(added+' grupos agregados','success');
+  $('tgDetectarResult').style.display='none';
+}
+
+// --- STATS TG ---
+async function loadTgStats(){
+  const r=await api('/api/tg/stats?u='+userId);
+  if(!r.ok){$('tgStatsCards').innerHTML='<div class="empty-state"><p>Error cargando stats</p></div>';return}
+  $('tgStatsCards').innerHTML=`
+    <div class="card"><div class="card-title">✈️ Cuentas</div><div style="font-size:28px;font-weight:bold;margin-top:10px">${r.cuentas||0}</div></div>
+    <div class="card"><div class="card-title">🌐 Grupos</div><div style="font-size:28px;font-weight:bold;margin-top:10px">${r.grupos||0}</div></div>
+    <div class="card"><div class="card-title">📋 Campanas</div><div style="font-size:28px;font-weight:bold;margin-top:10px">${r.campanas_total||0}</div><div style="font-size:12px;color:var(--text2)">${r.campanas_activas||0} activas</div></div>
+    <div class="card"><div class="card-title">📤 Enviados</div><div style="font-size:28px;font-weight:bold;margin-top:10px">${r.enviados_total||0}</div><div style="font-size:12px;color:var(--text2)">${r.errores_total||0} errores</div></div>
+  `;
+}
 
 // --- GRUPOS ---
 async function loadGrupos(){

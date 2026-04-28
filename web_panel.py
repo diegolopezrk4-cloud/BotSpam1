@@ -168,10 +168,19 @@ async def api_sesiones_tg(request):
     if not user_id:
         return web.json_response({"ok": False, "error": "falta u"}, status=400)
     sesiones = await db.get_sesiones(user_id)
-    return web.json_response({
-        "ok": True,
-        "sesiones": [{"nombre": s["nombre"], "telefono": s["telefono"]} for s in sesiones]
-    })
+    result = []
+    for s in sesiones:
+        try:
+            fecha = s["fecha_registro"]
+        except (KeyError, IndexError):
+            fecha = ""
+        result.append({
+            "nombre": s["nombre"],
+            "telefono": s["telefono"],
+            "origen": "panel",
+            "fecha": fecha or "",
+        })
+    return web.json_response({"ok": True, "sesiones": result})
 
 
 async def api_sesiones_tg_eliminar(request):
