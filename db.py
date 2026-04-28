@@ -130,6 +130,45 @@ async def init_db():
                 FOREIGN KEY(user_id) REFERENCES usuarios(telegram_id)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tg_mensajes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                nombre TEXT,
+                texto TEXT,
+                foto_path TEXT DEFAULT NULL,
+                fecha_creacion TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY(user_id) REFERENCES usuarios(telegram_id)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tg_envios_unicos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                mensaje_id INTEGER,
+                grupos_total INTEGER DEFAULT 0,
+                grupos_ok INTEGER DEFAULT 0,
+                grupos_error INTEGER DEFAULT 0,
+                estado TEXT DEFAULT 'pendiente',
+                fecha TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY(user_id) REFERENCES usuarios(telegram_id),
+                FOREIGN KEY(mensaje_id) REFERENCES tg_mensajes(id)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tg_envios_programados (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                mensaje_id INTEGER,
+                hora INTEGER DEFAULT 0,
+                minuto INTEGER DEFAULT 0,
+                repetir INTEGER DEFAULT 0,
+                activo INTEGER DEFAULT 1,
+                ultimo_envio TEXT DEFAULT NULL,
+                FOREIGN KEY(user_id) REFERENCES usuarios(telegram_id),
+                FOREIGN KEY(mensaje_id) REFERENCES tg_mensajes(id)
+            )
+        """)
         await db.commit()
 
 # ─────────────────────────────────────────
@@ -647,4 +686,130 @@ async def get_dashboard(user_id):
         "responder_activo": bool(config and config['activo']),
         "keywords": len(keywords),
     }
+
+# ─────────────────────────────────────────
+#   MENSAJES TG (CRUD)
+# ─────────────────────────────────────────
+async def tg_get_mensajes(user_id):
+    async with _connect() as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute("SELECT * FROM tg_mensajes WHERE user_id=? ORDER BY fecha_creacion DESC", (user_id,)) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+async def tg_get_mensaje_by_id(msg_id):
+    async with _connect() as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute("SELECT * FROM tg_mensajes WHERE id=?", (msg_id,)) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+async def tg_crear_mensaje(user_id, nombre, texto, foto_path=None):
+    async with _connect() as conn:
+        cur = await conn.execute("INSERT INTO tg_mensajes (user_id, nombre, texto, foto_path) VALUES (?, ?, ?, ?)", (user_id, nombre, texto, foto_path))
+        await conn.commit()
+        return cur.lastrowid
+
+async def tg_editar_mensaje(msg_id, texto, foto_path=None):
+    async with _connect() as conn:
+        if foto_path is not None:
+            await conn.execute("UPDATE tg_mensajes SET texto=?, foto_path=? WHERE id=?", (texto, foto_path, msg_id))
+        else:
+            await conn.execute("UPDATE tg_mensajes SET texto=? WHERE id=?", (texto, msg_id))
+        await conn.commit()
+
+async def tg_eliminar_mensaje(msg_id):
+    async with _connect() as conn:
+        await conn.execute("DELETE FROM tg_mensajes WHERE id=?", (msg_id,))
+        await conn.commit()
+
+async def tg_duplicar_mensaje(msg_id):
+    msg = await tg_get_mensaje_by_id(msg_id)
+    if not msg:
+        return None
+    return await tg_crear_mensaje(msg["user_id"], msg["nombre"] + "_copia", msg["texto"], msg.get("foto_path"))
+
+# ─────────────────────────────────────────
+#   ENVIOS UNICOS TG
+# ─────────────────────────────────────────
+async def tg_crear_envio_unico(user_id, mensaje_id, grupos_total):
+    async with _connect() as conn:
+        cur = await conn.execute("INSERT INTO tg_envios_unicos (user_id, mensaje_id, grupos_total) VALUES (?, ?, ?)", (user_id, mensaje_id, grupos_total))
+        await conn.commit()
+        return cur.lastrowid
+
+async def tg_actualizar_envio_unico(envio_id, ok, error, estado):
+    async with _connect() as conn:
+        await conn.execute("UPDATE tg_envios_unicos SET grupos_ok=?, grupos_error=?, estado=? WHERE id=?", (ok, error, estado, envio_id))
+        await conn.commit()
+
+async def tg_get_envios_unicos(user_id):
+    async with _connect() as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute("""
+            SELECT eu.*, m.nombre as mensaje_nombre
+            FROM tg_envios_unicos eu LEFT JOIN tg_mensajes m ON eu.mensaje_id = m.id
+            WHERE eu.user_id=? ORDER BY eu.fecha DESC LIMIT 20
+        """, (user_id,)) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+# ─────────────────────────────────────────
+#   ENVIOS PROGRAMADOS TG
+# ─────────────────────────────────────────
+async def tg_crear_envio_programado(user_id, mensaje_id, hora, minuto, repetir=0):
+    async with _connect() as conn:
+        cur = await conn.execute("INSERT INTO tg_envios_programados (user_id, mensaje_id, hora, minuto, repetir) VALUES (?, ?, ?, ?, ?)", (user_id, mensaje_id, hora, minuto, repetir))
+        await conn.commit()
+        return cur.lastrowid
+
+async def tg_get_envios_programados(user_id):
+    async with _connect() as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute("""
+            SELECT ep.*, m.nombre as mensaje_nombre
+            FROM tg_envios_programados ep LEFT JOIN tg_mensajes m ON ep.mensaje_id = m.id
+            WHERE ep.user_id=? ORDER BY ep.hora, ep.minuto
+        """, (user_id,)) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+async def tg_get_envios_programados_activos():
+    async with _connect() as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute("""
+            SELECT ep.*, m.nombre as mensaje_nombre, m.texto, m.foto_path
+            FROM tg_envios_programados ep LEFT JOIN tg_mensajes m ON ep.mensaje_id = m.id
+            WHERE ep.activo=1
+        """) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+async def tg_actualizar_ultimo_envio(prog_id):
+    async with _connect() as conn:
+        await conn.execute("UPDATE tg_envios_programados SET ultimo_envio=datetime('now') WHERE id=?", (prog_id,))
+        await conn.commit()
+
+async def tg_toggle_envio_programado(prog_id, activo):
+    async with _connect() as conn:
+        await conn.execute("UPDATE tg_envios_programados SET activo=? WHERE id=?", (1 if activo else 0, prog_id))
+        await conn.commit()
+
+async def tg_eliminar_envio_programado(prog_id):
+    async with _connect() as conn:
+        await conn.execute("DELETE FROM tg_envios_programados WHERE id=?", (prog_id,))
+        await conn.commit()
+
+# ─────────────────────────────────────────
+#   STATS POR GRUPO TG
+# ─────────────────────────────────────────
+async def tg_get_stats_por_grupo_resumen(user_id):
+    async with _connect() as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute("""
+            SELECT grupo_link,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN resultado='enviado' THEN 1 ELSE 0 END) as exitos,
+                   SUM(CASE WHEN resultado!='enviado' THEN 1 ELSE 0 END) as fallidos,
+                   MAX(fecha) as ultima_fecha
+            FROM historial_envios WHERE user_id=?
+            GROUP BY grupo_link ORDER BY total DESC LIMIT 50
+        """, (user_id,)) as cur:
+            return [dict(r) for r in await cur.fetchall()]
 

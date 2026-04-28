@@ -1,6 +1,6 @@
 const Database = require("better-sqlite3");
 const path = require("path");
-const config = require("./config");
+const config = require("./config_wsp");
 
 let db;
 
@@ -167,6 +167,39 @@ function init() {
             alternativas TEXT,
             FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
         );
+        CREATE TABLE IF NOT EXISTS mensajes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            nombre TEXT,
+            texto TEXT,
+            imagen_path TEXT DEFAULT NULL,
+            fecha_creacion TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+        CREATE TABLE IF NOT EXISTS envios_unicos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            mensaje_id INTEGER,
+            grupos_total INTEGER DEFAULT 0,
+            grupos_ok INTEGER DEFAULT 0,
+            grupos_error INTEGER DEFAULT 0,
+            estado TEXT DEFAULT 'pendiente',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            FOREIGN KEY(mensaje_id) REFERENCES mensajes(id)
+        );
+        CREATE TABLE IF NOT EXISTS envios_programados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            mensaje_id INTEGER,
+            hora INTEGER DEFAULT 0,
+            minuto INTEGER DEFAULT 0,
+            repetir INTEGER DEFAULT 0,
+            activo INTEGER DEFAULT 1,
+            ultimo_envio TEXT DEFAULT NULL,
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            FOREIGN KEY(mensaje_id) REFERENCES mensajes(id)
+        );
     `);
 
     // Migraciones
@@ -198,21 +231,42 @@ function getUsuario(wspId) {
 }
 
 function findUserByNumber(phoneNumber) {
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    // Limpiar el input (quitar sufijos si los tiene)
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+
+    // Busqueda exacta con sufijos comunes
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     const userLid = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(withLid);
     if (userLid) return userLid;
     const userWsp = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(withWsp);
     if (userWsp) return userWsp;
+
+    // Busqueda LIKE para LID con :device (ej: "12345:42@lid")
+    const likeUser = db.prepare("SELECT * FROM usuarios WHERE wsp_id LIKE ? LIMIT 1").get(cleanNum + ":%@lid");
+    if (likeUser) return likeUser;
+
+    // Busqueda exacta con el input original (por si ya viene con formato completo)
+    if (phoneNumber !== cleanNum) {
+        const exactUser = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(phoneNumber);
+        if (exactUser) return exactUser;
+    }
+
     return null;
 }
 
 function getAllJidsForNumber(phoneNumber) {
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
     const jids = [];
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     if (db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(withLid)) jids.push(withLid);
     if (db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(withWsp)) jids.push(withWsp);
+    // Buscar tambien JIDs con :device@lid
+    const lidDevices = db.prepare("SELECT wsp_id FROM usuarios WHERE wsp_id LIKE ?").all(cleanNum + ":%@lid");
+    for (const row of lidDevices) {
+        if (!jids.includes(row.wsp_id)) jids.push(row.wsp_id);
+    }
     return jids;
 }
 
@@ -281,10 +335,11 @@ function activarMembresia(wspId, dias) {
 }
 
 function activarMembresiaByNumber(phoneNumber, dias) {
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
     const expira = expiraPeru(dias);
     const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : "mensual";
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     let activated = false;
     const userLid = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(withLid);
     if (userLid) {
@@ -296,6 +351,12 @@ function activarMembresiaByNumber(phoneNumber, dias) {
         db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, withWsp);
         activated = true;
     }
+    // Buscar JIDs con :device@lid
+    const lidDevices = db.prepare("SELECT wsp_id FROM usuarios WHERE wsp_id LIKE ?").all(cleanNum + ":%@lid");
+    for (const row of lidDevices) {
+        db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, row.wsp_id);
+        activated = true;
+    }
     if (!activated) {
         db.prepare("INSERT OR IGNORE INTO usuarios (wsp_id, nombre) VALUES (?, '')").run(withWsp);
         db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, withWsp);
@@ -304,15 +365,20 @@ function activarMembresiaByNumber(phoneNumber, dias) {
 }
 
 function desactivarByNumber(phoneNumber) {
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     db.prepare("UPDATE usuarios SET activo = 0 WHERE wsp_id IN (?, ?)").run(withLid, withWsp);
+    // Tambien desactivar JIDs con :device@lid
+    db.prepare("UPDATE usuarios SET activo = 0 WHERE wsp_id LIKE ?").run(cleanNum + ":%@lid");
 }
 
 function banByNumber(phoneNumber) {
-    const withLid = phoneNumber + "@lid";
-    const withWsp = phoneNumber + "@s.whatsapp.net";
+    const cleanNum = phoneNumber.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+    const withLid = cleanNum + "@lid";
+    const withWsp = cleanNum + "@s.whatsapp.net";
     db.prepare("UPDATE usuarios SET activo = 0, plan = 'baneado' WHERE wsp_id IN (?, ?)").run(withLid, withWsp);
+    db.prepare("UPDATE usuarios SET activo = 0, plan = 'baneado' WHERE wsp_id LIKE ?").run(cleanNum + ":%@lid");
 }
 
 let botRealJid = null;
@@ -345,20 +411,27 @@ function tieneMembresia(wspId) {
         }
         return true;
     }
-    let altJid = null;
+    // Buscar en todos los formatos de JID alternativos
+    const altJids = [];
     if (wspId.endsWith("@lid")) {
-        altJid = num + "@s.whatsapp.net";
+        altJids.push(num + "@s.whatsapp.net");
+        // Si tiene :device, tambien probar sin device
+        if (wspId.includes(":")) altJids.push(num + "@lid");
     } else if (wspId.endsWith("@s.whatsapp.net")) {
-        altJid = num + "@lid";
+        altJids.push(num + "@lid");
     }
-    if (altJid) {
+    // Buscar tambien por LIKE para LID con :device
+    const lidDevices = db.prepare("SELECT * FROM usuarios WHERE wsp_id LIKE ? AND wsp_id != ? LIMIT 1").all(num + ":%@lid", wspId);
+    for (const ld of lidDevices) altJids.push(ld.wsp_id);
+
+    for (const altJid of altJids) {
         const altUser = getUsuario(altJid);
         if (altUser && altUser.activo) {
             if (altUser.fecha_expira) {
                 const expira = new Date(altUser.fecha_expira);
                 if (Date.now() > expira.getTime()) {
                     db.prepare("UPDATE usuarios SET activo = 0, plan = 'expirado' WHERE wsp_id = ?").run(altJid);
-                    return false;
+                    continue;
                 }
             }
             crearUsuario(wspId, user ? user.nombre : "");
@@ -832,6 +905,93 @@ function exportarCampanas(userId) {
 
 function getDb() { return db; }
 
+// --- MENSAJES (CRUD) ---
+function getMensajes(userId) {
+    return db.prepare("SELECT * FROM mensajes WHERE user_id = ? ORDER BY fecha_creacion DESC").all(userId);
+}
+
+function getMensajeById(id) {
+    return db.prepare("SELECT * FROM mensajes WHERE id = ?").get(id);
+}
+
+function crearMensaje(userId, nombre, texto, imagenPath = null) {
+    const result = db.prepare("INSERT INTO mensajes (user_id, nombre, texto, imagen_path) VALUES (?, ?, ?, ?)").run(userId, nombre, texto, imagenPath);
+    return result.lastInsertRowid;
+}
+
+function editarMensaje(id, texto, imagenPath) {
+    if (imagenPath !== undefined) {
+        db.prepare("UPDATE mensajes SET texto = ?, imagen_path = ? WHERE id = ?").run(texto, imagenPath, id);
+    } else {
+        db.prepare("UPDATE mensajes SET texto = ? WHERE id = ?").run(texto, id);
+    }
+}
+
+function editarNombreMensaje(id, nombre) {
+    db.prepare("UPDATE mensajes SET nombre = ? WHERE id = ?").run(nombre, id);
+}
+
+function eliminarMensaje(id) {
+    db.prepare("DELETE FROM mensajes WHERE id = ?").run(id);
+}
+
+// --- ENVIOS UNICOS ---
+function crearEnvioUnico(userId, mensajeId, gruposTotal) {
+    const result = db.prepare("INSERT INTO envios_unicos (user_id, mensaje_id, grupos_total) VALUES (?, ?, ?)").run(userId, mensajeId, gruposTotal);
+    return result.lastInsertRowid;
+}
+
+function actualizarEnvioUnico(id, ok, error, estado) {
+    db.prepare("UPDATE envios_unicos SET grupos_ok = ?, grupos_error = ?, estado = ? WHERE id = ?").run(ok, error, estado, id);
+}
+
+function getEnviosUnicos(userId) {
+    return db.prepare("SELECT eu.*, m.nombre as mensaje_nombre FROM envios_unicos eu LEFT JOIN mensajes m ON eu.mensaje_id = m.id WHERE eu.user_id = ? ORDER BY eu.fecha DESC LIMIT 20").all(userId);
+}
+
+// --- ENVIOS PROGRAMADOS ---
+function crearEnvioProgramado(userId, mensajeId, hora, minuto, repetir = 0) {
+    const result = db.prepare("INSERT INTO envios_programados (user_id, mensaje_id, hora, minuto, repetir) VALUES (?, ?, ?, ?, ?)").run(userId, mensajeId, hora, minuto, repetir);
+    return result.lastInsertRowid;
+}
+
+function getEnviosProgramados(userId) {
+    return db.prepare("SELECT ep.*, m.nombre as mensaje_nombre FROM envios_programados ep LEFT JOIN mensajes m ON ep.mensaje_id = m.id WHERE ep.user_id = ? ORDER BY ep.hora, ep.minuto").all(userId);
+}
+
+function getEnviosProgramadosActivos() {
+    return db.prepare("SELECT ep.*, m.nombre as mensaje_nombre, m.texto, m.imagen_path FROM envios_programados ep LEFT JOIN mensajes m ON ep.mensaje_id = m.id WHERE ep.activo = 1").all();
+}
+
+function actualizarUltimoEnvio(id) {
+    db.prepare("UPDATE envios_programados SET ultimo_envio = datetime('now') WHERE id = ?").run(id);
+}
+
+function toggleEnvioProgramado(id, activo) {
+    db.prepare("UPDATE envios_programados SET activo = ? WHERE id = ?").run(activo ? 1 : 0, id);
+}
+
+function eliminarEnvioProgramado(id) {
+    db.prepare("DELETE FROM envios_programados WHERE id = ?").run(id);
+}
+
+// --- DUPLICAR MENSAJE ---
+function duplicarMensaje(id) {
+    const msg = getMensajeById(id);
+    if (!msg) return null;
+    return crearMensaje(msg.user_id, msg.nombre + "_copia", msg.texto, msg.imagen_path);
+}
+
+// --- STATS POR GRUPO (MEJORADAS) ---
+function getGrupoStatsResumen(userId) {
+    return db.prepare(`
+        SELECT grupo_link, enviados, fallidos, exitos,
+               CASE WHEN enviados > 0 THEN ROUND(exitos * 100.0 / enviados, 1) ELSE 0 END as tasa_exito,
+               ultima_fecha
+        FROM grupo_stats WHERE user_id = ? ORDER BY enviados DESC LIMIT 50
+    `).all(userId);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -859,4 +1019,12 @@ module.exports = {
     getSinonimos, agregarSinonimo, eliminarSinonimo, limpiarSinonimos,
     getReporteDiario,
     exportarGrupos, importarGrupos, exportarCampanas,
+    // Mensajes y envios unicos
+    getMensajes, getMensajeById, crearMensaje, editarMensaje, editarNombreMensaje, eliminarMensaje,
+    crearEnvioUnico, actualizarEnvioUnico, getEnviosUnicos,
+    // Envios programados
+    crearEnvioProgramado, getEnviosProgramados, getEnviosProgramadosActivos,
+    actualizarUltimoEnvio, toggleEnvioProgramado, eliminarEnvioProgramado,
+    // Duplicar y stats
+    duplicarMensaje, getGrupoStatsResumen,
 };

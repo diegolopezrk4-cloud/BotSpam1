@@ -90,3 +90,70 @@ async def wsp_activar(wsp_id, dias):
 
 async def wsp_desactivar(wsp_id):
     return await _post("/api/desactivar", {"wsp_id": str(wsp_id)})
+
+# --- DETECTAR GRUPOS (VIA CUENTA CLIENTE) ---
+async def wsp_detectar_cliente(user_id, cuenta=None):
+    params = {"u": str(user_id)}
+    if cuenta:
+        params["cuenta"] = cuenta
+    return await _get("/api/detectar_cliente", params)
+
+# --- MENSAJES ---
+async def wsp_mensajes(user_id):
+    return await _get("/api/mensajes", {"u": str(user_id)})
+
+async def wsp_crear_mensaje(user_id, nombre, texto, imagen_path=None):
+    data = {"u": str(user_id), "nombre": nombre, "texto": texto}
+    if imagen_path:
+        data["imagen_path"] = imagen_path
+    return await _post("/api/mensajes/crear", data)
+
+async def wsp_editar_mensaje(mensaje_id, texto, imagen_path=None):
+    data = {"id": mensaje_id, "texto": texto}
+    if imagen_path is not None:
+        data["imagen_path"] = imagen_path
+    return await _post("/api/mensajes/editar", data)
+
+async def wsp_eliminar_mensaje(mensaje_id):
+    return await _post("/api/mensajes/del", {"id": mensaje_id})
+
+# --- ENVIO UNICO ---
+async def wsp_enviar_unico(user_id, mensaje_id, grupos_seleccionados=None):
+    data = {"u": str(user_id), "mensaje_id": mensaje_id}
+    if grupos_seleccionados:
+        data["grupos_seleccionados"] = grupos_seleccionados
+    return await _post("/api/enviar_unico", data)
+
+async def wsp_envios_unicos(user_id):
+    return await _get("/api/envios_unicos", {"u": str(user_id)})
+
+# --- DUPLICAR MENSAJE ---
+async def wsp_duplicar_mensaje(mensaje_id):
+    return await _post("/api/mensajes/duplicar", {"id": mensaje_id})
+
+# --- ENVIOS PROGRAMADOS ---
+async def wsp_programados(user_id):
+    return await _get("/api/programados", {"u": str(user_id)})
+
+async def wsp_crear_programado(user_id, mensaje_id, hora, minuto, repetir=False):
+    return await _post("/api/programados/crear", {
+        "u": str(user_id), "mensaje_id": mensaje_id,
+        "hora": hora, "minuto": minuto, "repetir": repetir
+    })
+
+async def wsp_toggle_programado(prog_id, activo):
+    return await _post("/api/programados/toggle", {"id": prog_id, "activo": activo})
+
+async def wsp_eliminar_programado(prog_id):
+    return await _post("/api/programados/del", {"id": prog_id})
+
+# --- STATS POR GRUPO ---
+async def wsp_grupo_stats(user_id):
+    return await _get("/api/grupo_stats", {"u": str(user_id)})
+
+# --- AUTO-UNIRSE A GRUPOS ---
+async def wsp_autojoin(user_id, links, cuenta=None):
+    data = {"u": str(user_id), "links": links}
+    if cuenta:
+        data["cuenta"] = cuenta
+    return await _post("/api/autojoin", data)
