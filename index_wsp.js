@@ -669,9 +669,15 @@ poll();
             if (url.pathname === "/api/grupo_stats" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
-                const stats = db.getGrupoStatsResumen(userId);
-                res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, stats }));
+                try {
+                    const stats = db.getGrupoStatsResumen(userId);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, stats: stats || [] }));
+                } catch (e) {
+                    console.error("Error en grupo_stats:", e.message);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, stats: [] }));
+                }
             }
 
             // POST /api/autojoin — Auto-unirse a grupos por invite link { u, links: ["https://chat.whatsapp.com/xxx"], cuenta }
@@ -1262,6 +1268,17 @@ if(uid())loadAll();
                 db.setAdminPanel(body.telegram_id, body.es_admin ? true : false);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/admin/tipo_membresia — Cambiar tipo de membresia (wsp, telegram, wsp+tg)
+            if (url.pathname === "/api/admin/tipo_membresia" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.admin_id || !body.telegram_id || !body.tipo) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                const admin = db.getPanelUser(body.admin_id);
+                if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
+                db.setTipoMembresia(body.telegram_id, body.tipo);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Tipo de membresia actualizado a " + body.tipo }));
             }
 
             // Endpoint no encontrado

@@ -250,7 +250,8 @@ function init() {
             es_admin INTEGER DEFAULT 0,
             plan TEXT DEFAULT 'demo',
             fecha_expira TEXT DEFAULT (datetime('now', '+1 day')),
-            fecha_registro TEXT DEFAULT (datetime('now'))
+            fecha_registro TEXT DEFAULT (datetime('now')),
+            tipo_membresia TEXT DEFAULT 'wsp+tg'
         );
         CREATE TABLE IF NOT EXISTS recovery_codes (
             telegram_id TEXT NOT NULL,
@@ -297,6 +298,12 @@ function init() {
         db.exec("ALTER TABLE panel_users ADD COLUMN plan TEXT DEFAULT 'demo'");
         db.exec("ALTER TABLE panel_users ADD COLUMN fecha_expira TEXT DEFAULT NULL");
         console.log("   Columnas admin/plan/username agregadas a panel_users");
+    }
+    try {
+        db.prepare("SELECT tipo_membresia FROM panel_users LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE panel_users ADD COLUMN tipo_membresia TEXT DEFAULT 'wsp+tg'");
+        console.log("   Columna 'tipo_membresia' agregada a panel_users");
     }
     console.log("\u2705 Base de datos WSP inicializada");
 }
@@ -1179,20 +1186,28 @@ function setAdminPanel(telegramId, esAdmin) {
     db.prepare("UPDATE panel_users SET es_admin = ? WHERE telegram_id = ?").run(esAdmin ? 1 : 0, String(telegramId));
 }
 function activarMembresiPanel(telegramId, plan, dias) {
-    const expira = new Date(Date.now() + dias * 24 * 60 * 60 * 1000).toISOString();
-    db.prepare("UPDATE panel_users SET plan = ?, fecha_expira = ? WHERE telegram_id = ?").run(plan, expira, String(telegramId));
+    if (plan === 'permanente') {
+        db.prepare("UPDATE panel_users SET plan = ?, fecha_expira = NULL WHERE telegram_id = ?").run(plan, String(telegramId));
+    } else {
+        const expira = new Date(Date.now() + dias * 24 * 60 * 60 * 1000).toISOString();
+        db.prepare("UPDATE panel_users SET plan = ?, fecha_expira = ? WHERE telegram_id = ?").run(plan, expira, String(telegramId));
+    }
 }
 function checkMembresiPanel(telegramId) {
     const user = getPanelUser(telegramId);
     if (!user) return { activo: false, plan: null, expira: null };
     if (user.es_admin) return { activo: true, plan: 'admin', expira: null, es_admin: true };
+    if (user.plan === 'permanente') return { activo: true, plan: 'permanente', expira: null, es_admin: false };
     if (!user.fecha_expira) return { activo: false, plan: user.plan || 'sin_plan', expira: null };
     const expira = new Date(user.fecha_expira);
     const activo = Date.now() < expira.getTime();
     return { activo, plan: user.plan, expira: user.fecha_expira, es_admin: false };
 }
 function getAllPanelUsers() {
-    return db.prepare("SELECT telegram_id, username, es_admin, plan, fecha_expira, fecha_registro FROM panel_users").all();
+    return db.prepare("SELECT telegram_id, username, es_admin, plan, fecha_expira, fecha_registro, tipo_membresia FROM panel_users").all();
+}
+function setTipoMembresia(telegramId, tipo) {
+    db.prepare("UPDATE panel_users SET tipo_membresia = ? WHERE telegram_id = ?").run(tipo, String(telegramId));
 }
 
 // --- RECOVERY CODES ---
@@ -1309,7 +1324,7 @@ module.exports = {
     checkMembresiaTg,
     // Panel users
     getPanelUser, registrarPanelUser, registrarPanelUserCompleto,
-    setAdminPanel, activarMembresiPanel, checkMembresiPanel, getAllPanelUsers,
+    setAdminPanel, activarMembresiPanel, checkMembresiPanel, getAllPanelUsers, setTipoMembresia,
     // Recovery codes
     crearRecoveryCode, validarRecoveryCode, marcarRecoveryCodeUsado, resetPasswordConCodigo,
     // Chats personales (persistencia)

@@ -11,9 +11,8 @@ module.exports = {
 
     // Planes
     PLANES: {
-        diario:  { dias: 1,  precio: "S/ 2.00",  emoji: "\u{1F949}" },
-        semanal: { dias: 7,  precio: "S/ 10.00", emoji: "\u{1F948}" },
-        mensual: { dias: 30, precio: "S/ 25.00", emoji: "\u{1F947}" },
+        semanal: { dias: 7,  precio: "S/ 15.00", emoji: "\u{1F948}" },
+        mensual: { dias: 30, precio: "S/ 30.00", emoji: "\u{1F947}" },
     },
 
     // Limites
