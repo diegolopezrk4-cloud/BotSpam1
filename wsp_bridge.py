@@ -58,6 +58,26 @@ async def wsp_crear_campana(user_id, nombre, mensaje):
 async def wsp_eliminar_campana(campana_id):
     return await _post("/api/campanas/del", {"id": campana_id})
 
+async def wsp_editar_campana(campana_id, mensaje, imagen=None):
+    return await _post("/api/campanas/editar", {"id": campana_id, "mensaje": mensaje, "imagen": imagen})
+
+async def wsp_detalle_campana(campana_id):
+    return await _get("/api/campanas/detalle", {"id": str(campana_id)})
+
+async def wsp_clonar_campana(campana_id, user_id):
+    return await _post("/api/campanas/clonar", {"id": campana_id, "u": str(user_id)})
+
+async def wsp_reset_campana(campana_id):
+    return await _post("/api/campanas/reset", {"id": campana_id})
+
+# --- SESIONES ---
+async def wsp_eliminar_sesion(user_id, nombre):
+    return await _post("/api/sesiones/del", {"u": str(user_id), "nombre": nombre})
+
+# --- GRUPOS EXTRA ---
+async def wsp_editar_grupo(user_id, grupo_id, link):
+    return await _post("/api/grupos/edit", {"u": str(user_id), "id": grupo_id, "link": link})
+
 # --- CONTROL ---
 async def wsp_iniciar(user_id, campana_id):
     return await _post("/api/iniciar", {"u": str(user_id), "id": campana_id})

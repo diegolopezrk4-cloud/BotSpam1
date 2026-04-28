@@ -320,6 +320,65 @@ poll();
                 return res.end(JSON.stringify({ ok: true }));
             }
 
+            // POST /api/campanas/editar — Editar mensaje de campaña { id, mensaje, imagen }
+            if (url.pathname === "/api/campanas/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id o mensaje" })); }
+                db.actualizarCampanaMensaje(body.id, body.mensaje, body.imagen || null);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/campanas/detalle?id=CAMP_ID — Ver detalle de campaña
+            if (url.pathname === "/api/campanas/detalle" && req.method === "GET") {
+                const campId = url.searchParams.get("id");
+                if (!campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                const camp = db.getCampanaById(parseInt(campId));
+                if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "no encontrada" })); }
+                const sesiones = db.getSesionesCampana(parseInt(campId));
+                const grupos = db.getGruposCampana(parseInt(campId));
+                const config = db.getCampanaConfig(parseInt(campId));
+                const horario = db.getCampanaHorario(parseInt(campId));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, campana: camp, sesiones, grupos, config, horario }));
+            }
+
+            // POST /api/campanas/clonar — Clonar campaña { id, u }
+            if (url.pathname === "/api/campanas/clonar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id || !body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id o u" })); }
+                const newId = db.clonarCampana(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id: newId }));
+            }
+
+            // POST /api/campanas/reset — Resetear stats { id }
+            if (url.pathname === "/api/campanas/reset" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.resetearStatsCampana(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/sesiones/del — Eliminar cuenta WSP { u, nombre }
+            if (url.pathname === "/api/sesiones/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                db.eliminarSesion(body.u, body.nombre);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/grupos/edit — Editar link de grupo { u, id, link }
+            if (url.pathname === "/api/grupos/edit" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id || !body.link) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, id o link" })); }
+                db.actualizarGrupoLink(body.u, body.id, body.link);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
             // POST /api/iniciar — Iniciar campaña { u, id }
             if (url.pathname === "/api/iniciar" && req.method === "POST") {
                 const body = await readBody();
