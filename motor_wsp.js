@@ -1,8 +1,8 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay, fetchLatestBaileysVersion, Browsers } = require("@whiskeysockets/baileys");
 const path = require("path");
 const fs = require("fs");
-const db = require("./db");
-const config = require("./config");
+const db = require("./db_wsp");
+const config = require("./config_wsp");
 
 const tareasActivas = {};    // { campanaId: { running, cancel } }
 const responderActivos = {}; // { userId: { running, cancel } }
@@ -365,9 +365,7 @@ function esGrupoReal(groupId, groupMetadata) {
     if (groupMetadata) {
         if (groupMetadata.isCommunityAnnounce) return false;
         if (groupMetadata.isCommunity && groupMetadata.linkedParent) return false;
-        // Filtrar grupos de solo lectura (solo admins pueden escribir)
         if (groupMetadata.announce === true) return false;
-        // Filtrar newsletters/canales
         if (groupMetadata.isNewsletter) return false;
     }
     return true;
@@ -852,22 +850,17 @@ function getCampanasActivas() {
 }
 
 // ============================================================
-// ENVIO PERSONAL: Leer chats personales y enviar con delay
+// ENVIO PERSONAL — Enviar a chats personales con delay 10s
 // ============================================================
-const envioPersonalActivo = {}; // { userId: { running, cancel } }
+const DELAY_ENTRE_ENVIOS = 10000; // 10 segundos entre cada envio
+const envioPersonalActivo = {};
 
 async function listarChatsPersonales(botSock) {
     const chats = [];
     try {
-        const store = botSock.store || null;
-        // Obtener todos los chats usando fetchAllContacts o store
-        // Baileys no tiene un "getChats" directo, pero podemos listar contactos
-        // y chats recientes usando las conversaciones
         const contacts = await botSock.fetchAllContacts?.() || [];
-        const contactJids = new Set();
         for (const c of contacts) {
             if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
-                contactJids.add(c.id);
                 const num = c.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
                 chats.push({
                     jid: c.id,
@@ -884,166 +877,120 @@ async function listarChatsPersonales(botSock) {
 
 async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
     if (envioPersonalActivo[userId]) return false;
-
     let cancelled = false;
-    const task = {
-        running: true,
-        cancel: () => { cancelled = true; },
-    };
+    const task = { running: true, cancel: () => { cancelled = true; } };
     envioPersonalActivo[userId] = task;
 
-    (async () => {
-        try {
-            // Obtener la lista de chats personales
-            const chats = await listarChatsPersonales(botSock);
-            if (!chats.length) {
-                try {
-                    await botSock.sendMessage(userId, {
-                        text: "\u274C No se encontraron chats personales para enviar.",
-                    });
-                } catch (e) {}
-                return;
-            }
-
-            const total = chats.length;
-            let enviados = 0;
-            let errores = 0;
-            const DELAY_ENTRE_ENVIOS = 10000; // 10 segundos
-
-            try {
-                await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 10 segundos entre cada envio\n\u23F3 Tiempo estimado: ~${Math.round(total * 10 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`,
-                });
-            } catch (e) {}
-
-            for (const chat of chats) {
-                if (cancelled) break;
-
-                try {
-                    const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
-                    if (imagenPath && fs.existsSync(imagenPath)) {
-                        await botSock.sendMessage(chat.jid, {
-                            image: fs.readFileSync(imagenPath),
-                            caption: textoFinal,
-                        });
-                    } else {
-                        await botSock.sendMessage(chat.jid, { text: textoFinal });
-                    }
-                    enviados++;
-                    db.registrarEnvio(userId, 0, chat.jid, "enviado_personal");
-                } catch (e) {
-                    errores++;
-                    console.error(`Error enviando a ${chat.numero}: ${e.message}`);
-                    db.registrarEnvio(userId, 0, chat.jid, "error_personal");
-                }
-
-                // Progreso cada 10 envios
-                if (enviados % 10 === 0 && enviados > 0) {
-                    try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u{1F4E8} Progreso: ${enviados}/${total} enviados (${errores} errores)...`,
-                        });
-                    } catch (e) {}
-                }
-
-                // Esperar 10 segundos entre cada envio
-                if (!cancelled) {
-                    await delay(DELAY_ENTRE_ENVIOS);
-                }
-            }
-
-            // Resultado final
-            try {
-                await botSock.sendMessage(userId, {
-                    text: `\u2705 *ENVIO PERSONAL COMPLETADO*\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Cancelado por el usuario" : ""}`,
-                });
-            } catch (e) {}
-
-        } catch (e) {
-            console.error(`Error envio personal ${userId}: ${e.message}`);
-            try {
-                await botSock.sendMessage(userId, {
-                    text: `\u274C Error en envio personal: ${e.message}`,
-                });
-            } catch (ex) {}
-        } finally {
+    try {
+        const chats = await listarChatsPersonales(botSock);
+        if (!chats.length) {
             delete envioPersonalActivo[userId];
+            try { await botSock.sendMessage(userId, { text: "\u274C No se encontraron chats personales." }); } catch (e) {}
+            return false;
         }
-    })();
 
-    return true;
+        const total = chats.length;
+        let enviados = 0, errores = 0;
+
+        try {
+            await botSock.sendMessage(userId, {
+                text: `\u{1F4E8} Iniciando envio personal a ${total} chat(s)...\nDelay: ${DELAY_ENTRE_ENVIOS / 1000}s entre cada envio.\nEscribe "cancelar envio" para detener.`
+            });
+        } catch (e) {}
+
+        for (const chat of chats) {
+            if (cancelled) break;
+            try {
+                const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
+                if (imagenPath && fs.existsSync(imagenPath)) {
+                    await botSock.sendMessage(chat.jid, {
+                        image: fs.readFileSync(imagenPath),
+                        caption: textoFinal,
+                    });
+                } else {
+                    await botSock.sendMessage(chat.jid, { text: textoFinal });
+                }
+                enviados++;
+                db.registrarEnvio(userId, 0, chat.jid, "enviado_personal");
+            } catch (e) {
+                errores++;
+                db.registrarEnvio(userId, 0, chat.jid, "error_personal");
+            }
+            if (enviados % 10 === 0 && enviados > 0) {
+                try {
+                    await botSock.sendMessage(userId, { text: `\u{1F4CA} Progreso: ${enviados}/${total}...` });
+                } catch (e) {}
+            }
+            if (!cancelled) {
+                await new Promise(r => setTimeout(r, DELAY_ENTRE_ENVIOS));
+            }
+        }
+
+        delete envioPersonalActivo[userId];
+        const resumen = cancelled
+            ? `\u{1F6D1} Envio personal cancelado.\n\n\u2705 Enviados: ${enviados}/${total}\n\u274C Errores: ${errores}`
+            : `\u2705 *Envio personal completado*\n\n\u{1F4E8} Enviados: ${enviados}/${total}\n\u274C Errores: ${errores}`;
+        try { await botSock.sendMessage(userId, { text: resumen }); } catch (e) {}
+        return true;
+    } catch (e) {
+        delete envioPersonalActivo[userId];
+        console.error(`Error en envio personal: ${e.message}`);
+        return false;
+    }
 }
 
 async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock) {
     if (envioPersonalActivo[userId]) return false;
-
     let cancelled = false;
-    const task = {
-        running: true,
-        cancel: () => { cancelled = true; },
-    };
+    const task = { running: true, cancel: () => { cancelled = true; } };
     envioPersonalActivo[userId] = task;
 
-    (async () => {
+    try {
+        const total = jids.length;
+        let enviados = 0, errores = 0;
+
         try {
-            const total = jids.length;
-            let enviados = 0;
-            let errores = 0;
-            const DELAY_ENTRE_ENVIOS = 10000; // 10 segundos
+            await botSock.sendMessage(userId, {
+                text: `\u{1F4E8} Enviando a ${total} contacto(s) seleccionados...\nDelay: ${DELAY_ENTRE_ENVIOS / 1000}s`
+            });
+        } catch (e) {}
 
+        for (const jid of jids) {
+            if (cancelled) break;
             try {
-                await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} contacto(s) seleccionados\n\u23F1 Delay: 10 segundos entre cada envio\n\u23F3 Tiempo estimado: ~${Math.round(total * 10 / 60)} min`,
-                });
-            } catch (e) {}
-
-            for (const jid of jids) {
-                if (cancelled) break;
-
-                try {
-                    const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
-                    if (imagenPath && fs.existsSync(imagenPath)) {
-                        await botSock.sendMessage(jid, {
-                            image: fs.readFileSync(imagenPath),
-                            caption: textoFinal,
-                        });
-                    } else {
-                        await botSock.sendMessage(jid, { text: textoFinal });
-                    }
-                    enviados++;
-                    db.registrarEnvio(userId, 0, jid, "enviado_personal");
-                } catch (e) {
-                    errores++;
-                    db.registrarEnvio(userId, 0, jid, "error_personal");
+                const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
+                if (imagenPath && fs.existsSync(imagenPath)) {
+                    await botSock.sendMessage(jid, {
+                        image: fs.readFileSync(imagenPath),
+                        caption: textoFinal,
+                    });
+                } else {
+                    await botSock.sendMessage(jid, { text: textoFinal });
                 }
-
-                if (enviados % 10 === 0 && enviados > 0) {
-                    try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u{1F4E8} Progreso: ${enviados}/${total} enviados (${errores} errores)...`,
-                        });
-                    } catch (e) {}
-                }
-
-                if (!cancelled) {
-                    await delay(DELAY_ENTRE_ENVIOS);
-                }
+                enviados++;
+                db.registrarEnvio(userId, 0, jid, "enviado_personal");
+            } catch (e) {
+                errores++;
+                db.registrarEnvio(userId, 0, jid, "error_personal");
             }
-
-            try {
-                await botSock.sendMessage(userId, {
-                    text: `\u2705 *ENVIO PERSONAL COMPLETADO*\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Cancelado por el usuario" : ""}`,
-                });
-            } catch (e) {}
-
-        } catch (e) {
-            console.error(`Error envio personal ${userId}: ${e.message}`);
-        } finally {
-            delete envioPersonalActivo[userId];
+            if (enviados % 10 === 0 && enviados > 0) {
+                try { await botSock.sendMessage(userId, { text: `\u{1F4CA} Progreso: ${enviados}/${total}...` }); } catch (e) {}
+            }
+            if (!cancelled) {
+                await new Promise(r => setTimeout(r, DELAY_ENTRE_ENVIOS));
+            }
         }
-    })();
 
-    return true;
+        delete envioPersonalActivo[userId];
+        const resumen = cancelled
+            ? `\u{1F6D1} Envio cancelado.\n\n\u2705 Enviados: ${enviados}/${total}\n\u274C Errores: ${errores}`
+            : `\u2705 *Envio completado*\n\n\u{1F4E8} Enviados: ${enviados}/${total}\n\u274C Errores: ${errores}`;
+        try { await botSock.sendMessage(userId, { text: resumen }); } catch (e) {}
+        return true;
+    } catch (e) {
+        delete envioPersonalActivo[userId];
+        return false;
+    }
 }
 
 function detenerEnvioPersonal(userId) {
@@ -1060,7 +1007,6 @@ module.exports = {
     tareasActivas,
     getCampanasActivas,
     responderActivos,
-    envioPersonalActivo,
     clientSessions,
     pendingLinks,
     reporteInterval,
@@ -1082,6 +1028,9 @@ module.exports = {
     detenerReporteDiario,
     iniciarResponder,
     detenerResponder,
+    resolveGroupJid,
+    sendToGroup,
+    envioPersonalActivo,
     listarChatsPersonales,
     enviarAPersonales,
     enviarASeleccionados,
