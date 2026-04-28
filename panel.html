@@ -347,21 +347,22 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" class="active" data-section="dashboard"><span class="icon">📊</span><span>Dashboard</span></a>
       <a href="#" data-section="cuentas" data-plat="wsp"><span class="icon">👤</span><span>Cuentas WSP</span></a>
       <a href="#" data-section="cuentastg" data-plat="tg"><span class="icon">✈️</span><span>Cuentas Telegram</span></a>
-      <a href="#" data-section="grupos"><span class="icon">🌐</span><span>Grupos</span></a>
-      <div class="nav-group">Mensajeria</div>
-      <a href="#" data-section="mensajes"><span class="icon">✉</span><span>Mensajes</span></a>
-      <a href="#" data-section="envios"><span class="icon">📤</span><span>Envio Unico</span></a>
-      <a href="#" data-section="enviopersonal"><span class="icon">💬</span><span>Envio Personal</span></a>
-      <a href="#" data-section="enviomiembros"><span class="icon">👥</span><span>Envio a Miembros</span></a>
-      <a href="#" data-section="programados"><span class="icon">⏰</span><span>Programados</span></a>
-      <a href="#" data-section="campanas"><span class="icon">📋</span><span>Campanas</span></a>
+      <a href="#" data-section="grupos" data-plat="wsp"><span class="icon">🌐</span><span>Grupos</span></a>
+      <div class="nav-group" data-plat="wsp">Mensajeria WSP</div>
+      <a href="#" data-section="mensajes" data-plat="wsp"><span class="icon">✉</span><span>Mensajes</span></a>
+      <a href="#" data-section="envios" data-plat="wsp"><span class="icon">📤</span><span>Envio Unico</span></a>
+      <a href="#" data-section="enviopersonal" data-plat="wsp"><span class="icon">💬</span><span>Envio Personal</span></a>
+      <a href="#" data-section="enviomiembros" data-plat="wsp"><span class="icon">👥</span><span>Envio a Miembros</span></a>
+      <a href="#" data-section="programados" data-plat="wsp"><span class="icon">⏰</span><span>Programados</span></a>
+      <a href="#" data-section="campanas" data-plat="wsp"><span class="icon">📋</span><span>Campanas</span></a>
       <div class="nav-group">Herramientas</div>
       <a href="#" data-section="plantillas"><span class="icon">📋</span><span>Plantillas</span></a>
       <a href="#" data-section="historial"><span class="icon">📜</span><span>Historial</span></a>
-      <div class="nav-group">Configuracion</div>
-      <a href="#" data-section="config"><span class="icon">⚙</span><span>Config Envio</span></a>
-      <a href="#" data-section="listanegra"><span class="icon">🚫</span><span>Lista Negra</span></a>
-      <a href="#" data-section="autoresp"><span class="icon">🤖</span><span>Auto-Responder</span></a>
+      <div class="nav-group" data-plat="wsp">Config WSP</div>
+      <a href="#" data-section="config" data-plat="wsp"><span class="icon">⚙</span><span>Config Envio</span></a>
+      <a href="#" data-section="listanegra" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra</span></a>
+      <a href="#" data-section="autoresp" data-plat="wsp"><span class="icon">🤖</span><span>Auto-Responder</span></a>
+      <div class="nav-group">General</div>
       <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas</span></a>
       <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
       <div class="nav-group admin-only" style="display:none">Admin</div>
@@ -777,8 +778,9 @@ function switchPlatform(p){
     $('platBtnTg').style.background='var(--accent)';$('platBtnTg').style.color='#fff';
     $('platBtnWsp').style.background='transparent';$('platBtnWsp').style.color='var(--text2)';
   }
-  document.querySelectorAll('.sidebar nav a[data-plat]').forEach(a=>{
-    a.style.display=a.dataset.plat===p?'':'none';
+  // Hide/show sidebar items based on platform
+  document.querySelectorAll('.sidebar nav [data-plat]').forEach(el=>{
+    el.style.display=el.dataset.plat===p?'':'none';
   });
   // Navigate to the corresponding accounts section
   const sec=p==='wsp'?'cuentas':'cuentastg';
@@ -795,8 +797,8 @@ function initPlatformSwitch(){
     $('platBtnTg').style.background='var(--accent)';$('platBtnTg').style.color='#fff';
     $('platBtnWsp').style.background='transparent';$('platBtnWsp').style.color='var(--text2)';
   }
-  document.querySelectorAll('.sidebar nav a[data-plat]').forEach(a=>{
-    a.style.display=a.dataset.plat===p?'':'none';
+  document.querySelectorAll('.sidebar nav [data-plat]').forEach(el=>{
+    el.style.display=el.dataset.plat===p?'':'none';
   });
 }
 
@@ -1293,10 +1295,11 @@ async function loadCuentasTg(){
   let h='<div class="table-wrap"><div class="table-header"><h3>✈️ Cuentas ('+s.length+')</h3></div>';
   h+='<table><thead><tr><th>#</th><th>Nombre</th><th>Telefono</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>';
   s.forEach((x,i)=>{
-    h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre)}</b></td><td>${esc(x.telefono||'—')}</td>`;
+    const origenBadge=x.origen==='bot'?'<span class="badge badge-info" style="font-size:10px;margin-left:4px">Bot</span>':'<span class="badge badge-warn" style="font-size:10px;margin-left:4px">Panel</span>';
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre)}</b>${origenBadge}</td><td>${esc(x.telefono||'—')}</td>`;
     h+=`<td><span class="badge badge-success">Activa</span></td>`;
     h+=`<td style="font-size:11px">${x.fecha||'—'}</td>`;
-    h+=`<td><button class="btn btn-sm btn-danger" onclick="eliminarCuentaTg(${JSON.stringify(x.nombre)})">🗑 Eliminar</button></td></tr>`;
+    h+=`<td>${x.origen!=='bot'?'<button class="btn btn-sm btn-danger" onclick="eliminarCuentaTg('+JSON.stringify(x.nombre)+')">🗑 Eliminar</button>':'<span style="color:var(--text2);font-size:11px">Gestionada por bot</span>'}</td></tr>`;
   });
   h+='</tbody></table></div>';
   $('cuentasTgContent').innerHTML=h;

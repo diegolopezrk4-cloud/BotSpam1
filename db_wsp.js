@@ -1379,8 +1379,27 @@ module.exports = {
 };
 
 // --- Sesiones Telegram ---
+function getSesionesTgFromBot(userId) {
+    try {
+        const botDbPath = path.resolve(__dirname, "titan.db");
+        const fs = require("fs");
+        if (!fs.existsSync(botDbPath)) return [];
+        const botDb = new Database(botDbPath, { readonly: true });
+        const rows = botDb.prepare("SELECT * FROM sesiones WHERE user_id = ? AND activa = 1 ORDER BY id DESC").all(Number(userId));
+        botDb.close();
+        return rows;
+    } catch (e) { return []; }
+}
 function getSesionesTg(userId) {
-    return db.prepare("SELECT * FROM sesiones_tg WHERE user_id = ? AND activa = 1 ORDER BY id DESC").all(String(userId));
+    const panelSesiones = db.prepare("SELECT * FROM sesiones_tg WHERE user_id = ? AND activa = 1 ORDER BY id DESC").all(String(userId));
+    const botSesiones = getSesionesTgFromBot(userId);
+    const panelNombres = new Set(panelSesiones.map(s => s.nombre));
+    botSesiones.forEach(s => {
+        if (!panelNombres.has(s.nombre)) {
+            panelSesiones.push({ id: s.id, user_id: String(s.user_id), nombre: s.nombre, telefono: s.telefono || '', activa: 1, fecha: s.fecha || '—', origen: 'bot' });
+        }
+    });
+    return panelSesiones;
 }
 function agregarSesionTg(userId, nombre, telefono) {
     const existing = db.prepare("SELECT id FROM sesiones_tg WHERE user_id = ? AND nombre = ? AND activa = 1").get(String(userId), nombre);
@@ -1439,7 +1458,14 @@ function registrarHistorialEnvio(userId, tipo, destino, msgPreview, resultado, t
 function getLimitesMembresia(userId) {
     const user = getPanelUser(userId);
     if (!user) return { max_envios_dia: 10, max_grupos: 5 };
-    if (user.es_admin || user.plan === 'permanente') return { max_envios_dia: 999999, max_grupos: 999999 };
+    if (user.es_admin) return { max_envios_dia: 999999, max_grupos: 999999 };
+    if (user.plan === 'permanente') return { max_envios_dia: 999999, max_grupos: 999999 };
+    if (user.fecha_expira) {
+        const expira = new Date(user.fecha_expira);
+        if (Date.now() >= expira.getTime()) return { max_envios_dia: 10, max_grupos: 5 };
+    } else {
+        return { max_envios_dia: 10, max_grupos: 5 };
+    }
     if (user.plan === 'mensual') return { max_envios_dia: 500, max_grupos: 50 };
     if (user.plan === 'semanal') return { max_envios_dia: 200, max_grupos: 25 };
     return { max_envios_dia: 10, max_grupos: 5 };
