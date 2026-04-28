@@ -953,9 +953,23 @@ poll();
                 return res.end(JSON.stringify({ ok: true, message: `envio iniciado a ${jids.length} numero(s)` }));
             }
 
-            // GET /panel — Dashboard web
+            // GET /panel — Panel web completo (sirve panel.html)
             if (url.pathname === "/panel" && req.method === "GET") {
-                const userId = url.searchParams.get("u");
+                try {
+                    const fs = require("fs");
+                    const path = require("path");
+                    const html = fs.readFileSync(path.join(__dirname, "panel.html"), "utf-8");
+                    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                    return res.end(html);
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end("Error cargando panel: " + e.message);
+                }
+            }
+
+            // (panel legacy - removed, now served from panel.html)
+            if (false) {
+                const userId = null;
                 const html = `<!DOCTYPE html>
 <html lang="es">
 <head>

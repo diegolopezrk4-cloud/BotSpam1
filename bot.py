@@ -3369,15 +3369,21 @@ async def cb_wsp_panelweb(call: types.CallbackQuery):
         return
     link = f"http://{WSP_IP}:3000/panel?u={call.from_user.id}"
     texto = (
-        f"🌐 PANEL WEB\n\n"
+        f"🌐 PANEL WEB COMPLETO\n\n"
         f"Abre este enlace en tu navegador:\n\n"
         f"{link}\n\n"
-        f"Desde el panel puedes ver:\n"
-        f"• Reporte del día\n"
-        f"• Tasa de entrega\n"
-        f"• Config de envío\n"
+        f"Desde el panel puedes manejar TODO:\n"
+        f"• Dashboard con estadísticas\n"
+        f"• Cuentas WSP (ver, eliminar)\n"
+        f"• Grupos (ver, detectar, agregar, eliminar)\n"
+        f"• Mensajes (crear, editar, duplicar, eliminar)\n"
+        f"• Envío único a grupos\n"
+        f"• Envíos programados\n"
+        f"• Campañas\n"
+        f"• Config de envío (delay, lotes, horarios)\n"
         f"• Lista negra\n"
-        f"• Auto-respuestas"
+        f"• Auto-responder\n"
+        f"• Estadísticas por grupo"
     )
     botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
@@ -3391,9 +3397,9 @@ async def cmd_panelweb(msg: types.Message):
         return
     link = f"http://{WSP_IP}:3000/panel?u={msg.from_user.id}"
     await msg.answer(
-        f"🌐 PANEL WEB\n\n"
+        f"🌐 PANEL WEB COMPLETO\n\n"
         f"Abre en tu navegador:\n{link}\n\n"
-        f"Dashboard completo con reporte, tasa de entrega, config, lista negra y auto-respuestas."
+        f"Maneja TODO desde el panel: cuentas, grupos, mensajes, envíos, campañas, config, stats y más."
     )
 
 
