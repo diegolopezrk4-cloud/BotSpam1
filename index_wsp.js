@@ -597,6 +597,63 @@ poll();
                 return res.end(JSON.stringify({ ok: true, envios }));
             }
 
+            // POST /api/mensajes/duplicar — Duplicar mensaje { id }
+            if (url.pathname === "/api/mensajes/duplicar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                const newId = db.duplicarMensaje(body.id);
+                if (!newId) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "mensaje no encontrado" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id: newId }));
+            }
+
+            // GET /api/programados?u=USER_ID — Envios programados
+            if (url.pathname === "/api/programados" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const programados = db.getEnviosProgramados(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, programados }));
+            }
+
+            // POST /api/programados/crear — Programar envio { u, mensaje_id, hora, minuto, repetir }
+            if (url.pathname === "/api/programados/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.mensaje_id || body.hora === undefined || body.minuto === undefined) {
+                    res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, mensaje_id, hora o minuto" }));
+                }
+                const id = db.crearEnvioProgramado(body.u, body.mensaje_id, body.hora, body.minuto, body.repetir ? 1 : 0);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id }));
+            }
+
+            // POST /api/programados/toggle — Activar/desactivar { id, activo }
+            if (url.pathname === "/api/programados/toggle" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.toggleEnvioProgramado(body.id, body.activo);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/programados/del — Eliminar envio programado { id }
+            if (url.pathname === "/api/programados/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.eliminarEnvioProgramado(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/grupo_stats?u=USER_ID — Estadisticas por grupo
+            if (url.pathname === "/api/grupo_stats" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const stats = db.getGrupoStatsResumen(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, stats }));
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
@@ -2754,3 +2811,56 @@ if (NO_WSP_BOT) {
 } else {
     startBot();
 }
+
+// --- SCHEDULER: Envios programados (cada minuto) ---
+setInterval(async () => {
+    try {
+        const ahora = new Date();
+        const hora = parseInt(ahora.toLocaleString("en-US", { timeZone: config.TIMEZONE, hour: "numeric", hour12: false }));
+        const minuto = ahora.getMinutes();
+        const hoy = ahora.toISOString().split("T")[0];
+
+        const programados = db.getEnviosProgramadosActivos();
+        for (const prog of programados) {
+            if (prog.hora !== hora || prog.minuto !== minuto) continue;
+            if (prog.ultimo_envio && prog.ultimo_envio.startsWith(hoy) && !prog.repetir) continue;
+
+            console.log(`[Scheduler] Ejecutando envio programado #${prog.id}: ${prog.mensaje_nombre}`);
+            db.actualizarUltimoEnvio(prog.id);
+
+            const grupos = db.getGrupos(prog.user_id);
+            if (!grupos.length) continue;
+            const sesiones = db.getSesiones(prog.user_id);
+            if (!sesiones.length) continue;
+
+            const envioId = db.crearEnvioUnico(prog.user_id, prog.mensaje_id, grupos.length);
+            let ok = 0, errores = 0;
+            const socks = [];
+            for (const s of sesiones) {
+                try { socks.push(await motor.getOrConnectClient(prog.user_id, s.nombre)); } catch (e) {}
+            }
+            if (!socks.length) { db.actualizarEnvioUnico(envioId, 0, grupos.length, "error"); continue; }
+
+            let sockIdx = 0;
+            for (const g of grupos) {
+                const sock = socks[sockIdx % socks.length];
+                sockIdx++;
+                try {
+                    const groupJid = await motor.resolveGroupJid(sock, g.link);
+                    if (!groupJid) { errores++; continue; }
+                    const texto = motor.variarMensaje(prog.texto, prog.user_id);
+                    const result = await motor.sendToGroup(sock, groupJid, texto, prog.imagen_path);
+                    if (result.sent) { ok++; } else { errores++; }
+                } catch (e) { errores++; }
+                await new Promise(r => setTimeout(r, 5000 + Math.random() * 10000));
+            }
+            db.actualizarEnvioUnico(envioId, ok, errores, "completado");
+
+            if (!prog.repetir) {
+                db.toggleEnvioProgramado(prog.id, false);
+            }
+        }
+    } catch (e) {
+        console.error(`[Scheduler] Error: ${e.message}`);
+    }
+}, 60000);

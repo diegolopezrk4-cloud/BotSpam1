@@ -188,6 +188,18 @@ function init() {
             FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
             FOREIGN KEY(mensaje_id) REFERENCES mensajes(id)
         );
+        CREATE TABLE IF NOT EXISTS envios_programados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            mensaje_id INTEGER,
+            hora INTEGER DEFAULT 0,
+            minuto INTEGER DEFAULT 0,
+            repetir INTEGER DEFAULT 0,
+            activo INTEGER DEFAULT 1,
+            ultimo_envio TEXT DEFAULT NULL,
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            FOREIGN KEY(mensaje_id) REFERENCES mensajes(id)
+        );
     `);
 
     // Migraciones
@@ -937,6 +949,49 @@ function getEnviosUnicos(userId) {
     return db.prepare("SELECT eu.*, m.nombre as mensaje_nombre FROM envios_unicos eu LEFT JOIN mensajes m ON eu.mensaje_id = m.id WHERE eu.user_id = ? ORDER BY eu.fecha DESC LIMIT 20").all(userId);
 }
 
+// --- ENVIOS PROGRAMADOS ---
+function crearEnvioProgramado(userId, mensajeId, hora, minuto, repetir = 0) {
+    const result = db.prepare("INSERT INTO envios_programados (user_id, mensaje_id, hora, minuto, repetir) VALUES (?, ?, ?, ?, ?)").run(userId, mensajeId, hora, minuto, repetir);
+    return result.lastInsertRowid;
+}
+
+function getEnviosProgramados(userId) {
+    return db.prepare("SELECT ep.*, m.nombre as mensaje_nombre FROM envios_programados ep LEFT JOIN mensajes m ON ep.mensaje_id = m.id WHERE ep.user_id = ? ORDER BY ep.hora, ep.minuto").all(userId);
+}
+
+function getEnviosProgramadosActivos() {
+    return db.prepare("SELECT ep.*, m.nombre as mensaje_nombre, m.texto, m.imagen_path FROM envios_programados ep LEFT JOIN mensajes m ON ep.mensaje_id = m.id WHERE ep.activo = 1").all();
+}
+
+function actualizarUltimoEnvio(id) {
+    db.prepare("UPDATE envios_programados SET ultimo_envio = datetime('now') WHERE id = ?").run(id);
+}
+
+function toggleEnvioProgramado(id, activo) {
+    db.prepare("UPDATE envios_programados SET activo = ? WHERE id = ?").run(activo ? 1 : 0, id);
+}
+
+function eliminarEnvioProgramado(id) {
+    db.prepare("DELETE FROM envios_programados WHERE id = ?").run(id);
+}
+
+// --- DUPLICAR MENSAJE ---
+function duplicarMensaje(id) {
+    const msg = getMensajeById(id);
+    if (!msg) return null;
+    return crearMensaje(msg.user_id, msg.nombre + "_copia", msg.texto, msg.imagen_path);
+}
+
+// --- STATS POR GRUPO (MEJORADAS) ---
+function getGrupoStatsResumen(userId) {
+    return db.prepare(`
+        SELECT grupo_link, enviados, fallidos, exitos,
+               CASE WHEN enviados > 0 THEN ROUND(exitos * 100.0 / enviados, 1) ELSE 0 END as tasa_exito,
+               ultima_fecha
+        FROM grupo_stats WHERE user_id = ? ORDER BY enviados DESC LIMIT 50
+    `).all(userId);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -967,4 +1022,9 @@ module.exports = {
     // Mensajes y envios unicos
     getMensajes, getMensajeById, crearMensaje, editarMensaje, editarNombreMensaje, eliminarMensaje,
     crearEnvioUnico, actualizarEnvioUnico, getEnviosUnicos,
+    // Envios programados
+    crearEnvioProgramado, getEnviosProgramados, getEnviosProgramadosActivos,
+    actualizarUltimoEnvio, toggleEnvioProgramado, eliminarEnvioProgramado,
+    // Duplicar y stats
+    duplicarMensaje, getGrupoStatsResumen,
 };

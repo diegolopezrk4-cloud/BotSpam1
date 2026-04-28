@@ -123,3 +123,27 @@ async def wsp_enviar_unico(user_id, mensaje_id):
 
 async def wsp_envios_unicos(user_id):
     return await _get("/api/envios_unicos", {"u": str(user_id)})
+
+# --- DUPLICAR MENSAJE ---
+async def wsp_duplicar_mensaje(mensaje_id):
+    return await _post("/api/mensajes/duplicar", {"id": mensaje_id})
+
+# --- ENVIOS PROGRAMADOS ---
+async def wsp_programados(user_id):
+    return await _get("/api/programados", {"u": str(user_id)})
+
+async def wsp_crear_programado(user_id, mensaje_id, hora, minuto, repetir=False):
+    return await _post("/api/programados/crear", {
+        "u": str(user_id), "mensaje_id": mensaje_id,
+        "hora": hora, "minuto": minuto, "repetir": repetir
+    })
+
+async def wsp_toggle_programado(prog_id, activo):
+    return await _post("/api/programados/toggle", {"id": prog_id, "activo": activo})
+
+async def wsp_eliminar_programado(prog_id):
+    return await _post("/api/programados/del", {"id": prog_id})
+
+# --- STATS POR GRUPO ---
+async def wsp_grupo_stats(user_id):
+    return await _get("/api/grupo_stats", {"u": str(user_id)})

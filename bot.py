@@ -96,6 +96,9 @@ class MensajeWspState(StatesGroup):
     esperando_texto = State()
     editando_texto = State()
 
+class ProgramarState(StatesGroup):
+    esperando_hora = State()
+
 # Sesiones Telethon temporales
 login_sessions = {}
 sesiones_seleccionadas = {}
@@ -2755,11 +2758,13 @@ async def cb_sec_wsp(call: types.CallbackQuery):
         [InlineKeyboardButton(text="🌐 Grupos WSP", callback_data="wsp_grupos"),
          InlineKeyboardButton(text="🔍 Detectar Grupos", callback_data="wsp_detectar")],
         [InlineKeyboardButton(text="✉ Mensajes", callback_data="wsp_mensajes")],
-        [InlineKeyboardButton(text="📤 Enviar Único", callback_data="wsp_enviar_unico")],
+        [InlineKeyboardButton(text="📤 Enviar Único", callback_data="wsp_enviar_unico"),
+         InlineKeyboardButton(text="⏰ Programados", callback_data="wsp_programados")],
         [InlineKeyboardButton(text="📋 Campañas WSP", callback_data="wsp_campanas")],
         [InlineKeyboardButton(text="🚀 Iniciar campaña", callback_data="wsp_iniciar"),
          InlineKeyboardButton(text="🛑 Detener", callback_data="wsp_detener")],
-        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial")],
+        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial"),
+         InlineKeyboardButton(text="📈 Stats Grupos", callback_data="wsp_grupo_stats")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
         [InlineKeyboardButton(text="👑 Membresía WSP", callback_data="wsp_membresia")],
         kb_volver(),
@@ -3176,11 +3181,13 @@ async def cmd_wsp(msg: types.Message):
         [InlineKeyboardButton(text="🌐 Grupos WSP", callback_data="wsp_grupos"),
          InlineKeyboardButton(text="🔍 Detectar Grupos", callback_data="wsp_detectar")],
         [InlineKeyboardButton(text="✉ Mensajes", callback_data="wsp_mensajes")],
-        [InlineKeyboardButton(text="📤 Enviar Único", callback_data="wsp_enviar_unico")],
+        [InlineKeyboardButton(text="📤 Enviar Único", callback_data="wsp_enviar_unico"),
+         InlineKeyboardButton(text="⏰ Programados", callback_data="wsp_programados")],
         [InlineKeyboardButton(text="📋 Campañas WSP", callback_data="wsp_campanas")],
         [InlineKeyboardButton(text="🚀 Iniciar campaña", callback_data="wsp_iniciar"),
          InlineKeyboardButton(text="🛑 Detener", callback_data="wsp_detener")],
-        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial")],
+        [InlineKeyboardButton(text="📊 Historial WSP", callback_data="wsp_historial"),
+         InlineKeyboardButton(text="📈 Stats Grupos", callback_data="wsp_grupo_stats")],
         [InlineKeyboardButton(text="📈 Dashboard WSP", callback_data="wsp_dashboard")],
         kb_volver(),
     ]
@@ -3534,7 +3541,9 @@ async def cb_wsp_msg_ver(call: types.CallbackQuery):
     )
     botones = [
         [InlineKeyboardButton(text="📤 Enviar a todos los grupos", callback_data=f"wsp_enviar_msg_{msg_id}")],
-        [InlineKeyboardButton(text="✏ Editar texto", callback_data=f"wsp_msg_edit_{msg_id}")],
+        [InlineKeyboardButton(text="⏰ Programar envío", callback_data=f"wsp_prog_msg_{msg_id}")],
+        [InlineKeyboardButton(text="✏ Editar texto", callback_data=f"wsp_msg_edit_{msg_id}"),
+         InlineKeyboardButton(text="📋 Duplicar", callback_data=f"wsp_msg_dup_{msg_id}")],
         [InlineKeyboardButton(text="🗑 Eliminar", callback_data=f"wsp_msg_del_{msg_id}")],
         [InlineKeyboardButton(text="🔙 Volver a mensajes", callback_data="wsp_mensajes")],
     ]
@@ -3678,6 +3687,170 @@ async def cb_wsp_historial_envios(call: types.CallbackQuery):
             )
     else:
         texto += "(sin envíos registrados)\n"
+    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+# ╔══════════════════════════════════════╗
+# ║    DUPLICAR MENSAJE WSP             ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data.startswith("wsp_msg_dup_"))
+async def cb_wsp_msg_dup(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("wsp_msg_dup_", ""))
+    import wsp_bridge as wsp
+    r = await wsp.wsp_duplicar_mensaje(msg_id)
+    if r.get("ok"):
+        await call.answer("✅ Mensaje duplicado!", show_alert=True)
+        # Volver a la lista de mensajes
+        await cb_wsp_mensajes(call)
+    else:
+        await call.answer(f"❌ Error: {r.get('error')}", show_alert=True)
+
+
+# ╔══════════════════════════════════════╗
+# ║    ENVIOS PROGRAMADOS WSP           ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data.startswith("wsp_prog_msg_"))
+async def cb_wsp_prog_msg(call: types.CallbackQuery, state: FSMContext):
+    if not await verificar_membresia_cb(call):
+        return
+    msg_id = int(call.data.replace("wsp_prog_msg_", ""))
+    await state.set_state(ProgramarState.esperando_hora)
+    await state.update_data(prog_msg_id=msg_id)
+    botones = [[InlineKeyboardButton(text="❌ Cancelar", callback_data=f"wsp_msg_ver_{msg_id}")]]
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message,
+        "⏰ PROGRAMAR ENVÍO\n\n"
+        "Envía la hora en formato HH:MM (hora de Perú)\n"
+        "Ejemplo: 14:30\n\n"
+        "¿Quieres que se repita diariamente?\n"
+        "Envía: 14:30 repetir\n"
+        "O solo: 14:30 (una sola vez)",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@dp.message(ProgramarState.esperando_hora)
+async def msg_programar_hora(msg: types.Message, state: FSMContext):
+    texto = msg.text.strip().lower()
+    repetir = "repetir" in texto
+    tiempo = texto.replace("repetir", "").strip()
+    try:
+        partes = tiempo.split(":")
+        hora = int(partes[0])
+        minuto = int(partes[1]) if len(partes) > 1 else 0
+        if hora < 0 or hora > 23 or minuto < 0 or minuto > 59:
+            raise ValueError
+    except (ValueError, IndexError):
+        await msg.answer("❌ Formato inválido. Envía la hora como HH:MM (ej: 14:30)")
+        return
+    data = await state.get_data()
+    msg_id = data.get("prog_msg_id")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_crear_programado(msg.from_user.id, msg_id, hora, minuto, repetir)
+    await state.clear()
+    if r.get("ok"):
+        rep_txt = "🔄 (se repite diariamente)" if repetir else "1️⃣ (una sola vez)"
+        await msg.answer(f"✅ Envío programado para las {hora:02d}:{minuto:02d} (Perú)\n{rep_txt}")
+    else:
+        await msg.answer(f"❌ Error: {r.get('error')}")
+
+
+@dp.callback_query(F.data == "wsp_programados")
+async def cb_wsp_programados(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_programados(call.from_user.id)
+    programados = r.get("programados", []) if r.get("ok") else []
+    texto = "⏰ ENVÍOS PROGRAMADOS\n\n"
+    if programados:
+        for p in programados:
+            estado = "🟢" if p.get("activo") else "🔴"
+            rep = "🔄" if p.get("repetir") else "1️⃣"
+            texto += f"{estado} {p.get('mensaje_nombre', '?')} — {p['hora']:02d}:{p['minuto']:02d} {rep}\n"
+            if p.get("ultimo_envio"):
+                texto += f"   Último: {p['ultimo_envio']}\n"
+            texto += "\n"
+    else:
+        texto += "(sin envíos programados)\n\n"
+    texto += "Para programar, ve a un mensaje y presiona 'Programar envío'."
+    botones = []
+    for p in programados[:10]:
+        botones.append([
+            InlineKeyboardButton(
+                text=f"{'🔴 Desactivar' if p.get('activo') else '🟢 Activar'} {p.get('mensaje_nombre', '?')}",
+                callback_data=f"wsp_prog_toggle_{p['id']}_{0 if p.get('activo') else 1}"
+            ),
+            InlineKeyboardButton(text="🗑", callback_data=f"wsp_prog_del_{p['id']}"),
+        ])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("wsp_prog_toggle_"))
+async def cb_wsp_prog_toggle(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    parts = call.data.replace("wsp_prog_toggle_", "").split("_")
+    prog_id = int(parts[0])
+    activo = int(parts[1]) if len(parts) > 1 else 1
+    import wsp_bridge as wsp
+    await wsp.wsp_toggle_programado(prog_id, activo)
+    await call.answer(f"{'🟢 Activado' if activo else '🔴 Desactivado'}", show_alert=True)
+    await cb_wsp_programados(call)
+
+
+@dp.callback_query(F.data.startswith("wsp_prog_del_"))
+async def cb_wsp_prog_del(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    prog_id = int(call.data.replace("wsp_prog_del_", ""))
+    import wsp_bridge as wsp
+    await wsp.wsp_eliminar_programado(prog_id)
+    await call.answer("✅ Envío programado eliminado.", show_alert=True)
+    await cb_wsp_programados(call)
+
+
+# ╔══════════════════════════════════════╗
+# ║    ESTADISTICAS POR GRUPO WSP       ║
+# ╚══════════════════════════════════════╝
+
+@dp.callback_query(F.data == "wsp_grupo_stats")
+async def cb_wsp_grupo_stats(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_grupo_stats(call.from_user.id)
+    stats = r.get("stats", []) if r.get("ok") else []
+    texto = "📊 ESTADÍSTICAS POR GRUPO\n\n"
+    if stats:
+        for i, s in enumerate(stats[:30], 1):
+            link = s.get("grupo_link", "?")
+            if len(link) > 30:
+                link = link[:30] + "..."
+            tasa = s.get("tasa_exito", 0)
+            emoji = "🟢" if tasa >= 80 else ("🟡" if tasa >= 50 else "🔴")
+            texto += (
+                f"{i}. {emoji} {link}\n"
+                f"   ✅{s.get('exitos', 0)} ❌{s.get('fallidos', 0)} "
+                f"📊{tasa}% | Último: {s.get('ultima_fecha', '?')}\n\n"
+            )
+    else:
+        texto += "(sin estadísticas aún)\n"
     botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     if len(texto) > 4000:
         texto = texto[:4000] + "\n(truncado)"
