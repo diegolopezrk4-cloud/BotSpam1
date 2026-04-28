@@ -1417,9 +1417,12 @@ async function loadChart(dias){
   if(!canvas)return;
   if(_chartInstance){_chartInstance.destroy();_chartInstance=null}
   if(!r.ok||!r.data||!r.data.length){
-    canvas.parentElement.innerHTML='<div class="empty-state"><p>Sin datos de envios</p></div><canvas id="enviosChart" style="display:none"></canvas>';
+    canvas.parentElement.innerHTML='<div class="empty-state"><p>Sin datos de envios</p></div><canvas id="enviosChart"></canvas>';
     return;
   }
+  const emptyDiv=canvas.parentElement.querySelector('.empty-state');
+  if(emptyDiv)emptyDiv.style.display='none';
+  canvas.style.display='';
   const isDark=!document.documentElement.getAttribute('data-theme');
   const textColor=isDark?'#94a3b8':'#555770';
   const gridColor=isDark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.08)';
@@ -1459,7 +1462,7 @@ async function loadPlantillas(){
   if(!p.length){$('plantillasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay plantillas. Crea una.</p></div>';return}
   let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre</th><th>Mensaje</th><th>Acciones</th></tr></thead><tbody>';
   p.forEach((x,i)=>{
-    h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${(x.mensaje||'').slice(0,60)}</td>`;
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre||'?')}</b></td><td style="font-size:12px;color:var(--text2)">${esc((x.mensaje||'').slice(0,60))}</td>`;
     h+=`<td style="white-space:nowrap"><button class="btn btn-sm btn-primary" onclick="usarPlantilla(${x.id})">📤 Usar</button> <button class="btn btn-sm btn-danger" onclick="eliminarPlantilla(${x.id})">🗑</button></td></tr>`;
   });
   h+='</tbody></table></div>';$('plantillasContent').innerHTML=h;
