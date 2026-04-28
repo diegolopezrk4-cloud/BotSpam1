@@ -708,7 +708,7 @@ poll();
                 }
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
                 try {
-                    const chats = await motor.listarChatsPersonales(sock);
+                    const chats = await motor.listarChatsPersonales(sock, userId);
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, total: chats.length, chats }));
                 } catch (e) {
@@ -733,9 +733,11 @@ poll();
                 }
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
                 try {
-                    const started = await motor.enviarAPersonales(userId, mensaje, null, sock);
+                    const result = await motor.enviarAPersonales(userId, mensaje, null, sock);
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo o no hay chats" }));
+                    if (result === true) return res.end(JSON.stringify({ ok: true, message: "envio iniciado" }));
+                    if (result === "activo") return res.end(JSON.stringify({ ok: false, error: "ya hay un envio activo. Usa /wspcancelarpersonal para cancelarlo." }));
+                    return res.end(JSON.stringify({ ok: false, error: "no se encontraron chats personales. La cuenta necesita unos minutos para sincronizar." }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -791,9 +793,11 @@ poll();
                 }
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
                 try {
-                    const started = await motor.enviarAMiembrosGrupo(userId, grupoJid, mensaje, null, sock);
+                    const result = await motor.enviarAMiembrosGrupo(userId, grupoJid, mensaje, null, sock);
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: started, message: started ? "envio a miembros iniciado" : "ya hay un envio activo" }));
+                    if (result === true) return res.end(JSON.stringify({ ok: true, message: "envio a miembros iniciado" }));
+                    if (result === "activo") return res.end(JSON.stringify({ ok: false, error: "ya hay un envio activo. Usa /wspcancelarpersonal para cancelarlo." }));
+                    return res.end(JSON.stringify({ ok: false, error: "no se encontraron miembros en el grupo" }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -1527,10 +1531,10 @@ async function showEnvioPersonal(jid) {
         if (!sock) {
             return await send(jid, "\u274C No hay cuenta WSP conectada.\nVincula una cuenta primero desde Telegram.\n\n*0.* Volver");
         }
-        const chats = await motor.listarChatsPersonales(sock);
+        const chats = await motor.listarChatsPersonales(sock, jid);
         if (!chats.length) {
             return await send(jid,
-                `\u274C No se encontraron chats personales.\n\nAsegurate de que el bot tenga conversaciones abiertas con tus clientes.\n\n*0.* Volver`
+                `\u274C No se encontraron chats personales.\n\nLa cuenta necesita unos minutos para sincronizar el historial de chats despues de conectarse.\n\n*0.* Volver`
             );
         }
         let texto = `\u{1F4E8} *ENVIO PERSONAL*\n\n`;

@@ -8,6 +8,56 @@ const tareasActivas = {};    // { campanaId: { running, cancel } }
 const responderActivos = {}; // { userId: { running, cancel } }
 const clientSessions = {};   // { "userId_nombre": socket }
 const pendingLinks = {};     // { "userId_nombre": { qr, status, error } }
+const clientChats = {};      // { "userId_nombre": { jid: { id, name } } } — chats capturados
+
+function setupChatCapture(sock, key) {
+    if (!clientChats[key]) clientChats[key] = {};
+    sock.ev.on("messaging-history.set", ({ chats, contacts }) => {
+        if (chats) {
+            for (const c of chats) {
+                if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                    clientChats[key][c.id] = { id: c.id, name: c.name || c.notify || null };
+                }
+            }
+        }
+        if (contacts) {
+            for (const c of contacts) {
+                if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                    if (!clientChats[key][c.id]) clientChats[key][c.id] = { id: c.id };
+                    clientChats[key][c.id].name = c.name || c.notify || clientChats[key][c.id].name || null;
+                }
+            }
+        }
+    });
+    sock.ev.on("chats.upsert", (newChats) => {
+        for (const c of newChats) {
+            if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                if (!clientChats[key][c.id]) clientChats[key][c.id] = { id: c.id };
+                if (c.name) clientChats[key][c.id].name = c.name;
+            }
+        }
+    });
+    sock.ev.on("contacts.upsert", (newContacts) => {
+        for (const c of newContacts) {
+            if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                if (!clientChats[key][c.id]) clientChats[key][c.id] = { id: c.id };
+                clientChats[key][c.id].name = c.name || c.notify || clientChats[key][c.id].name || null;
+            }
+        }
+    });
+    sock.ev.on("messages.upsert", ({ messages }) => {
+        for (const m of messages) {
+            const jid = m.key?.remoteJid;
+            if (jid && jid.endsWith("@s.whatsapp.net") && jid !== "status@broadcast") {
+                if (!clientChats[key][jid]) {
+                    clientChats[key][jid] = { id: jid, name: m.pushName || null };
+                } else if (m.pushName && !clientChats[key][jid].name) {
+                    clientChats[key][jid].name = m.pushName;
+                }
+            }
+        }
+    });
+}
 const reporteInterval = {};  // { userId: intervalId }
 
 // Limite de envios diarios por cuenta (proteccion anti-ban)
@@ -46,6 +96,8 @@ async function connectClientAccount(userId, nombre, telefono) {
         retryRequestDelayMs: 2000,
     });
     sock.ev.on("creds.update", saveCreds);
+    const chatKey = `${userId}_${nombre}`;
+    setupChatCapture(sock, chatKey);
 
     return new Promise((resolve, reject) => {
         let resolved = false;
@@ -53,8 +105,7 @@ async function connectClientAccount(userId, nombre, telefono) {
             const { connection, lastDisconnect } = update;
             if (connection === "open" && !resolved) {
                 resolved = true;
-                const key = `${userId}_${nombre}`;
-                clientSessions[key] = sock;
+                clientSessions[chatKey] = sock;
                 resolve(sock);
             }
             if (connection === "close" && !resolved) {
@@ -127,6 +178,7 @@ async function linkAccount(userId, nombre) {
                 retryRequestDelayMs: 2000,
             });
             sock.ev.on("creds.update", freshSave);
+            setupChatCapture(sock, key);
             linkData.sock = sock;
 
             sock.ev.on("connection.update", async (update) => {
@@ -855,37 +907,61 @@ function getCampanasActivas() {
 const DELAY_ENTRE_ENVIOS = 10000; // 10 segundos entre cada envio
 const envioPersonalActivo = {};
 
-async function listarChatsPersonales(botSock) {
+async function listarChatsPersonales(sock, userId) {
     const chats = [];
-    try {
-        const contacts = await botSock.fetchAllContacts?.() || [];
-        for (const c of contacts) {
-            if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
-                const num = c.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+    // 1. Buscar chats capturados en clientChats (de eventos messaging-history, chats.upsert, messages.upsert)
+    for (const key of Object.keys(clientChats)) {
+        if (!userId || key.startsWith(userId + "_")) {
+            const stored = clientChats[key];
+            for (const jid of Object.keys(stored)) {
+                const c = stored[jid];
+                const num = jid.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "");
                 chats.push({
-                    jid: c.id,
-                    nombre: c.name || c.notify || num,
+                    jid: jid,
+                    nombre: c.name || num,
                     numero: num,
                 });
             }
         }
-    } catch (e) {
-        console.error(`Error listando chats personales: ${e.message}`);
     }
-    return chats;
+    // 2. Fallback: intentar fetchAllContacts si existe (versiones antiguas de Baileys)
+    if (!chats.length) {
+        try {
+            const contacts = await sock.fetchAllContacts?.() || [];
+            for (const c of contacts) {
+                if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                    const num = c.id.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "");
+                    chats.push({
+                        jid: c.id,
+                        nombre: c.name || c.notify || num,
+                        numero: num,
+                    });
+                }
+            }
+        } catch (e) {
+            console.error(`Error en fetchAllContacts: ${e.message}`);
+        }
+    }
+    // Eliminar duplicados por jid
+    const seen = new Set();
+    return chats.filter(c => {
+        if (seen.has(c.jid)) return false;
+        seen.add(c.jid);
+        return true;
+    });
 }
 
 async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
-    if (envioPersonalActivo[userId]) return false;
+    if (envioPersonalActivo[userId]) return "activo";
     let cancelled = false;
     const task = { running: true, cancel: () => { cancelled = true; } };
     envioPersonalActivo[userId] = task;
 
     try {
-        const chats = await listarChatsPersonales(botSock);
+        const chats = await listarChatsPersonales(botSock, userId);
         if (!chats.length) {
             delete envioPersonalActivo[userId];
-            try { await botSock.sendMessage(userId, { text: "\u274C No se encontraron chats personales." }); } catch (e) {}
+            try { await botSock.sendMessage(userId, { text: "\u274C No se encontraron chats personales. La cuenta necesita tiempo para sincronizar el historial de chats." }); } catch (e) {}
             return false;
         }
 
@@ -1010,10 +1086,13 @@ async function listarMiembrosGrupo(sock, groupJid) {
     const miembros = [];
     try {
         const metadata = await sock.groupMetadata(groupJid);
+        console.log(`[miembros] Grupo ${groupJid}: ${metadata?.participants?.length || 0} participantes encontrados`);
         if (!metadata || !metadata.participants) return miembros;
         for (const p of metadata.participants) {
-            if (p.id && p.id.endsWith("@s.whatsapp.net") && p.id !== "status@broadcast") {
-                const num = p.id.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "");
+            if (!p.id || p.id === "status@broadcast") continue;
+            // Aceptar @s.whatsapp.net y @lid (linked device IDs)
+            if (p.id.endsWith("@s.whatsapp.net") || p.id.endsWith("@lid")) {
+                const num = p.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
                 miembros.push({
                     jid: p.id,
                     numero: num,
@@ -1022,13 +1101,13 @@ async function listarMiembrosGrupo(sock, groupJid) {
             }
         }
     } catch (e) {
-        console.error(`Error listando miembros del grupo: ${e.message}`);
+        console.error(`Error listando miembros del grupo ${groupJid}: ${e.message}`);
     }
     return miembros;
 }
 
 async function enviarAMiembrosGrupo(userId, groupJid, mensaje, imagenPath, sock) {
-    if (envioPersonalActivo[userId]) return false;
+    if (envioPersonalActivo[userId]) return "activo";
     let cancelled = false;
     const task = { running: true, cancel: () => { cancelled = true; } };
     envioPersonalActivo[userId] = task;
