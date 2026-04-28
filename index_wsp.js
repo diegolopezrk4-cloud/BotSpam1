@@ -92,6 +92,7 @@ function isAdmin(jid) {
 
 // --- Enviar mensaje helper ---
 async function send(jid, text) {
+    if (!botSock) { console.log(`[NO-WSP] send(${jid}): ${text.substring(0, 80)}...`); return; }
     botIsSending = true;
     try {
         const result = await botSock.sendMessage(jid, { text });
@@ -102,6 +103,7 @@ async function send(jid, text) {
 }
 
 async function sendImage(jid, imagePath, caption = "") {
+    if (!botSock) { console.log(`[NO-WSP] sendImage(${jid})`); return; }
     botIsSending = true;
     try {
         if (fs.existsSync(imagePath)) {
@@ -544,12 +546,6 @@ server.listen(QR_PORT, "0.0.0.0", () => {
 
 // --- INICIO DEL BOT ---
 async function startBot() {
-    db.init();
-    db.setAdminJids(adminJids);
-    fs.mkdirSync("sessions", { recursive: true });
-    fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
-    fs.mkdirSync("media", { recursive: true });
-
     const { state, saveCreds } = await useMultiFileAuthState("sessions");
 
     let version;
@@ -2617,4 +2613,20 @@ async function showReporteDiario(jid) {
 }
 
 // --- INICIAR ---
-startBot();
+const NO_WSP_BOT = process.env.NO_WSP_BOT === "1" || process.env.NO_WSP_BOT === "true";
+
+// Inicializar DB y directorios siempre (necesario para API)
+db.init();
+db.setAdminJids(adminJids);
+fs.mkdirSync("sessions", { recursive: true });
+fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
+fs.mkdirSync("media", { recursive: true });
+
+if (NO_WSP_BOT) {
+    botStatus = "solo_api";
+    console.log("\n\u{1F4E1} Modo SOLO API (sin cuenta de bot WSP).");
+    console.log("   Notificaciones y comandos solo por Telegram.");
+    console.log(`   API disponible en http://0.0.0.0:${QR_PORT}\n`);
+} else {
+    startBot();
+}
