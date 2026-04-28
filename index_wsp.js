@@ -695,11 +695,20 @@ poll();
                 }
             }
 
-            // GET /api/chats_personales — Listar chats personales
+            // GET /api/chats_personales?u=USER_ID — Listar chats personales
             if (url.pathname === "/api/chats_personales" && req.method === "GET") {
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                const userId = url.searchParams.get("u");
+                // Buscar sock: botSock o cuenta cliente
+                let sock = botSock;
+                if (!sock && userId) {
+                    const sesiones = db.getSesiones(userId);
+                    for (const s of sesiones) {
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); break; } catch (e) {}
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
                 try {
-                    const chats = await motor.listarChatsPersonales(botSock);
+                    const chats = await motor.listarChatsPersonales(sock);
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, total: chats.length, chats }));
                 } catch (e) {
@@ -713,9 +722,17 @@ poll();
                 const userId = body.u;
                 const mensaje = body.mensaje;
                 if (!userId || !mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje" })); }
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                // Buscar sock: botSock o cuenta cliente
+                let sock = botSock;
+                if (!sock) {
+                    const sesiones = db.getSesiones(userId);
+                    for (const s of sesiones) {
+                        try { sock = await motor.getOrConnectClient(userId, s.nombre); break; } catch (e) {}
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "sin cuenta WSP conectada" })); }
                 try {
-                    const started = await motor.enviarAPersonales(userId, mensaje, null, botSock);
+                    const started = await motor.enviarAPersonales(userId, mensaje, null, sock);
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
                 } catch (e) {
@@ -1449,7 +1466,18 @@ async function showEnvioPersonal(jid) {
     if (!await checkMembership(jid)) return;
     await send(jid, "\u{1F50D} Buscando chats personales...");
     try {
-        const chats = await motor.listarChatsPersonales(botSock);
+        // Usar botSock o cuenta cliente
+        let sock = botSock;
+        if (!sock) {
+            const sesiones = db.getSesiones(jid);
+            for (const s of sesiones) {
+                try { sock = await motor.getOrConnectClient(jid, s.nombre); break; } catch (e) {}
+            }
+        }
+        if (!sock) {
+            return await send(jid, "\u274C No hay cuenta WSP conectada.\nVincula una cuenta primero desde Telegram.\n\n*0.* Volver");
+        }
+        const chats = await motor.listarChatsPersonales(sock);
         if (!chats.length) {
             return await send(jid,
                 `\u274C No se encontraron chats personales.\n\nAsegurate de que el bot tenga conversaciones abiertas con tus clientes.\n\n*0.* Volver`
@@ -1986,9 +2014,20 @@ async function handleFSM(jid, msg, text, trimmed, state) {
             }
             const mensaje = trimmed;
             clearState(jid);
+            // Usar botSock o cuenta cliente
+            let personalSock = botSock;
+            if (!personalSock) {
+                const sesiones = db.getSesiones(jid);
+                for (const s of sesiones) {
+                    try { personalSock = await motor.getOrConnectClient(jid, s.nombre); break; } catch (e) {}
+                }
+            }
+            if (!personalSock) {
+                return await send(jid, "\u274C No hay cuenta WSP conectada. Vincula una cuenta primero.");
+            }
             if (data.modo === "todos") {
                 const allJids = data.chats.map(c => c.jid);
-                motor.enviarASeleccionados(jid, allJids, mensaje, null, botSock);
+                motor.enviarASeleccionados(jid, allJids, mensaje, null, personalSock);
                 return await send(jid,
                     `\u{1F4E8} *Envio personal iniciado!*\n\n` +
                     `\u{1F464} Contactos: ${allJids.length}\n` +
@@ -1997,7 +2036,7 @@ async function handleFSM(jid, msg, text, trimmed, state) {
                     `Escribe *cancelar envio* para detener.`
                 );
             } else {
-                motor.enviarASeleccionados(jid, data.jids, mensaje, null, botSock);
+                motor.enviarASeleccionados(jid, data.jids, mensaje, null, personalSock);
                 return await send(jid,
                     `\u{1F4E8} *Envio personal iniciado!*\n\n` +
                     `\u{1F464} Contactos: ${data.jids.length}\n` +
