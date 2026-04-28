@@ -378,7 +378,15 @@ function getSesiones(userId) {
     return db.prepare("SELECT * FROM sesiones WHERE user_id = ? AND activa = 1").all(userId);
 }
 
+function ensureUser(userId) {
+    const exists = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(String(userId));
+    if (!exists) {
+        crearUsuario(String(userId), "TG_" + userId);
+    }
+}
+
 function agregarSesion(userId, nombre, telefono) {
+    ensureUser(userId);
     const existente = db.prepare("SELECT id FROM sesiones WHERE user_id = ? AND nombre = ? AND activa = 1").get(userId, nombre);
     if (existente) {
         db.prepare("UPDATE sesiones SET telefono = ? WHERE user_id = ? AND nombre = ? AND activa = 1").run(telefono, userId, nombre);
@@ -398,6 +406,7 @@ function getGrupos(userId) {
 }
 
 function agregarGrupo(userId, link, nombre = null) {
+    ensureUser(userId);
     const existente = db.prepare("SELECT id, nombre FROM grupos WHERE user_id = ? AND link = ?").get(userId, link);
     if (!existente) {
         db.prepare("INSERT INTO grupos (user_id, link, nombre) VALUES (?, ?, ?)").run(userId, link, nombre);
@@ -444,6 +453,7 @@ function getCampanas(userId) {
 }
 
 function crearCampana(userId, nombre, mensaje, imagenPath = null) {
+    ensureUser(userId);
     const result = db.prepare("INSERT INTO campanas (user_id, nombre, mensaje, imagen_path) VALUES (?, ?, ?, ?)").run(userId, nombre, mensaje, imagenPath);
     return result.lastInsertRowid;
 }
@@ -837,7 +847,7 @@ module.exports = {
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
     activarMembresiaByCodigo, desactivarByCodigo, banByCodigo,
     desactivarByNumber, banByNumber,
-    tieneMembresia, getTodosUsuarios,
+    tieneMembresia, getTodosUsuarios, ensureUser,
     getSesiones, agregarSesion, eliminarSesion,
     getGrupos, agregarGrupo, eliminarGrupo, eliminarGrupoPorLink, eliminarTodosGrupos, actualizarGrupoLink,
     getCampanas, crearCampana, getCampanaById, actualizarStatsCampana,
