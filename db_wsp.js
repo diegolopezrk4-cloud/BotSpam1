@@ -1698,10 +1698,12 @@ function eliminarTgCampana(userId, id) {
     let botDb;
     try {
         botDb = openBotDbWrite(); if (!botDb) return false;
+        const owns = botDb.prepare("SELECT id FROM campanas WHERE id = ? AND user_id = ?").get(id, Number(userId));
+        if (!owns) return false;
         botDb.prepare("DELETE FROM campana_sesiones WHERE campana_id = ?").run(id);
         botDb.prepare("DELETE FROM campana_grupos WHERE campana_id = ?").run(id);
         botDb.prepare("DELETE FROM campana_config WHERE campana_id = ?").run(id);
-        botDb.prepare("DELETE FROM campanas WHERE id = ? AND user_id = ?").run(id, Number(userId));
+        botDb.prepare("DELETE FROM campanas WHERE id = ?").run(id);
         return true;
     } catch (e) { return false; }
     finally { if (botDb) botDb.close(); }
@@ -1838,7 +1840,7 @@ function setTgConfigEnvio(userId, delay, lote, pausa) {
     try {
         botDb = openBotDbWrite(); if (!botDb) return false;
         botDb.prepare("CREATE TABLE IF NOT EXISTS tg_config_envio (user_id INTEGER PRIMARY KEY, delay_seg INTEGER DEFAULT 10, lote_tamano INTEGER DEFAULT 0, lote_pausa_seg INTEGER DEFAULT 30)").run();
-        botDb.prepare("INSERT OR REPLACE INTO tg_config_envio (user_id, delay_seg, lote_tamano, lote_pausa_seg) VALUES (?, ?, ?, ?)").run(Number(userId), delay || 10, lote || 0, pausa || 30);
+        botDb.prepare("INSERT OR REPLACE INTO tg_config_envio (user_id, delay_seg, lote_tamano, lote_pausa_seg) VALUES (?, ?, ?, ?)").run(Number(userId), delay ?? 10, lote ?? 0, pausa ?? 30);
         return true;
     } catch (e) { return false; }
     finally { if (botDb) botDb.close(); }
