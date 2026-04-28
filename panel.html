@@ -234,13 +234,14 @@ table tr:hover { background: rgba(108,92,231,0.05); }
   <div class="auth-card">
     <div class="logo">📝</div>
     <h1>Crear Cuenta</h1>
-    <p class="subtitle">Registrate para acceder al panel</p>
+    <p class="subtitle">Registrate para acceder al panel — Demo 1 dia gratis</p>
     <input type="text" id="regId" placeholder="Tu ID de Telegram" autocomplete="off">
+    <input type="text" id="regUsername" placeholder="Nombre de usuario" autocomplete="off">
     <input type="password" id="regPass" placeholder="Crear contrasena">
     <input type="password" id="regPass2" placeholder="Confirmar contrasena">
     <ul class="password-rules">
       <li>Minimo 4 caracteres</li>
-      <li>Necesitas membresia activa para registrarte</li>
+      <li>Obtendras 1 dia de demo gratis al registrarte</li>
     </ul>
     <button class="btn-main" onclick="doRegister()" id="btnRegister">Registrarse</button>
     <div class="divider"></div>
@@ -278,6 +279,8 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="listanegra"><span class="icon">🚫</span><span>Lista Negra</span></a>
       <a href="#" data-section="autoresp"><span class="icon">🤖</span><span>Auto-Responder</span></a>
       <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas</span></a>
+      <div class="nav-group admin-only" style="display:none">Admin</div>
+      <a href="#" data-section="admin" class="admin-only" style="display:none"><span class="icon">👑</span><span>Admin Panel</span></a>
     </nav>
     <div class="bottom-actions">
       <button onclick="showCambiarPass()">🔑 <span>Cambiar Contrasena</span></button>
@@ -441,6 +444,52 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <h2>📈 Estadisticas por Grupo</h2>
       <div id="statsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
+
+    <!-- ADMIN -->
+    <div class="section" id="sec-admin">
+      <h2>👑 Panel de Administrador</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Gestiona usuarios y membresias desde aqui.</p>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="loadAdminUsuarios()">🔄 Actualizar Lista</button>
+      </div>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px">
+        <h3 style="margin-bottom:10px">💰 Planes de Membresia</h3>
+        <div style="display:flex;gap:15px;flex-wrap:wrap">
+          <div style="background:var(--bg2);padding:15px;border-radius:10px;flex:1;min-width:200px;border:1px solid var(--accent)">
+            <h4 style="color:var(--accent)">Semanal</h4>
+            <div style="font-size:24px;font-weight:bold;margin:10px 0">S/ 15</div>
+            <div style="color:var(--text2);font-size:13px">7 dias de acceso completo</div>
+          </div>
+          <div style="background:var(--bg2);padding:15px;border-radius:10px;flex:1;min-width:200px;border:1px solid var(--accent2)">
+            <h4 style="color:var(--accent2)">Mensual</h4>
+            <div style="font-size:24px;font-weight:bold;margin:10px 0">S/ 30</div>
+            <div style="color:var(--text2);font-size:13px">30 dias de acceso completo</div>
+          </div>
+        </div>
+      </div>
+      <div id="adminContent" class="empty-state"><div class="icon">👑</div><p>Cargando usuarios...</p></div>
+    </div>
+
+    <!-- MEMBRESIA BLOQUEADA OVERLAY -->
+    <div id="membresiaOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:9999;display:none;align-items:center;justify-content:center">
+      <div style="background:var(--bg2);padding:40px;border-radius:15px;text-align:center;max-width:500px;margin:20px">
+        <div style="font-size:48px;margin-bottom:15px">🔒</div>
+        <h2 style="margin-bottom:15px">Membresia Requerida</h2>
+        <p style="color:var(--text2);margin-bottom:20px" id="membresiaMsg">Tu periodo de prueba ha terminado. Adquiere una membresia para usar todas las funciones.</p>
+        <div style="display:flex;gap:15px;justify-content:center;flex-wrap:wrap;margin-bottom:20px">
+          <div style="background:var(--bg);padding:15px 25px;border-radius:10px;border:1px solid var(--accent)">
+            <div style="color:var(--accent);font-weight:bold">Semanal</div>
+            <div style="font-size:22px;font-weight:bold;margin:5px 0">S/ 15</div>
+          </div>
+          <div style="background:var(--bg);padding:15px 25px;border-radius:10px;border:1px solid var(--accent2)">
+            <div style="color:var(--accent2);font-weight:bold">Mensual</div>
+            <div style="font-size:22px;font-weight:bold;margin:5px 0">S/ 30</div>
+          </div>
+        </div>
+        <p style="color:var(--text2);font-size:13px">Contacta al administrador para activar tu membresia.</p>
+        <button class="btn btn-outline" style="margin-top:15px" onclick="doLogout()">Cerrar Sesion</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -483,6 +532,9 @@ function showForgot(){
     <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Entendido</button></div>`);
 }
 
+let esAdmin=false;
+let membresiaActiva=true;
+
 async function doLogin(){
   const id=$('loginId').value.trim(),pass=$('loginPass').value;
   if(!id||!pass){showErr('loginError','Ingresa ID y contrasena');return}
@@ -490,41 +542,64 @@ async function doLogin(){
   const r=await api('/api/panel_login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id,password:pass})});
   $('btnLogin').disabled=false;$('btnLogin').textContent='Iniciar Sesion';
   if(!r.ok){
-    const msgs={'no_membresia':'Membresia no activa. Contacta al admin para renovar.','no_registrado':'No tienes cuenta. Registrate primero.','password_incorrecta':'Contrasena incorrecta.'};
+    const msgs={'no_registrado':'No tienes cuenta. Registrate primero.','password_incorrecta':'Contrasena incorrecta.'};
     showErr('loginError',msgs[r.error]||r.error||'Error');return;
   }
   userId=id;
+  esAdmin=r.es_admin||false;
   localStorage.setItem('panel_uid',id);localStorage.setItem('panel_token',r.token);
+  localStorage.setItem('panel_admin',esAdmin?'1':'0');
   showApp();
 }
 
 async function doRegister(){
-  const id=$('regId').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
+  const id=$('regId').value.trim(),username=$('regUsername').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
   hideMsg('regError');hideMsg('regSuccess');
-  if(!id||!pass){showErr('regError','Completa todos los campos');return}
+  if(!id||!username||!pass){showErr('regError','Completa todos los campos');return}
   if(pass.length<4){showErr('regError','La contrasena debe tener minimo 4 caracteres');return}
   if(pass!==pass2){showErr('regError','Las contrasenas no coinciden');return}
   $('btnRegister').disabled=true;$('btnRegister').textContent='Registrando...';
-  const r=await api('/api/panel_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id,password:pass})});
+  const r=await api('/api/panel_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id,password:pass,username})});
   $('btnRegister').disabled=false;$('btnRegister').textContent='Registrarse';
   if(!r.ok){
-    const msgs={'no_membresia':'Membresia no activa. Necesitas membresia para registrarte.','ya_registrado':'Ya tienes cuenta. Inicia sesion.'};
+    const msgs={'ya_registrado':'Ya tienes cuenta. Inicia sesion.'};
     showErr('regError',msgs[r.error]||r.error||'Error');return;
   }
-  showMsg('regSuccess','Registro exitoso! Ahora inicia sesion.');
+  showMsg('regSuccess','Registro exitoso! Demo de 1 dia activado. Inicia sesion.');
   setTimeout(()=>{showLogin();$('loginId').value=id},2000);
 }
 
-function doLogout(){localStorage.removeItem('panel_uid');localStorage.removeItem('panel_token');location.reload()}
+function doLogout(){localStorage.removeItem('panel_uid');localStorage.removeItem('panel_token');localStorage.removeItem('panel_admin');location.reload()}
 
 function showErr(id,msg){const el=$(id);el.style.display='block';el.textContent=msg;el.className='auth-error';el.style.display='block'}
 function showMsg(id,msg){const el=$(id);el.style.display='block';el.textContent=msg}
 function hideMsg(id){$(id).style.display='none'}
 
-function showApp(){
+async function showApp(){
   $('authLogin').style.display='none';$('authRegister').style.display='none';
   $('app').style.display='block';
   $('sideUserId').textContent=userId;
+  // Check admin
+  esAdmin=localStorage.getItem('panel_admin')==='1';
+  // Verificar membresia
+  const m=await api('/api/check_membresia?u='+userId);
+  if(m.ok){
+    esAdmin=m.es_admin||esAdmin;
+    membresiaActiva=m.activa;
+    if(m.membresia){
+      const info=m.membresia;
+      if(!info.activo && !esAdmin){
+        $('membresiaOverlay').style.display='flex';
+        if(info.plan==='demo')$('membresiaMsg').textContent='Tu demo de 1 dia ha terminado. Adquiere una membresia para continuar.';
+        else $('membresiaMsg').textContent='Tu membresia '+info.plan+' ha expirado. Renueva para seguir usando el panel.';
+      }
+    }
+  }
+  // Mostrar items admin
+  if(esAdmin){
+    document.querySelectorAll('.admin-only').forEach(el=>el.style.display='');
+    localStorage.setItem('panel_admin','1');
+  }
   loadDashboard();
 }
 
@@ -554,7 +629,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios};
     if(loaders[sec])loaders[sec]();
   });
 });
@@ -897,12 +972,56 @@ async function agregarMiembrosAGrupo(){
 // --- STATS ---
 async function loadStats(){
   const r=await api('/api/grupo_stats?u='+userId);
-  if(!r.ok){$('statsContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  if(!r.ok){$('statsContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
   const s=r.stats||[];
   if(!s.length){$('statsContent').innerHTML='<div class="empty-state"><div class="icon">📈</div><p>Sin stats. Envia mensajes para generar datos.</p></div>';return}
   let h='<div class="table-wrap"><table><thead><tr><th>Grupo</th><th>Enviados</th><th>OK</th><th>Error</th><th>Tasa</th></tr></thead><tbody>';
-  s.forEach(x=>{const t=x.total?Math.round((x.exitosos/x.total)*100):0,c=t>=80?'badge-success':t>=50?'badge-warn':'badge-danger';h+=`<tr><td style="font-size:11px">${(x.grupo||x.link||'?').slice(0,40)}</td><td>${x.total||0}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td><td><span class="badge ${c}">${t}%</span></td></tr>`});
+  s.forEach(x=>{
+    const env=x.enviados||0,ok=x.exitos||0,fail=x.fallidos||0;
+    const t=x.tasa_exito||0;
+    const c=t>=80?'badge-success':t>=50?'badge-warn':'badge-danger';
+    h+=`<tr><td style="font-size:11px">${(x.grupo_link||'?').slice(0,40)}</td><td>${env}</td><td style="color:var(--success)">${ok}</td><td style="color:var(--danger)">${fail}</td><td><span class="badge ${c}">${t}%</span></td></tr>`;
+  });
   h+='</tbody></table></div>';$('statsContent').innerHTML=h;
+}
+
+// --- ADMIN ---
+async function loadAdminUsuarios(){
+  if(!esAdmin){$('adminContent').innerHTML='<div class="empty-state"><p>No tienes permisos de admin</p></div>';return}
+  $('adminContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando usuarios...</div>';
+  const r=await api('/api/admin/usuarios?u='+userId);
+  if(!r.ok){$('adminContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
+  const users=r.usuarios||[];
+  if(!users.length){$('adminContent').innerHTML='<div class="empty-state"><div class="icon">👑</div><p>No hay usuarios registrados</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>👤 '+users.length+' Usuarios</h3></div>';
+  h+='<table><thead><tr><th>ID</th><th>Usuario</th><th>Plan</th><th>Expira</th><th>Admin</th><th>Acciones</th></tr></thead><tbody>';
+  users.forEach(u=>{
+    const exp=u.fecha_expira?new Date(u.fecha_expira).toLocaleDateString('es'):'N/A';
+    const activo=u.es_admin||(!u.fecha_expira?false:new Date(u.fecha_expira)>new Date());
+    const planBadge=u.es_admin?'<span class="badge badge-info">Admin</span>':activo?'<span class="badge badge-success">'+u.plan+'</span>':'<span class="badge badge-danger">'+(u.plan||'sin plan')+' (exp)</span>';
+    h+=`<tr><td style="font-size:11px">${u.telegram_id}</td><td>${u.username||'-'}</td><td>${planBadge}</td><td style="font-size:11px">${exp}</td>`;
+    h+=`<td>${u.es_admin?'Si':'No'}</td>`;
+    h+=`<td style="display:flex;gap:5px;flex-wrap:wrap">`;
+    h+=`<button class="btn btn-sm btn-primary" onclick="adminActivar('${u.telegram_id}','semanal',7)">7d</button>`;
+    h+=`<button class="btn btn-sm btn-success" onclick="adminActivar('${u.telegram_id}','mensual',30)">30d</button>`;
+    if(!u.es_admin)h+=`<button class="btn btn-sm btn-outline" onclick="adminSetAdmin('${u.telegram_id}',true)">+Admin</button>`;
+    else h+=`<button class="btn btn-sm btn-danger" onclick="adminSetAdmin('${u.telegram_id}',false)">-Admin</button>`;
+    h+=`</td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  $('adminContent').innerHTML=h;
+}
+async function adminActivar(tid,plan,dias){
+  if(!confirm('Activar '+plan+' ('+dias+' dias) para '+tid+'?'))return;
+  const r=await api('/api/admin/membresia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid,plan,dias})});
+  toast(r.ok?'Membresia activada':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadAdminUsuarios();
+}
+async function adminSetAdmin(tid,val){
+  if(!confirm((val?'Hacer':'Quitar')+' admin a '+tid+'?'))return;
+  const r=await api('/api/admin/set_admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid,es_admin:val})});
+  toast(r.ok?'Admin actualizado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadAdminUsuarios();
 }
 
 // --- INIT ---

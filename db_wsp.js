@@ -246,6 +246,10 @@ function init() {
         CREATE TABLE IF NOT EXISTS panel_users (
             telegram_id TEXT PRIMARY KEY,
             password TEXT NOT NULL,
+            username TEXT DEFAULT '',
+            es_admin INTEGER DEFAULT 0,
+            plan TEXT DEFAULT 'demo',
+            fecha_expira TEXT DEFAULT (datetime('now', '+1 day')),
             fecha_registro TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS recovery_codes (
@@ -284,6 +288,15 @@ function init() {
         db.exec("ALTER TABLE campana_config ADD COLUMN espera_cuenta INTEGER DEFAULT 300");
         db.exec("ALTER TABLE campana_config ADD COLUMN espera_ciclo INTEGER DEFAULT 600");
         console.log("   Columnas 'espera_cuenta/espera_ciclo' agregadas");
+    }
+    try {
+        db.prepare("SELECT username FROM panel_users LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE panel_users ADD COLUMN username TEXT DEFAULT ''");
+        db.exec("ALTER TABLE panel_users ADD COLUMN es_admin INTEGER DEFAULT 0");
+        db.exec("ALTER TABLE panel_users ADD COLUMN plan TEXT DEFAULT 'demo'");
+        db.exec("ALTER TABLE panel_users ADD COLUMN fecha_expira TEXT DEFAULT NULL");
+        console.log("   Columnas admin/plan/username agregadas a panel_users");
     }
     console.log("\u2705 Base de datos WSP inicializada");
 }
@@ -1157,6 +1170,30 @@ function getPanelUser(telegramId) {
 function registrarPanelUser(telegramId, password) {
     db.prepare("INSERT OR REPLACE INTO panel_users (telegram_id, password) VALUES (?, ?)").run(String(telegramId), password);
 }
+function registrarPanelUserCompleto(telegramId, password, username) {
+    const expiraDemo = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    db.prepare(`INSERT OR REPLACE INTO panel_users (telegram_id, password, username, es_admin, plan, fecha_expira)
+        VALUES (?, ?, ?, 0, 'demo', ?)`).run(String(telegramId), password, username || '', expiraDemo);
+}
+function setAdminPanel(telegramId, esAdmin) {
+    db.prepare("UPDATE panel_users SET es_admin = ? WHERE telegram_id = ?").run(esAdmin ? 1 : 0, String(telegramId));
+}
+function activarMembresiPanel(telegramId, plan, dias) {
+    const expira = new Date(Date.now() + dias * 24 * 60 * 60 * 1000).toISOString();
+    db.prepare("UPDATE panel_users SET plan = ?, fecha_expira = ? WHERE telegram_id = ?").run(plan, expira, String(telegramId));
+}
+function checkMembresiPanel(telegramId) {
+    const user = getPanelUser(telegramId);
+    if (!user) return { activo: false, plan: null, expira: null };
+    if (user.es_admin) return { activo: true, plan: 'admin', expira: null, es_admin: true };
+    if (!user.fecha_expira) return { activo: false, plan: user.plan || 'sin_plan', expira: null };
+    const expira = new Date(user.fecha_expira);
+    const activo = Date.now() < expira.getTime();
+    return { activo, plan: user.plan, expira: user.fecha_expira, es_admin: false };
+}
+function getAllPanelUsers() {
+    return db.prepare("SELECT telegram_id, username, es_admin, plan, fecha_expira, fecha_registro FROM panel_users").all();
+}
 
 // --- RECOVERY CODES ---
 function crearRecoveryCode(telegramId) {
@@ -1271,7 +1308,8 @@ module.exports = {
     // Membresia TG
     checkMembresiaTg,
     // Panel users
-    getPanelUser, registrarPanelUser,
+    getPanelUser, registrarPanelUser, registrarPanelUserCompleto,
+    setAdminPanel, activarMembresiPanel, checkMembresiPanel, getAllPanelUsers,
     // Recovery codes
     crearRecoveryCode, validarRecoveryCode, marcarRecoveryCodeUsado, resetPasswordConCodigo,
     // Chats personales (persistencia)

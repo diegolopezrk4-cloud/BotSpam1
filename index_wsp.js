@@ -1159,40 +1159,38 @@ if(uid())loadAll();
             if (url.pathname === "/api/check_membresia" && req.method === "GET") {
                 const telegramId = url.searchParams.get("u");
                 if (!telegramId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
-                const activa = db.checkMembresiaTg(telegramId);
+                const membresia = db.checkMembresiPanel(telegramId);
+                const user = db.getPanelUser(telegramId);
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, activa }));
+                return res.end(JSON.stringify({ ok: true, activa: membresia.activo, membresia, es_admin: user?.es_admin ? true : false }));
             }
 
-            // POST /api/panel_registro — Registrar usuario del panel
+            // POST /api/panel_registro — Registrar usuario del panel (con demo 1 dia)
             if (url.pathname === "/api/panel_registro" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
-                const activa = db.checkMembresiaTg(body.telegram_id);
-                if (!activa) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_membresia" })); }
+                if (!body.telegram_id || !body.password || !body.username) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id, password o username" })); }
                 const existing = db.getPanelUser(body.telegram_id);
                 if (existing) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: "ya_registrado" })); }
                 const crypto = require("crypto");
                 const hash = crypto.createHash("sha256").update(body.password).digest("hex");
-                db.registrarPanelUser(body.telegram_id, hash);
+                db.registrarPanelUserCompleto(body.telegram_id, hash, body.username);
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, msg: "Registro exitoso" }));
+                return res.end(JSON.stringify({ ok: true, msg: "Registro exitoso. Demo de 1 dia activado." }));
             }
 
             // POST /api/panel_login — Login del panel
             if (url.pathname === "/api/panel_login" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
-                const activa = db.checkMembresiaTg(body.telegram_id);
-                if (!activa) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_membresia" })); }
                 const user = db.getPanelUser(body.telegram_id);
                 if (!user) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "no_registrado" })); }
                 const crypto = require("crypto");
                 const hash = crypto.createHash("sha256").update(body.password).digest("hex");
                 if (user.password !== hash) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "password_incorrecta" })); }
                 const token = crypto.randomBytes(32).toString("hex");
+                const membresia = db.checkMembresiPanel(body.telegram_id);
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, token, telegram_id: body.telegram_id }));
+                return res.end(JSON.stringify({ ok: true, token, telegram_id: body.telegram_id, es_admin: user.es_admin ? true : false, membresia }));
             }
 
             // POST /api/panel_cambiar_password — Cambiar contraseña
@@ -1231,6 +1229,39 @@ if(uid())loadAll();
                 if (!ok) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "codigo_invalido" })); }
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, msg: "Password reseteada exitosamente" }));
+            }
+
+            // GET /api/admin/usuarios?u=ADMIN_ID — Listar usuarios del panel (solo admin)
+            if (url.pathname === "/api/admin/usuarios" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!adminId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const admin = db.getPanelUser(adminId);
+                if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
+                const usuarios = db.getAllPanelUsers();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, usuarios }));
+            }
+
+            // POST /api/admin/membresia — Activar/cambiar membresía { admin_id, telegram_id, plan, dias }
+            if (url.pathname === "/api/admin/membresia" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.admin_id || !body.telegram_id || !body.plan || !body.dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                const admin = db.getPanelUser(body.admin_id);
+                if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
+                db.activarMembresiPanel(body.telegram_id, body.plan, parseInt(body.dias));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Membresia actualizada" }));
+            }
+
+            // POST /api/admin/set_admin — Hacer/quitar admin { admin_id, telegram_id, es_admin }
+            if (url.pathname === "/api/admin/set_admin" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.admin_id || !body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "faltan campos" })); }
+                const admin = db.getPanelUser(body.admin_id);
+                if (!admin || !admin.es_admin) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "no_admin" })); }
+                db.setAdminPanel(body.telegram_id, body.es_admin ? true : false);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
             }
 
             // Endpoint no encontrado
