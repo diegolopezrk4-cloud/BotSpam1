@@ -719,6 +719,7 @@ poll();
 
             // POST /api/enviar_personal — Enviar mensaje a chats personales
             if (url.pathname === "/api/enviar_personal" && req.method === "POST") {
+                const body = await readBody();
                 const userId = body.u;
                 const mensaje = body.mensaje;
                 if (!userId || !mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje" })); }
@@ -743,6 +744,7 @@ poll();
 
             // POST /api/cancelar_envio_personal — Cancelar envio personal
             if (url.pathname === "/api/cancelar_envio_personal" && req.method === "POST") {
+                const body = await readBody();
                 const userId = body.u;
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const stopped = motor.detenerEnvioPersonal(userId);
@@ -775,6 +777,7 @@ poll();
 
             // POST /api/enviar_miembros — Enviar DM a miembros de un grupo
             if (url.pathname === "/api/enviar_miembros" && req.method === "POST") {
+                const body = await readBody();
                 const userId = body.u;
                 const grupoJid = body.grupo;
                 const mensaje = body.mensaje;

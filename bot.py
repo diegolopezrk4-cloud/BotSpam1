@@ -3574,12 +3574,53 @@ async def cb_wsp_personal(call: types.CallbackQuery):
 
     texto += f"\nPara enviar a todos:\n/wsppersonal Tu mensaje aqui\n\nDelay: 10 seg entre cada envio (anti-ban)"
     botones = [
-        [InlineKeyboardButton(text="Cancelar envio activo", callback_data="wsp_cancelar_personal")],
-        [InlineKeyboardButton(text="Volver a WSP", callback_data="sec_wsp")],
+        [InlineKeyboardButton(text="🔍 Detectar chats", callback_data="wsp_detectar_chats")],
+        [InlineKeyboardButton(text="🛑 Cancelar envio activo", callback_data="wsp_cancelar_personal")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
+
+
+@dp.callback_query(F.data == "wsp_detectar_chats")
+async def cb_wsp_detectar_chats(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    await safe_edit(call.message, "🔍 Detectando todos los chats personales...")
+    await call.answer()
+    r = await wsp.wsp_chats_personales(call.from_user.id)
+    botones_back = [
+        [InlineKeyboardButton(text="🔙 Volver a Envio Personal", callback_data="wsp_personal")],
+        [InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")],
+    ]
+    kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
+    if not r.get("ok"):
+        await safe_edit(call.message, f"Error: {r.get('error')}", reply_markup=kb_back)
+        return
+
+    total = r.get("total", 0)
+    chats = r.get("chats", [])
+    if not total:
+        await safe_edit(call.message,
+            "📭 No se encontraron chats personales.\n\n"
+            "La cuenta WSP no tiene conversaciones abiertas aun.",
+            reply_markup=kb_back)
+        return
+
+    texto = f"🔍 *CHATS PERSONALES DETECTADOS: {total}*\n\n"
+    for i, c in enumerate(chats[:50], 1):
+        nombre = c.get("nombre", "?")
+        numero = c.get("numero", "?")
+        texto += f"  {i}. {nombre} — {numero}\n"
+    if total > 50:
+        texto += f"\n  ... y {total - 50} chats mas\n"
+    texto += f"\n━━━━━━━━━━━━━━━━━━\nTotal: {total} chat(s) personales"
+    texto += f"\n\nPara enviar a todos:\n/wsppersonal Tu mensaje aqui"
+    if len(texto) > 4000:
+        texto = texto[:4000] + "\n(truncado)"
+    await safe_edit(call.message, texto, reply_markup=kb_back)
 
 
 @dp.message(Command("wsppersonal"))
@@ -3633,18 +3674,18 @@ async def cb_wsp_miembros(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
     import wsp_bridge as wsp
-    r = await wsp.wsp_detectar(call.from_user.id)
+    await safe_edit(call.message, "🔍 Buscando grupos desde tus cuentas WSP...")
+    await call.answer()
+    r = await wsp.wsp_detectar_cliente(call.from_user.id)
     botones_back = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
     if not r.get("ok"):
         await safe_edit(call.message, f"Error: {r.get('error')}", reply_markup=kb_back)
-        await call.answer()
         return
 
     grupos = r.get("grupos", [])
     if not grupos:
         await safe_edit(call.message, "No se encontraron grupos.", reply_markup=kb_back)
-        await call.answer()
         return
 
     texto = f"👥 *ENVIO A MIEMBROS*\n\nSelecciona un grupo para extraer sus miembros y enviarles DM:\n\n"
