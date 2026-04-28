@@ -1180,6 +1180,29 @@ if(uid())loadAll();
                 return res.end(JSON.stringify({ ok: true, msg: "Password actualizada" }));
             }
 
+            // POST /api/panel_generar_recovery — Generar código de recuperación
+            if (url.pathname === "/api/panel_generar_recovery" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                const user = db.getPanelUser(body.telegram_id);
+                if (!user) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "no_registrado" })); }
+                const code = db.crearRecoveryCode(body.telegram_id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, code }));
+            }
+
+            // POST /api/panel_reset_password — Resetear password con código de recuperación
+            if (url.pathname === "/api/panel_reset_password" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.code || !body.new_password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta code o new_password" })); }
+                const crypto = require("crypto");
+                const newHash = crypto.createHash("sha256").update(body.new_password).digest("hex");
+                const ok = db.resetPasswordConCodigo(body.code, newHash);
+                if (!ok) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "codigo_invalido" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Password reseteada exitosamente" }));
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));

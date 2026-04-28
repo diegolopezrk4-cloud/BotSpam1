@@ -108,6 +108,9 @@ class SeleccionGruposState(StatesGroup):
     esperando_numeros_tg = State()
     esperando_numeros_detectar = State()
 
+class RecuperPassState(StatesGroup):
+    esperando_nueva_password = State()
+
 class MensajeTgState(StatesGroup):
     esperando_nombre = State()
     esperando_texto = State()
@@ -3367,7 +3370,7 @@ async def cb_sec_wsp(call: types.CallbackQuery):
 async def cb_wsp_panelweb(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
-    link = f"http://{WSP_IP}:3000/panel?u={call.from_user.id}"
+    link = f"http://{WSP_IP}:3001/panel?u={call.from_user.id}"
     texto = (
         f"🌐 PANEL WEB COMPLETO\n\n"
         f"Abre este enlace en tu navegador:\n\n"
@@ -3395,12 +3398,82 @@ async def cb_wsp_panelweb(call: types.CallbackQuery):
 async def cmd_panelweb(msg: types.Message):
     if not await verificar_membresia(msg):
         return
-    link = f"http://{WSP_IP}:3000/panel?u={msg.from_user.id}"
+    link = f"http://{WSP_IP}:3001/panel?u={msg.from_user.id}"
     await msg.answer(
         f"🌐 PANEL WEB COMPLETO\n\n"
         f"Abre en tu navegador:\n{link}\n\n"
         f"Maneja TODO desde el panel: cuentas, grupos, mensajes, envíos, campañas, config, stats y más."
     )
+
+
+# --- RECUPERAR CONTRASEÑA DEL PANEL ---
+@dp.message(Command("recuperpass"))
+async def cmd_recuperpass(msg: types.Message, command: CommandObject, state: FSMContext):
+    codigo = (command.args or "").strip().upper()
+    if not codigo:
+        # Sin código → generar uno nuevo
+        import wsp_bridge as wsp
+        r = await wsp.wsp_generar_recovery(msg.from_user.id)
+        if not r.get("ok"):
+            error = r.get("error", "")
+            if error == "no_registrado":
+                await msg.answer("❌ No tienes cuenta en el panel web. Primero regístrate desde el panel.")
+            else:
+                await msg.answer(f"❌ Error: {error}")
+            return
+        code = r.get("code", "???")
+        await msg.answer(
+            f"🔑 *RECUPERAR CONTRASEÑA*\n\n"
+            f"Tu código de recuperación es:\n\n"
+            f"```{code}```\n\n"
+            f"⚠️ Este código es de *un solo uso* y expira en *15 minutos*.\n\n"
+            f"Ahora escribe:\n"
+            f"`/recuperpass {code}`\n\n"
+            f"Y te pediré tu nueva contraseña.",
+            parse_mode="Markdown"
+        )
+        return
+
+    # Con código → pedir nueva contraseña
+    await state.set_state(RecuperPassState.esperando_nueva_password)
+    await state.update_data(recovery_code=codigo)
+    await msg.answer(
+        "✏️ Escribe tu *nueva contraseña* (mínimo 4 caracteres):\n\n"
+        "Escribe /cancelar para cancelar.",
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(RecuperPassState.esperando_nueva_password)
+async def process_nueva_password(msg: types.Message, state: FSMContext):
+    if msg.text and msg.text.strip().lower() == "/cancelar":
+        await state.clear()
+        await msg.answer("❌ Recuperación cancelada.")
+        return
+
+    nueva = (msg.text or "").strip()
+    if len(nueva) < 4:
+        await msg.answer("⚠️ La contraseña debe tener mínimo 4 caracteres. Intenta de nuevo:")
+        return
+
+    data = await state.get_data()
+    codigo = data.get("recovery_code", "")
+    await state.clear()
+
+    import wsp_bridge as wsp
+    r = await wsp.wsp_reset_password(codigo, nueva)
+    if r.get("ok"):
+        await msg.answer(
+            "✅ *Contraseña actualizada exitosamente*\n\n"
+            "Ya puedes iniciar sesión en el panel web con tu nueva contraseña.",
+            parse_mode="Markdown"
+        )
+    else:
+        error = r.get("error", "")
+        if error == "codigo_invalido":
+            await msg.answer("❌ Código inválido o expirado. Genera uno nuevo con /recuperpass")
+        else:
+            await msg.answer(f"❌ Error: {error}")
 
 
 # --- CUENTAS WSP ---

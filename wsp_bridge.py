@@ -228,3 +228,10 @@ async def wsp_autojoin(user_id, links, cuenta=None):
     if cuenta:
         data["cuenta"] = cuenta
     return await _post("/api/autojoin", data)
+
+# --- RECOVERY PASSWORD ---
+async def wsp_generar_recovery(telegram_id):
+    return await _post("/api/panel_generar_recovery", {"telegram_id": str(telegram_id)})
+
+async def wsp_reset_password(code, new_password):
+    return await _post("/api/panel_reset_password", {"code": code, "new_password": new_password})

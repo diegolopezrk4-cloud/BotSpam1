@@ -248,6 +248,13 @@ function init() {
             password TEXT NOT NULL,
             fecha_registro TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS recovery_codes (
+            telegram_id TEXT NOT NULL,
+            code TEXT NOT NULL UNIQUE,
+            usado INTEGER DEFAULT 0,
+            fecha TEXT DEFAULT (datetime('now')),
+            expira TEXT DEFAULT (datetime('now', '+15 minutes'))
+        );
     `);
 
     // Migraciones
@@ -1143,6 +1150,29 @@ function registrarPanelUser(telegramId, password) {
     db.prepare("INSERT OR REPLACE INTO panel_users (telegram_id, password) VALUES (?, ?)").run(String(telegramId), password);
 }
 
+// --- RECOVERY CODES ---
+function crearRecoveryCode(telegramId) {
+    const crypto = require("crypto");
+    const code = crypto.randomBytes(4).toString("hex").toUpperCase();
+    db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(String(telegramId));
+    db.prepare("INSERT INTO recovery_codes (telegram_id, code) VALUES (?, ?)").run(String(telegramId), code);
+    return code;
+}
+function validarRecoveryCode(code) {
+    const row = db.prepare("SELECT * FROM recovery_codes WHERE code = ? AND usado = 0 AND datetime('now') < expira").get(String(code).toUpperCase());
+    return row || null;
+}
+function marcarRecoveryCodeUsado(code) {
+    db.prepare("UPDATE recovery_codes SET usado = 1 WHERE code = ?").run(String(code).toUpperCase());
+}
+function resetPasswordConCodigo(code, newPasswordHash) {
+    const row = validarRecoveryCode(code);
+    if (!row) return false;
+    marcarRecoveryCodeUsado(code);
+    registrarPanelUser(row.telegram_id, newPasswordHash);
+    return true;
+}
+
 function checkMembresiaTg(telegramId) {
     try {
         const Database = require("better-sqlite3");
@@ -1209,4 +1239,6 @@ module.exports = {
     checkMembresiaTg,
     // Panel users
     getPanelUser, registrarPanelUser,
+    // Recovery codes
+    crearRecoveryCode, validarRecoveryCode, marcarRecoveryCodeUsado, resetPasswordConCodigo,
 };

@@ -218,6 +218,9 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <input type="text" id="loginId" placeholder="Tu ID de Telegram" autocomplete="off">
     <input type="password" id="loginPass" placeholder="Contrasena">
     <button class="btn-main" onclick="doLogin()" id="btnLogin">Iniciar Sesion</button>
+    <p style="color:var(--text2);font-size:12px;margin-top:8px;margin-bottom:4px">
+      <button class="link-btn" onclick="showForgot()" style="font-size:12px">Olvide mi contrasena</button>
+    </p>
     <div class="divider"></div>
     <p style="color:var(--text2);font-size:13px;margin-bottom:8px">Primera vez?</p>
     <button class="link-btn" onclick="showRegister()">Crear cuenta</button>
@@ -406,6 +409,17 @@ $('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
 // --- AUTH ---
 function showLogin(){$('authLogin').style.display='flex';$('authRegister').style.display='none'}
 function showRegister(){$('authLogin').style.display='none';$('authRegister').style.display='flex'}
+function showForgot(){
+  showModal(`<h3>🔑 Recuperar Contrasena</h3>
+    <p style="color:var(--text2);font-size:14px;line-height:1.6;margin-bottom:15px">
+      Para recuperar tu contrasena, ve al <b>bot de Telegram</b> y escribe:<br><br>
+      <code style="background:var(--bg);padding:6px 12px;border-radius:6px;font-size:15px;color:var(--accent2)">/recuperpass</code><br><br>
+      El bot te dara un <b>codigo unico de un solo uso</b>.<br>
+      Luego escribe: <code style="background:var(--bg);padding:4px 8px;border-radius:4px;font-size:13px">/recuperpass CODIGO</code><br>
+      y podras poner tu nueva contrasena.
+    </p>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Entendido</button></div>`);
+}
 
 async function doLogin(){
   const id=$('loginId').value.trim(),pass=$('loginPass').value;
