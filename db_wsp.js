@@ -219,6 +219,25 @@ function init() {
         db.exec("ALTER TABLE campana_config ADD COLUMN espera_ciclo INTEGER DEFAULT 600");
         console.log("   Columnas 'espera_cuenta/espera_ciclo' agregadas");
     }
+    // Migración: es_admin, tipo_membresia, username
+    try {
+        db.prepare("SELECT es_admin FROM usuarios LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE usuarios ADD COLUMN es_admin INTEGER DEFAULT 0");
+        console.log("   Columna 'es_admin' agregada a usuarios");
+    }
+    try {
+        db.prepare("SELECT tipo_membresia FROM usuarios LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE usuarios ADD COLUMN tipo_membresia TEXT DEFAULT 'wsp+tg'");
+        console.log("   Columna 'tipo_membresia' agregada a usuarios");
+    }
+    try {
+        db.prepare("SELECT username FROM usuarios LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE usuarios ADD COLUMN username TEXT DEFAULT ''");
+        console.log("   Columna 'username' agregada a usuarios");
+    }
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -863,15 +882,22 @@ function exportarCampanas(userId) {
 // --- PANEL AUTH ---
 function panelLogin(telegramId, password) {
     const user = db.prepare("SELECT * FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
-    if (!user) return { ok: false, error: "Usuario no registrado" };
-    if (user.password !== password) return { ok: false, error: "Contraseña incorrecta" };
-    return { ok: true, telegram_id: user.telegram_id, username: user.username };
+    if (!user) return { ok: false, error: "no_registrado" };
+    if (user.password !== password) return { ok: false, error: "password_incorrecta" };
+    const usu = db.prepare("SELECT es_admin FROM usuarios WHERE wsp_id = ?").get(String(telegramId));
+    return { ok: true, telegram_id: user.telegram_id, username: user.username, es_admin: usu ? (usu.es_admin === 1) : false };
 }
 
 function panelRegistro(telegramId, password, username) {
     const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
-    if (existing) return { ok: false, error: "Ya estás registrado" };
+    if (existing) return { ok: false, error: "ya_registrado" };
     db.prepare("INSERT INTO panel_users (telegram_id, username, password) VALUES (?, ?, ?)").run(String(telegramId), username || '', password);
+    // Crear usuario principal si no existe y darle 1 dia demo
+    const user = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(String(telegramId));
+    if (!user) {
+        crearUsuario(String(telegramId), username || '');
+        activarMembresia(String(telegramId), 1);
+    }
     return { ok: true };
 }
 
@@ -884,9 +910,22 @@ function panelCambiarPassword(telegramId, oldPass, newPass) {
 }
 
 function checkMembresia(userId) {
-    const sesiones = getSesiones(userId);
-    if (sesiones.length > 0) return { ok: true, activa: true, tipo: "wsp" };
-    return { ok: true, activa: true, tipo: "free" };
+    const user = getUsuario(userId);
+    const usu = db.prepare("SELECT es_admin FROM usuarios WHERE wsp_id = ?").get(String(userId));
+    const esAdmin = usu ? (usu.es_admin === 1) : false;
+    if (!user) return { ok: true, activa: false, es_admin: esAdmin, membresia: null };
+    const activo = user.plan === 'permanente' || (user.fecha_expira && new Date(user.fecha_expira) > new Date());
+    return {
+        ok: true,
+        activa: activo || esAdmin,
+        es_admin: esAdmin,
+        membresia: {
+            plan: user.plan,
+            fecha_expira: user.fecha_expira,
+            activo: activo || esAdmin,
+            tipo_membresia: user.tipo_membresia || 'wsp+tg',
+        }
+    };
 }
 
 // --- TEMPLATE (mensajes) EXTRAS ---
@@ -967,6 +1006,30 @@ function getTasaEntrega(userId) {
 
 function getDb() { return db; }
 
+// --- ADMIN ---
+function setAdmin(wspId, esAdmin) {
+    db.prepare("UPDATE usuarios SET es_admin = ? WHERE wsp_id = ?").run(esAdmin ? 1 : 0, String(wspId));
+}
+
+function setTipoMembresia(wspId, tipo) {
+    db.prepare("UPDATE usuarios SET tipo_membresia = ? WHERE wsp_id = ?").run(tipo || "wsp+tg", String(wspId));
+}
+
+function getTodosUsuariosAdmin() {
+    const users = db.prepare("SELECT * FROM usuarios ORDER BY fecha_registro DESC").all();
+    return users.map(u => ({
+        telegram_id: u.wsp_id,
+        username: u.username || u.nombre || "",
+        plan: u.plan || "sin_plan",
+        fecha_expira: u.fecha_expira || null,
+        activo: u.activo,
+        fecha_registro: u.fecha_registro,
+        es_admin: u.es_admin || 0,
+        tipo_membresia: u.tipo_membresia || "wsp+tg",
+        origen: "bot",
+    }));
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -1006,4 +1069,6 @@ module.exports = {
     getAutoRespuestas, agregarAutoRespuesta, eliminarAutoRespuesta, limpiarAutoRespuestas,
     // Tasa entrega
     getTasaEntrega,
+    // Admin
+    setAdmin, setTipoMembresia, getTodosUsuariosAdmin,
 };

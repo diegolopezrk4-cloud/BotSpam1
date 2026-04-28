@@ -162,8 +162,27 @@ const server = http.createServer(async (req, res) => {
             return res.end("<h1>Error: falta parametro u (user) o n (nombre)</h1>");
         }
 
+        // Guardar sesion en DB si no existe
+        try {
+            const existentes = db.getSesiones(userId);
+            const yaExiste = existentes.some(s => s.nombre === nombre);
+            if (!yaExiste) {
+                db.agregarSesion(userId, nombre, "pendiente");
+            }
+        } catch (e) { console.error("Error guardando sesion:", e.message); }
+
         // Iniciar proceso de vinculacion
-        motor.linkAccount(userId, nombre).catch(e => {
+        motor.linkAccount(userId, nombre).then(() => {
+            // Actualizar telefono real cuando se vincula
+            const key = `${userId}_${nombre}`;
+            const sock = motor.clientSessions ? motor.clientSessions[key] : null;
+            if (sock && sock.user && sock.user.id) {
+                const realPhone = sock.user.id.split(":")[0].split("@")[0];
+                try {
+                    db.getDb().prepare("UPDATE sesiones SET telefono=? WHERE user_id=? AND nombre=?").run(realPhone, userId, nombre);
+                } catch (e) {}
+            }
+        }).catch(e => {
             console.error(`Link error: ${e.message}`);
         });
 
@@ -908,27 +927,43 @@ poll();
 
             // ─── ADMIN ENDPOINTS ───
             if (url.pathname === "/api/admin/usuarios" && req.method === "GET") {
-                const usuarios = db.getTodosUsuarios();
+                const usuarios = db.getTodosUsuariosAdmin();
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, usuarios }));
             }
             if (url.pathname === "/api/admin/membresia" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.user_id || !body.dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta user_id o dias" })); }
-                let user = db.getUsuario(body.user_id);
-                if (!user) user = db.findUserByNumber(body.user_id);
-                if (!user) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "usuario no encontrado" })); }
-                db.activarMembresia(user.wsp_id, parseInt(body.dias));
+                const tid = body.telegram_id || body.user_id;
+                const dias = parseInt(body.dias) || 0;
+                const plan = body.plan || (dias >= 36500 ? "permanente" : dias >= 30 ? "mensual" : dias >= 7 ? "semanal" : "diario");
+                if (!tid || !dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o dias" })); }
+                let user = db.getUsuario(tid);
+                if (!user) user = db.findUserByNumber(tid);
+                if (!user) {
+                    db.crearUsuario(tid, body.username || "");
+                    user = db.getUsuario(tid);
+                }
+                if (plan === "permanente") {
+                    db.getDb().prepare("UPDATE usuarios SET plan='permanente', activo=1, fecha_expira=NULL WHERE wsp_id=?").run(user.wsp_id);
+                } else {
+                    db.activarMembresia(user.wsp_id, dias);
+                }
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
             if (url.pathname === "/api/admin/set_admin" && req.method === "POST") {
                 const body = await readBody();
+                const tid = body.telegram_id || body.user_id;
+                if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                db.setAdmin(tid, body.es_admin);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
             if (url.pathname === "/api/admin/tipo_membresia" && req.method === "POST") {
                 const body = await readBody();
+                const tid = body.telegram_id || body.user_id;
+                if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                db.setTipoMembresia(tid, body.tipo);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
