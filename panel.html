@@ -64,6 +64,7 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
   position: fixed; left: 0; top: 0; bottom: 0; width: 250px;
   background: var(--bg2); border-right: 1px solid var(--border); padding: 20px 0;
   overflow-y: auto; z-index: 100; transition: width 0.3s;
+  display: flex; flex-direction: column;
 }
 .sidebar .brand { padding: 0 20px 15px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
 .sidebar .brand h2 { color: var(--accent2); font-size: 18px; display: flex; align-items: center; gap: 8px; }
@@ -74,7 +75,7 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 }
 .sidebar .user-info .uid { color: var(--accent2); font-weight: 700; font-size: 14px; }
 .sidebar .user-info .label { color: var(--text2); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
-.sidebar nav { padding: 5px 0; }
+.sidebar nav { padding: 5px 0; flex: 1; overflow-y: auto; }
 .sidebar nav .nav-group { padding: 5px 20px 5px; font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 10px; }
 .sidebar nav a {
   display: flex; align-items: center; gap: 10px; padding: 11px 20px;
@@ -85,7 +86,7 @@ body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background
 .sidebar nav a.active { background: var(--bg3); color: var(--accent2); border-left-color: var(--accent); font-weight: 600; }
 .sidebar nav a .icon { font-size: 17px; width: 22px; text-align: center; }
 .sidebar .bottom-actions {
-  position: absolute; bottom: 0; left: 0; right: 0; padding: 15px;
+  padding: 15px; flex-shrink: 0;
   border-top: 1px solid var(--border); background: var(--bg2);
 }
 .sidebar .bottom-actions button {
