@@ -997,22 +997,23 @@ async def enviar_a_chats(user_id, nombre_sesion, mensaje_id, bot_notificar=None)
 # ─────────────────────────────────────────
 #   DETECTAR GRUPOS Y CARPETAS DE TELEGRAM
 # ─────────────────────────────────────────
-async def detectar_grupos_telegram(user_id):
+async def detectar_grupos_telegram(user_id, nombre_sesion=None):
     """Lee todos los grupos/supergrupos del Telegram del usuario.
+    Si nombre_sesion es None, usa la primera cuenta.
     Retorna lista de dicts con info de cada grupo."""
     from telethon.tl.types import Channel, Chat
     sesiones = await get_sesiones(user_id)
     if not sesiones:
         return None, "No tienes cuentas registradas."
 
-    nombre = sesiones[0]['nombre']
-    path = get_session_path(user_id, nombre)
-    client = TelegramClient(path, API_ID, API_HASH)
+    nombre = nombre_sesion or sesiones[0]['nombre']
+    client = await pool_obtener_cliente(user_id, nombre)
+    if not client:
+        return None, f"Cuenta '{nombre}' no autorizada. Vincúlala de nuevo."
+
+    pool_registrar_campana(user_id, nombre, f"detect_grupos_{user_id}")
 
     try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            return None, f"Cuenta '{nombre}' no autorizada. Vincúlala de nuevo."
 
         dialogs = await client.get_dialogs(limit=500)
         grupos = []
@@ -1051,28 +1052,26 @@ async def detectar_grupos_telegram(user_id):
     except Exception as e:
         return None, f"Error: {str(e)[:100]}"
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        await pool_liberar_campana(user_id, nombre, f"detect_grupos_{user_id}")
 
 
-async def detectar_carpetas_telegram(user_id):
+async def detectar_carpetas_telegram(user_id, nombre_sesion=None):
     """Lee las carpetas (folders) del Telegram del usuario.
+    Si nombre_sesion es None, usa la primera cuenta.
     Retorna lista de carpetas con id y nombre."""
     from telethon.tl.functions.messages import GetDialogFiltersRequest
     sesiones = await get_sesiones(user_id)
     if not sesiones:
         return None, "No tienes cuentas registradas."
 
-    nombre = sesiones[0]['nombre']
-    path = get_session_path(user_id, nombre)
-    client = TelegramClient(path, API_ID, API_HASH)
+    nombre = nombre_sesion or sesiones[0]['nombre']
+    client = await pool_obtener_cliente(user_id, nombre)
+    if not client:
+        return None, f"Cuenta '{nombre}' no autorizada."
+
+    pool_registrar_campana(user_id, nombre, f"detect_carpetas_{user_id}")
 
     try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            return None, f"Cuenta '{nombre}' no autorizada."
 
         result = await client(GetDialogFiltersRequest())
         carpetas = []
@@ -1092,14 +1091,12 @@ async def detectar_carpetas_telegram(user_id):
     except Exception as e:
         return None, f"Error: {str(e)[:100]}"
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        await pool_liberar_campana(user_id, nombre, f"detect_carpetas_{user_id}")
 
 
-async def detectar_grupos_carpeta(user_id, folder_id):
+async def detectar_grupos_carpeta(user_id, folder_id, nombre_sesion=None):
     """Lee los grupos de una carpeta específica de Telegram.
+    Si nombre_sesion es None, usa la primera cuenta.
     Retorna lista de grupos filtrados por esa carpeta."""
     from telethon.tl.functions.messages import GetDialogFiltersRequest
     from telethon.tl.types import Channel, Chat, InputPeerChannel, InputPeerChat, InputPeerUser
@@ -1107,14 +1104,14 @@ async def detectar_grupos_carpeta(user_id, folder_id):
     if not sesiones:
         return None, "No tienes cuentas registradas."
 
-    nombre = sesiones[0]['nombre']
-    path = get_session_path(user_id, nombre)
-    client = TelegramClient(path, API_ID, API_HASH)
+    nombre = nombre_sesion or sesiones[0]['nombre']
+    client = await pool_obtener_cliente(user_id, nombre)
+    if not client:
+        return None, f"Cuenta '{nombre}' no autorizada."
+
+    pool_registrar_campana(user_id, nombre, f"detect_carpeta_{folder_id}")
 
     try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            return None, f"Cuenta '{nombre}' no autorizada."
 
         result = await client(GetDialogFiltersRequest())
         filters_list = getattr(result, 'filters', result)
@@ -1172,13 +1169,10 @@ async def detectar_grupos_carpeta(user_id, folder_id):
     except Exception as e:
         return None, f"Error: {str(e)[:100]}"
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        await pool_liberar_campana(user_id, nombre, f"detect_carpeta_{folder_id}")
 
 
-async def verificar_grupos_estado(user_id):
+async def verificar_grupos_estado(user_id, nombre_sesion=None):
     """Verifica el estado de todos los grupos guardados del usuario.
     Detecta cuáles están baneados, sin permiso, privados, etc.
     Retorna lista de dicts con estado de cada grupo."""
@@ -1186,15 +1180,14 @@ async def verificar_grupos_estado(user_id):
     if not sesiones:
         return None, "No tienes cuentas registradas."
 
-    nombre = sesiones[0]['nombre']
-    path = get_session_path(user_id, nombre)
-    client = TelegramClient(path, API_ID, API_HASH)
+    nombre = nombre_sesion or sesiones[0]['nombre']
+    client = await pool_obtener_cliente(user_id, nombre)
+    if not client:
+        return None, f"Cuenta '{nombre}' no autorizada."
+
+    pool_registrar_campana(user_id, nombre, f"verificar_grupos_{user_id}")
 
     try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            return None, f"Cuenta '{nombre}' no autorizada."
-
         grupos_guardados = await get_grupos(user_id)
         if not grupos_guardados:
             return [], nombre
@@ -1260,8 +1253,5 @@ async def verificar_grupos_estado(user_id):
     except Exception as e:
         return None, f"Error: {str(e)[:100]}"
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        await pool_liberar_campana(user_id, nombre, f"verificar_grupos_{user_id}")
 
