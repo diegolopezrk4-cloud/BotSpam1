@@ -627,6 +627,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <div style="display:flex;gap:10px;align-items:center">
           <select id="emCuenta" style="flex:1"><option value="">-- Cargando cuentas... --</option></select>
           <button class="btn btn-primary" onclick="cargarGruposCuenta()">🔄 Cargar Grupos</button>
+          <button class="btn btn-outline" onclick="cargarGruposCuenta(true)" title="Forzar recarga desde WhatsApp">♻ Refrescar</button>
         </div>
       </div>
       <div class="grid" style="grid-template-columns:1fr 1fr;margin-bottom:15px">
@@ -835,6 +836,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
             <div style="display:flex;gap:10px;align-items:center">
               <select id="promoGrupoCuenta" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)"><option value="">-- Selecciona cuenta --</option></select>
               <button class="btn btn-primary" onclick="cargarGruposPromoMiembros()">🔄 Cargar Grupos</button>
+              <button class="btn btn-outline" onclick="cargarGruposPromoMiembros(true)" title="Forzar recarga desde WhatsApp" style="padding:6px 10px;font-size:12px">♻</button>
             </div>
           </div>
           <div class="form-group">
@@ -2401,14 +2403,16 @@ async function descartarProgreso(){
   $('resumeBar').style.display='none';
   toast('Progreso descartado','success');
 }
-async function cargarGruposCuenta(){
+async function cargarGruposCuenta(forceRefresh){
   const cuenta=$('emCuenta').value;
   if(!cuenta){toast('Selecciona una cuenta primero','error');return}
   toast('Cargando grupos de '+cuenta+'...','success');
   const sel=$('emGrupo'),sel2=$('emDestino');
   sel.innerHTML='<option value="">-- Cargando... --</option>';
   sel2.innerHTML='<option value="">-- Cargando... --</option>';
-  const r=await api('/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
+  let url='/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta);
+  if(forceRefresh)url+='&refresh=1';
+  const r=await api(url);
   sel.innerHTML='<option value="">-- Selecciona grupo origen --</option>';
   sel2.innerHTML='<option value="">-- Opcional: grupo destino --</option>';
   if(r.ok){
@@ -2421,7 +2425,8 @@ async function cargarGruposCuenta(){
       sel.innerHTML+=`<option value="${g.jid}">${info}</option>`;
       sel2.innerHTML+=`<option value="${g.jid}">${info}</option>`;
     });
-    toast(postables.length+' grupos cargados ('+grupos.length+' total, filtrados solo donde puedes enviar)','success');
+    const cacheMsg=r.from_cache?' (desde cache)':' (actualizado)';
+    toast(postables.length+' grupos cargados'+cacheMsg,'success');
   }else{toast('Error: '+(r.error||''),'error')}
 }
 let _miembrosCache=[];
@@ -2886,13 +2891,15 @@ function togglePromoTipo(){
     lP.style.borderColor='var(--accent)';lM.style.borderColor='var(--border)';
   }
 }
-async function cargarGruposPromoMiembros(){
+async function cargarGruposPromoMiembros(forceRefresh){
   const cuenta=$('promoGrupoCuenta').value;
   if(!cuenta){toast('Selecciona una cuenta primero','error');return}
   toast('Cargando grupos de '+cuenta+'...','success');
   const sel=$('promoGrupo');
   sel.innerHTML='<option value="">-- Cargando... --</option>';
-  const r=await api('/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
+  let url='/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta);
+  if(forceRefresh)url+='&refresh=1';
+  const r=await api(url);
   sel.innerHTML='<option value="">-- Selecciona grupo --</option>';
   if(r.ok){
     const grupos=(r.grupos||[]).sort((a,b)=>(a.subject||'').localeCompare(b.subject||''));
@@ -2901,7 +2908,8 @@ async function cargarGruposPromoMiembros(){
       const badge=g.esAdmin?' [Admin]':'';
       sel.innerHTML+=`<option value="${g.jid}">${name}${badge} (${g.size} miembros)</option>`;
     });
-    toast(grupos.length+' grupos cargados','success');
+    const cacheMsg=r.from_cache?' (desde cache)':' (actualizado)';
+    toast(grupos.length+' grupos cargados'+cacheMsg,'success');
   }else{toast('Error: '+(r.error||''),'error')}
 }
 

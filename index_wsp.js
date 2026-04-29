@@ -906,9 +906,19 @@ poll();
             if (url.pathname === "/api/detectar_cliente" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 const cuenta = url.searchParams.get("cuenta");
+                const forceRefresh = url.searchParams.get("refresh") === "1";
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 try {
+                    // Check cache first (unless force refresh)
+                    if (cuenta && !forceRefresh) {
+                        const cached = db.getGruposCacheSesion(userId, cuenta);
+                        if (cached.length > 0) {
+                            res.writeHead(200);
+                            return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true }));
+                        }
+                    }
                     let sock;
+                    const sesionNombre = cuenta || null;
                     if (cuenta) {
                         sock = await motor.getOrConnectClient(userId, cuenta);
                     } else {
@@ -937,6 +947,10 @@ poll();
                             announce: g.announce || false, esAdmin, canPost
                         };
                     });
+                    // Cache groups for this session
+                    if (sesionNombre) {
+                        try { db.cacheGruposSesion(userId, sesionNombre, grupos); } catch (e) {}
+                    }
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, grupos }));
                 } catch (e) {

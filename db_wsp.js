@@ -415,6 +415,21 @@ function init() {
             fecha TEXT DEFAULT (datetime('now'))
         );
     `);
+    // Cache of groups per session
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS session_grupos_cache (
+            user_id TEXT,
+            sesion_nombre TEXT,
+            grupo_jid TEXT,
+            subject TEXT,
+            size INTEGER DEFAULT 0,
+            es_admin INTEGER DEFAULT 0,
+            can_post INTEGER DEFAULT 1,
+            announce INTEGER DEFAULT 0,
+            fecha_cache TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY(user_id, sesion_nombre, grupo_jid)
+        );
+    `);
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -641,6 +656,7 @@ function agregarSesion(userId, nombre, telefono) {
 function eliminarSesion(userId, nombre) {
     db.prepare("DELETE FROM sesiones WHERE user_id = ? AND nombre = ?").run(userId, nombre);
     db.prepare("DELETE FROM campana_sesiones WHERE sesion_nombre = ?").run(nombre);
+    db.prepare("DELETE FROM session_grupos_cache WHERE user_id = ? AND sesion_nombre = ?").run(userId, nombre);
 }
 
 // --- GRUPOS ---
@@ -1540,6 +1556,26 @@ function limpiarLogs(userId) {
     }
 }
 
+// --- SESSION GRUPOS CACHE ---
+function cacheGruposSesion(userId, sesionNombre, grupos) {
+    db.prepare("DELETE FROM session_grupos_cache WHERE user_id = ? AND sesion_nombre = ?").run(userId, sesionNombre);
+    const stmt = db.prepare("INSERT INTO session_grupos_cache (user_id, sesion_nombre, grupo_jid, subject, size, es_admin, can_post, announce) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    for (const g of grupos) {
+        stmt.run(userId, sesionNombre, g.jid, g.subject || '', g.size || 0, g.esAdmin ? 1 : 0, g.canPost !== false ? 1 : 0, g.announce ? 1 : 0);
+    }
+}
+function getGruposCacheSesion(userId, sesionNombre) {
+    return db.prepare("SELECT grupo_jid AS jid, subject, size, es_admin AS esAdmin, can_post AS canPost, announce, fecha_cache FROM session_grupos_cache WHERE user_id = ? AND sesion_nombre = ?").all(userId, sesionNombre).map(r => ({
+        jid: r.jid, subject: r.subject, size: r.size, esAdmin: !!r.esAdmin, canPost: !!r.canPost, announce: !!r.announce, cached: true, fecha_cache: r.fecha_cache
+    }));
+}
+function limpiarGruposCacheSesion(userId, sesionNombre) {
+    db.prepare("DELETE FROM session_grupos_cache WHERE user_id = ? AND sesion_nombre = ?").run(userId, sesionNombre);
+}
+function limpiarTodosGruposCacheUsuario(userId) {
+    db.prepare("DELETE FROM session_grupos_cache WHERE user_id = ?").run(userId);
+}
+
 function getPromoSentJids(userId) {
     return db.prepare(
         "SELECT DISTINCT grupo_link FROM historial_envios WHERE user_id = ? AND tipo_envio = 'personal' AND resultado IN ('enviado_personal', 'enviado_pending')"
@@ -1599,6 +1635,8 @@ module.exports = {
     getPromoKeywords, agregarPromoKeyword, eliminarPromoKeyword, limpiarPromoKeywords,
     // Promo sent tracking
     getPromoSentJids,
+    // Session grupos cache
+    cacheGruposSesion, getGruposCacheSesion, limpiarGruposCacheSesion, limpiarTodosGruposCacheUsuario,
     // Bot logs (Mejora 6)
     agregarLog, getLogs, limpiarLogs,
 };
