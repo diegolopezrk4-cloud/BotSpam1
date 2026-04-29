@@ -1233,6 +1233,10 @@ poll();
             }
             if (url.pathname === "/api/chat_personal_eliminar" && req.method === "POST") {
                 const body = await readBody();
+                if (body.u && body.numero) {
+                    const cuenta = body.cuenta || '';
+                    db.eliminarNumeroManual(body.u, cuenta, body.numero);
+                }
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
@@ -1588,6 +1592,8 @@ poll();
                 if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 db.registrarPromoEscucha(body.u, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '');
                 db.limpiarPromoRespuestas(body.u);
+                // Stop any existing listeners before re-registering
+                motor.detenerPromoEscucha(body.u);
                 // Start listening on all connected accounts
                 try {
                     const sesiones = db.getSesiones(body.u);

@@ -1339,7 +1339,8 @@ function iniciarSchedulerMiembros(botSock) {
                     if (prog.ultimo_envio) {
                         const lastSend = new Date(prog.ultimo_envio + "Z");
                         const hoyPeru = peruTime.toISOString().split("T")[0];
-                        const lastSendDate = lastSend.toISOString().split("T")[0];
+                        const lastSendPeru = new Date(lastSend.toLocaleString("en-US", { timeZone: "America/Lima" }));
+                        const lastSendDate = lastSendPeru.toISOString().split("T")[0];
                         if (lastSendDate === hoyPeru) continue;
                     }
                     // Execute the scheduled send
