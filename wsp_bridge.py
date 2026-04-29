@@ -1,4 +1,5 @@
 """Puente para controlar el bot de WhatsApp desde el bot de Telegram via API REST."""
+import asyncio
 import aiohttp
 import logging
 
@@ -6,23 +7,35 @@ logger = logging.getLogger(__name__)
 
 WSP_API_URL = "http://localhost:3000"
 
-async def _get(path, params=None):
+async def _get(path, params=None, timeout=15):
     try:
         async with aiohttp.ClientSession() as s:
-            async with s.get(f"{WSP_API_URL}{path}", params=params, timeout=aiohttp.ClientTimeout(total=15)) as r:
+            async with s.get(f"{WSP_API_URL}{path}", params=params, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
                 return await r.json()
+    except asyncio.TimeoutError:
+        logger.error(f"WSP API GET {path} timeout ({timeout}s)")
+        return {"ok": False, "error": f"API WSP no responde (timeout {timeout}s)"}
+    except aiohttp.ClientConnectorError:
+        logger.error(f"WSP API GET {path} connection refused")
+        return {"ok": False, "error": "API WSP no disponible (puerto 3000 no responde)"}
     except Exception as e:
         logger.error(f"WSP API GET {path} error: {e}")
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e) or type(e).__name__}
 
-async def _post(path, data=None):
+async def _post(path, data=None, timeout=15):
     try:
         async with aiohttp.ClientSession() as s:
-            async with s.post(f"{WSP_API_URL}{path}", json=data, timeout=aiohttp.ClientTimeout(total=15)) as r:
+            async with s.post(f"{WSP_API_URL}{path}", json=data, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
                 return await r.json()
+    except asyncio.TimeoutError:
+        logger.error(f"WSP API POST {path} timeout ({timeout}s)")
+        return {"ok": False, "error": f"API WSP no responde (timeout {timeout}s)"}
+    except aiohttp.ClientConnectorError:
+        logger.error(f"WSP API POST {path} connection refused")
+        return {"ok": False, "error": "API WSP no disponible (puerto 3000 no responde)"}
     except Exception as e:
         logger.error(f"WSP API POST {path} error: {e}")
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e) or type(e).__name__}
 
 # --- STATUS ---
 async def wsp_status():
@@ -79,7 +92,7 @@ async def wsp_detectar_grupos(user_id, cuenta=None):
     params = {"u": str(user_id)}
     if cuenta:
         params["cuenta"] = cuenta
-    return await _get("/api/detectar", params)
+    return await _get("/api/detectar", params, timeout=30)
 
 # --- MEMBRESIA ---
 async def wsp_usuarios_todos():

@@ -3446,4 +3446,7 @@ async function showReporteDiario(jid) {
 }
 
 // --- INICIAR ---
-startBot();
+startBot().catch(e => {
+    console.error("Error fatal al iniciar el bot WSP:", e.message);
+    console.log("El servidor API sigue activo en puerto " + QR_PORT + " pero sin conexion WhatsApp.");
+});
