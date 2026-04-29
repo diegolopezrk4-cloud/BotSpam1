@@ -829,8 +829,8 @@ async def api_tg_stats(request):
     return web.json_response({
         "ok": True,
         "stats": {
-            "total_envios": total_env,
-            "exitosos": total_env - total_err,
+            "total_envios": total_env + total_err,
+            "exitosos": total_env,
             "fallidos": total_err,
             "grupos": dashboard.get("grupos", 0),
             "cuentas": len(sesiones),
