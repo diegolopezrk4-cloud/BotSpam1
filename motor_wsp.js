@@ -1396,9 +1396,15 @@ function iniciarSchedulerMiembros(botSock) {
 const _promoListeners = {}; // { userId: { handlers: [], cancel: fn } }
 
 function iniciarPromoEscucha(userId, sock, palabraAceptar, palabraRechazar, respAceptar, respRechazar) {
-    // Add listener to this sock for promo responses
     if (!_promoListeners[userId]) {
-        _promoListeners[userId] = { handlers: [], cancelled: false };
+        _promoListeners[userId] = { handlers: [], cancelled: false, respondedJids: new Set() };
+        // Pre-load JIDs that already responded (in case of restart mid-promo)
+        try {
+            const existing = db.getPromoRespuestas(userId);
+            for (const r of existing) {
+                if (r.jid) _promoListeners[userId].respondedJids.add(r.jid);
+            }
+        } catch (e) {}
     }
     const state = _promoListeners[userId];
     const acLower = (palabraAceptar || 'si').toLowerCase().trim();
@@ -1411,19 +1417,24 @@ function iniciarPromoEscucha(userId, sock, palabraAceptar, palabraRechazar, resp
             const jid = msg.key.remoteJid;
             if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") continue;
 
+            // Only respond once per person per promo session
+            if (state.respondedJids.has(jid)) continue;
+
             const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase().trim();
             const pushName = msg.pushName || "";
             const numero = jid.replace(/@s\.whatsapp\.net$/, "");
 
             if (text.includes(acLower)) {
+                state.respondedJids.add(jid);
                 db.registrarPromoRespuesta(userId, jid, numero, pushName, 'aceptado');
-                console.log(`[Promo] ${numero} (${pushName}) ACEPTO con "${text}"`);
+                console.log(`[Promo] ${numero} (${pushName}) ACEPTO con "${text}" (respuesta unica)`);
                 if (respAceptar) {
                     try { await sock.sendMessage(jid, { text: respAceptar }); } catch (e) {}
                 }
             } else if (text.includes(reLower)) {
+                state.respondedJids.add(jid);
                 db.registrarPromoRespuesta(userId, jid, numero, pushName, 'rechazado');
-                console.log(`[Promo] ${numero} (${pushName}) RECHAZO con "${text}"`);
+                console.log(`[Promo] ${numero} (${pushName}) RECHAZO con "${text}" (respuesta unica)`);
                 if (respRechazar) {
                     try { await sock.sendMessage(jid, { text: respRechazar }); } catch (e) {}
                 }
