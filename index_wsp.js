@@ -1152,15 +1152,14 @@ poll();
 
             // Proxy TG endpoints to Python server (port 3002)
             if (url.pathname.startsWith("/api/tg-auth/") || url.pathname.startsWith("/api/tg/") || url.pathname.startsWith("/api/sesiones_tg")) {
-                const tgBody = await readBody();
-                const tgBodyStr = JSON.stringify(tgBody);
                 return new Promise((resolve) => {
+                    const fwdHeaders = { ...req.headers, host: "127.0.0.1:3002" };
                     const proxyOpts = {
                         hostname: "127.0.0.1",
                         port: 3002,
                         path: req.url,
                         method: req.method,
-                        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(tgBodyStr) }
+                        headers: fwdHeaders
                     };
                     const proxyReq = http.request(proxyOpts, (proxyRes) => {
                         res.writeHead(proxyRes.statusCode, proxyRes.headers);
@@ -1172,7 +1171,7 @@ poll();
                         res.end(JSON.stringify({ ok: false, error: "Bot TG no disponible: " + e.message }));
                         resolve();
                     });
-                    proxyReq.end(tgBodyStr);
+                    req.pipe(proxyReq);
                 });
             }
 
