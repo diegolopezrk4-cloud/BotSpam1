@@ -968,25 +968,17 @@ poll();
                     const meta = await sock.groupMetadata(body.grupo);
                     const rawParticipants = meta.participants || [];
 
-                    // Resolve JIDs: convert @lid to @s.whatsapp.net for DMs
+                    // Baileys v7: @lid JIDs are valid for DMs — send directly without conversion
                     const myJid = sock.user?.id || "";
                     const myNum = jidToNumber(myJid);
                     const seen = new Set();
                     const jids = [];
                     for (const p of rawParticipants) {
                         let jid = p.id;
-                        // Convert @lid JIDs to @s.whatsapp.net for direct messages
-                        if (jid.endsWith("@lid")) {
-                            const num = jid.split("@")[0].replace(/:\d+$/, "");
-                            if (/^\d{7,15}$/.test(num)) {
-                                jid = num + "@s.whatsapp.net";
-                            } else {
-                                continue; // Skip unresolvable LID
-                            }
-                        }
                         // Normalize: strip device suffix (e.g. :0)
-                        if (jid.includes(":") && jid.endsWith("@s.whatsapp.net")) {
-                            jid = jid.split(":")[0] + "@s.whatsapp.net";
+                        if (jid.includes(":")) {
+                            const suffix = jid.endsWith("@s.whatsapp.net") ? "@s.whatsapp.net" : jid.endsWith("@lid") ? "@lid" : "";
+                            if (suffix) jid = jid.split(":")[0] + suffix;
                         }
                         const num = jidToNumber(jid);
                         // Skip sender's own JID and duplicates
@@ -997,13 +989,15 @@ poll();
                     }
                     if (!jids.length) {
                         res.writeHead(200);
-                        return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros validos para enviar (todos filtrados o JIDs no resolubles)" }));
+                        return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros validos para enviar (todos filtrados)" }));
                     }
+                    const grupoNombre = meta.subject || body.grupo;
                     const batchSize = parseInt(body.batch_size) || 0;
                     const delayMinutes = parseInt(body.delay_minutes) || 5;
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, null, sock, batchSize, delayMinutes);
+                    const startIndex = parseInt(body.start_index) || 0;
+                    motor.enviarASeleccionados(body.u, jids, body.mensaje, null, sock, batchSize, delayMinutes, grupoNombre, body.grupo, startIndex);
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, total: jids.length, filtered: rawParticipants.length - jids.length, batch_size: batchSize || jids.length, delay_minutes: batchSize ? delayMinutes : 0 }));
+                    return res.end(JSON.stringify({ ok: true, total: jids.length, filtered: rawParticipants.length - jids.length, batch_size: batchSize || jids.length, delay_minutes: batchSize ? delayMinutes : 0, grupo_nombre: grupoNombre }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -1086,17 +1080,88 @@ poll();
                 return res.end(JSON.stringify({ ok: true }));
             }
 
+            // ─── PROGRESO ENVIO (RESUME) ───
+            if (url.pathname === "/api/envio_progreso" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const progreso = db.getProgresoEnvioPendiente(userId);
+                res.writeHead(200);
+                if (progreso) {
+                    return res.end(JSON.stringify({
+                        ok: true,
+                        tiene_progreso: true,
+                        grupo_jid: progreso.grupo_jid,
+                        grupo_nombre: progreso.grupo_nombre,
+                        ultimo_indice: progreso.ultimo_indice,
+                        total: progreso.total,
+                        fecha: progreso.fecha,
+                    }));
+                }
+                return res.end(JSON.stringify({ ok: true, tiene_progreso: false }));
+            }
+
+            if (url.pathname === "/api/envio_progreso_cancelar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const progreso = db.getProgresoEnvioPendiente(body.u);
+                if (progreso) {
+                    db.eliminarProgresoEnvio(body.u, progreso.grupo_jid);
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            if (url.pathname === "/api/enviar_miembros_reanudar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const progreso = db.getProgresoEnvioPendiente(body.u);
+                if (!progreso) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: false, error: "No hay envio pendiente para reanudar" }));
+                }
+                try {
+                    let sock;
+                    if (body.cuenta) {
+                        sock = await motor.getOrConnectClient(body.u, body.cuenta);
+                    } else if (botSock) {
+                        sock = botSock;
+                    } else {
+                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                    }
+                    const batchSize = parseInt(body.batch_size) || 0;
+                    const delayMinutes = parseInt(body.delay_minutes) || 5;
+                    motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({
+                        ok: true,
+                        total: progreso.total,
+                        desde: progreso.ultimo_indice,
+                        restantes: progreso.total - progreso.ultimo_indice,
+                        grupo_nombre: progreso.grupo_nombre,
+                    }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
             // ─── HISTORIAL PANEL ───
             if (url.pathname === "/api/historial_panel" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const envios = db.getHistorialEnvios(userId, 100);
                 const historial = envios.map(e => {
-                    const esExitoso = e.resultado === "enviado" || e.resultado === "enviado_pending";
+                    const esExitoso = e.resultado === "enviado" || e.resultado === "enviado_pending" || e.resultado === "enviado_personal";
+                    // Build display destination: show group name + JID number
+                    let destino = e.grupo_link || "";
+                    if (e.grupo_nombre) {
+                        const numPart = destino.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/@g\.us$/, "");
+                        destino = `[${e.grupo_nombre}] ${numPart}`;
+                    }
                     return {
-                        fecha: e.fecha, tipo: "envio", destino: e.grupo_link,
+                        fecha: e.fecha, tipo: "envio", destino,
                         mensaje_preview: "", total: 1, exitosos: esExitoso ? 1 : 0,
-                        fallidos: esExitoso ? 0 : 1, resultado: esExitoso ? "enviado" : e.resultado,
+                        fallidos: esExitoso ? 0 : 1, resultado: e.resultado,
                     };
                 });
                 res.writeHead(200);

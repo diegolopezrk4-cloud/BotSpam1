@@ -1040,7 +1040,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
     return true;
 }
 
-async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes) {
+async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes, grupoNombre, grupoJid, startIndex) {
     if (envioPersonalActivo[userId]) return false;
 
     let cancelled = false;
@@ -1052,38 +1052,61 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
 
     batchSize = parseInt(batchSize) || 0;
     delayMinutes = parseInt(delayMinutes) || 5;
+    startIndex = parseInt(startIndex) || 0;
 
     (async () => {
         try {
             const total = jids.length;
             let enviados = 0;
             let errores = 0;
-            const DELAY_ENTRE_ENVIOS = 10000; // 10 segundos entre mensajes
+            const DELAY_ENTRE_ENVIOS = 10000;
             const DELAY_ENTRE_LOTES = batchSize ? delayMinutes * 60 * 1000 : 0;
+            const displayName = grupoNombre || grupoJid || "seleccionados";
 
             const batchInfo = batchSize ? `\n📦 Lotes: ${batchSize} por lote, pausa ${delayMinutes} min entre lotes` : "";
+            const resumeInfo = startIndex > 0 ? `\n🔄 Reanudando desde #${startIndex + 1}` : "";
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} contacto(s) seleccionados\n\u23F1 Delay: 10 segundos entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round(total * 10 / 60)} min`,
+                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 10 seg entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 10 / 60)} min`,
                 });
             } catch (e) {}
 
-            for (let i = 0; i < jids.length; i++) {
-                if (cancelled) break;
+            // Save progress at the start so we can resume if interrupted
+            if (grupoJid) {
+                db.guardarProgresoEnvio(userId, grupoJid, startIndex, total, mensaje, jids, grupoNombre);
+            }
+
+            for (let i = startIndex; i < jids.length; i++) {
+                if (cancelled) {
+                    // Save progress for resume
+                    if (grupoJid) {
+                        db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
+                    }
+                    break;
+                }
                 const jid = jids[i];
 
                 // Pausa entre lotes (anti-ban)
                 if (batchSize && enviados > 0 && enviados % batchSize === 0) {
+                    // Save progress before pause
+                    if (grupoJid) {
+                        db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
+                    }
                     try {
                         await botSock.sendMessage(userId, {
-                            text: `⏸ Lote de ${batchSize} completado (${enviados}/${total}). Pausando ${delayMinutes} minutos para evitar baneo...`,
+                            text: `⏸ Lote de ${batchSize} completado (${i}/${total}). Pausando ${delayMinutes} minutos...`,
                         });
                     } catch (e) {}
                     await delay(DELAY_ENTRE_LOTES);
-                    if (cancelled) break;
+                    if (cancelled) {
+                        if (grupoJid) {
+                            db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
+                        }
+                        break;
+                    }
                     try {
                         await botSock.sendMessage(userId, {
-                            text: `▶️ Reanudando envio... (${enviados}/${total})`,
+                            text: `▶️ Reanudando envio... (${i}/${total})`,
                         });
                     } catch (e) {}
                 }
@@ -1099,16 +1122,21 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                         await botSock.sendMessage(jid, { text: textoFinal });
                     }
                     enviados++;
-                    db.registrarEnvio(userId, 0, jid, "enviado_personal");
+                    db.registrarEnvio(userId, 0, jid, "enviado_personal", grupoNombre);
                 } catch (e) {
                     errores++;
-                    db.registrarEnvio(userId, 0, jid, "error_personal");
+                    db.registrarEnvio(userId, 0, jid, "error_personal", grupoNombre);
+                }
+
+                // Save progress periodically (every 5 sends)
+                if (grupoJid && (enviados + errores) % 5 === 0) {
+                    db.guardarProgresoEnvio(userId, grupoJid, i + 1, total, mensaje, jids, grupoNombre);
                 }
 
                 if (enviados % 10 === 0 && enviados > 0 && !(batchSize && enviados % batchSize === 0)) {
                     try {
                         await botSock.sendMessage(userId, {
-                            text: `\u{1F4E8} Progreso: ${enviados}/${total} enviados (${errores} errores)...`,
+                            text: `\u{1F4E8} Progreso: ${i + 1}/${total} (${enviados} ok, ${errores} err)...`,
                         });
                     } catch (e) {}
                 }
@@ -1118,9 +1146,14 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                 }
             }
 
+            // If completed (not cancelled), remove progress
+            if (!cancelled && grupoJid) {
+                db.eliminarProgresoEnvio(userId, grupoJid);
+            }
+
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u2705 *ENVIO PERSONAL COMPLETADO*\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Cancelado por el usuario" : ""}`,
+                    text: `\u2705 *ENVIO A MIEMBROS ${cancelled ? "PAUSADO" : "COMPLETADO"}*\n📂 Grupo: ${displayName}\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Pausado — puedes reanudar desde el panel" : ""}`,
                 });
             } catch (e) {}
 

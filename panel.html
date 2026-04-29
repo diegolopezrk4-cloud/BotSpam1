@@ -622,7 +622,13 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-success" onclick="enviarAMiembros()">📤 Enviar DM a Miembros</button>
         <button class="btn btn-primary" onclick="agregarMiembrosAGrupo()">➕ Agregar Miembros al Grupo Destino</button>
-        <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Cancelar Envio</button>
+        <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Detener Envio</button>
+      </div>
+      <div id="resumeBar" style="display:none;background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent2);align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="color:var(--accent2);font-weight:bold">🔄 Envio pendiente:</span>
+        <span id="resumeInfo" style="color:var(--text2);font-size:13px"></span>
+        <button class="btn btn-success" onclick="reanudarEnvio()" style="padding:5px 12px;font-size:12px">▶ Reanudar</button>
+        <button class="btn btn-danger" onclick="descartarProgreso()" style="padding:5px 12px;font-size:12px">✖ Descartar</button>
       </div>
       <div id="miembrosContent" class="empty-state"><div class="icon">👥</div><p>Selecciona una cuenta y carga sus grupos</p></div>
     </div>
@@ -2032,6 +2038,40 @@ async function loadEnvioMiembros(){
   }
   $('emGrupo').innerHTML='<option value="">-- Carga grupos primero --</option>';
   $('emDestino').innerHTML='<option value="">-- Opcional: grupo destino --</option>';
+  // Check for pending resume
+  checkEnvioProgreso();
+}
+async function checkEnvioProgreso(){
+  const r=await api('/api/envio_progreso?u='+userId);
+  const bar=$('resumeBar');
+  if(r.ok&&r.tiene_progreso){
+    const restantes=r.total-r.ultimo_indice;
+    $('resumeInfo').textContent=`Grupo: ${r.grupo_nombre||r.grupo_jid} | Enviados: ${r.ultimo_indice}/${r.total} | Restantes: ${restantes} | ${r.fecha||''}`;
+    bar.style.display='flex';
+  }else{
+    bar.style.display='none';
+  }
+}
+async function reanudarEnvio(){
+  if(!requireMembresia())return;
+  const cuenta=$('emCuenta').value;
+  const batchSize=$('emBatchSize').value,delayMinutes=$('emDelayMinutes').value||5;
+  if(!confirm('Reanudar envio pendiente?'))return;
+  toast('Reanudando envio...','success');
+  const payload={u:userId};
+  if(cuenta)payload.cuenta=cuenta;
+  if(batchSize){payload.batch_size=parseInt(batchSize);payload.delay_minutes=parseInt(delayMinutes);}
+  const r=await api('/api/enviar_miembros_reanudar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r.ok){
+    toast(`Reanudado: ${r.restantes} restantes de ${r.total} (grupo: ${r.grupo_nombre||'?'})`,'success');
+    $('resumeBar').style.display='none';
+  }else{toast('Error: '+(r.error||''),'error');}
+}
+async function descartarProgreso(){
+  if(!confirm('Descartar el progreso guardado? No podras reanudar despues.'))return;
+  await api('/api/envio_progreso_cancelar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  $('resumeBar').style.display='none';
+  toast('Progreso descartado','success');
 }
 async function cargarGruposCuenta(){
   const cuenta=$('emCuenta').value;
@@ -2089,7 +2129,7 @@ async function enviarAMiembros(){
   if(cuenta)payload.cuenta=cuenta;
   if(batchSize){payload.batch_size=parseInt(batchSize);payload.delay_minutes=parseInt(delayMinutes);}
   const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.filtered?' ('+r.filtered+' filtrados)':'')+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');}
+  if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.grupo_nombre?' de '+r.grupo_nombre:'')+(r.filtered?' ('+r.filtered+' filtrados)':'')+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');}
   else{toast('Error: '+(r.error||''),'error');}
 }
 async function agregarMiembrosAGrupo(){if(!requireMembresia())return;
@@ -2614,8 +2654,8 @@ async function loadHistorial(){
   let h='<div class="table-wrap"><div class="table-header"><h3>📜 '+h_data.length+' registros</h3></div>';
   h+='<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Destino</th><th>Mensaje</th><th>Total</th><th>OK</th><th>Error</th><th>Estado</th></tr></thead><tbody>';
   h_data.forEach(x=>{
-    const badge=x.resultado==='exitoso'||x.resultado==='enviado'||x.resultado==='enviado_pending'?'badge-success':x.resultado==='fallido'?'badge-danger':'badge-warn';
-    h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.tipo||'?'}</td><td style="font-size:11px">${(x.destino||'').slice(0,30)}</td><td style="font-size:11px;color:var(--text2)">${(x.mensaje_preview||'').slice(0,30)}</td>`;
+    const badge=x.resultado==='exitoso'||x.resultado==='enviado'||x.resultado==='enviado_pending'||x.resultado==='enviado_personal'?'badge-success':x.resultado==='fallido'?'badge-danger':'badge-warn';
+    h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.tipo||'?'}</td><td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${(x.destino||'').slice(0,50)}</td><td style="font-size:11px;color:var(--text2)">${(x.mensaje_preview||'').slice(0,30)}</td>`;
     h+=`<td>${x.total||0}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td>`;
     h+=`<td><span class="badge ${badge}">${x.resultado||'?'}</span></td></tr>`;
   });
