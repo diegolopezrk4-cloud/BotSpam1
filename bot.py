@@ -9,6 +9,7 @@ PERU_TZ = timezone(timedelta(hours=-5))
 def ahora_peru():
     return datetime.now(PERU_TZ)
 from aiogram import Bot, Dispatcher, types, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -132,7 +133,7 @@ async def verificar_membresia_cb(call: types.CallbackQuery) -> bool:
         return True
     activa = await db.tiene_membresia_activa(call.from_user.id)
     if not activa:
-        await call.answer("⛔ No tienes membresia activa.", show_alert=True)
+        await safe_answer(call, "⛔ No tienes membresia activa.", show_alert=True)
     return activa
 
 async def limpiar_sesion_login(user_id: int):
@@ -149,6 +150,13 @@ async def safe_edit(message: types.Message, text: str, reply_markup=None):
         await message.edit_text(text, reply_markup=reply_markup)
     except Exception:
         await message.answer(text, reply_markup=reply_markup)
+
+async def safe_answer(call: types.CallbackQuery, text: str = None, show_alert: bool = False):
+    """Responde un callback query de forma segura. Ignora si ya expiro."""
+    try:
+        await call.answer(text, show_alert=show_alert)
+    except TelegramBadRequest:
+        pass
 
 # ─────────────────────────────────────────
 #   TECLADOS REUTILIZABLES
@@ -231,7 +239,7 @@ async def cb_main_menu(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
     texto = await build_menu_text(call.from_user.id)
     await safe_edit(call.message, texto, reply_markup=kb_inline_menu(call.from_user.id))
-    await call.answer()
+    await safe_answer(call)
 
 # ╔══════════════════════════════════════╗
 # ║    SECCION: CUENTAS                 ║
@@ -264,7 +272,7 @@ async def cb_sec_cuentas(call: types.CallbackQuery):
         return
     texto, kb = await build_cuentas_view(call.from_user.id)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "acc_del")
 async def cb_acc_del(call: types.CallbackQuery):
@@ -281,7 +289,7 @@ async def cb_acc_del(call: types.CallbackQuery):
     botones.append([InlineKeyboardButton(text="🔙 Volver a Cuentas", callback_data="sec_cuentas")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, "🗑 Selecciona la cuenta a eliminar:", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("accdel_"))
 async def cb_acc_del_confirm(call: types.CallbackQuery):
@@ -302,7 +310,7 @@ async def cb_acc_del_confirm(call: types.CallbackQuery):
     texto, kb = await build_cuentas_view(call.from_user.id)
     texto = f"✅ Cuenta '{nombre}' eliminada.\n\n{texto}"
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 # Comando /cuentas (con o sin argumentos)
 @dp.message(Command("cuentas"))
@@ -505,7 +513,7 @@ async def cb_sec_grupos(call: types.CallbackQuery):
         return
     texto, kb = await build_grupos_view(call.from_user.id)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "grp_add")
 async def cb_grp_add(call: types.CallbackQuery, state: FSMContext):
@@ -520,7 +528,7 @@ async def cb_grp_add(call: types.CallbackQuery, state: FSMContext):
         "Envia /cancelar para cancelar."
     )
     await state.set_state(GrupoState.esperando_link)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "grp_del")
 async def cb_grp_del(call: types.CallbackQuery):
@@ -537,7 +545,7 @@ async def cb_grp_del(call: types.CallbackQuery):
     botones.append([InlineKeyboardButton(text="🔙 Volver a Grupos", callback_data="sec_grupos")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, "🗑 Selecciona el grupo a eliminar:", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("grpdel_"))
 async def cb_grp_del_confirm(call: types.CallbackQuery):
@@ -550,7 +558,7 @@ async def cb_grp_del_confirm(call: types.CallbackQuery):
     texto, kb = await build_grupos_view(call.from_user.id)
     texto = f"✅ Grupo eliminado.\n\n{texto}"
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "grp_edit")
 async def cb_grp_edit(call: types.CallbackQuery):
@@ -567,7 +575,7 @@ async def cb_grp_edit(call: types.CallbackQuery):
     botones.append([InlineKeyboardButton(text="🔙 Volver a Grupos", callback_data="sec_grupos")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, "✏ Selecciona el grupo a editar:", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("grpedit_"))
 async def cb_grp_edit_start(call: types.CallbackQuery, state: FSMContext):
@@ -579,7 +587,7 @@ async def cb_grp_edit_start(call: types.CallbackQuery, state: FSMContext):
         "Envia /cancelar para cancelar."
     )
     await state.set_state(EditarGrupoState.esperando_nuevo_link)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "grp_export")
 async def cb_grp_export(call: types.CallbackQuery):
@@ -594,7 +602,7 @@ async def cb_grp_export(call: types.CallbackQuery):
         f.write(contenido)
     doc = types.input_file.FSInputFile(filepath, filename=filename)
     await call.message.answer_document(doc, caption=f"📤 {len(grupos)} grupos exportados.")
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "grp_delall")
 async def cb_grp_delall(call: types.CallbackQuery):
@@ -604,7 +612,7 @@ async def cb_grp_delall(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, "⚠ Estas seguro de eliminar TODOS tus grupos?", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "grp_delall_ok")
 async def cb_grp_delall_ok(call: types.CallbackQuery):
@@ -612,7 +620,7 @@ async def cb_grp_delall_ok(call: types.CallbackQuery):
     texto, kb = await build_grupos_view(call.from_user.id)
     texto = f"✅ Todos los grupos eliminados.\n\n{texto}"
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 # /grupos command
 @dp.message(Command("grupos"))
@@ -792,7 +800,7 @@ async def cb_sec_campanas(call: types.CallbackQuery):
         return
     texto, kb = await build_campanas_view(call.from_user.id)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "camp_nueva")
 async def cb_camp_nueva(call: types.CallbackQuery, state: FSMContext):
@@ -805,7 +813,7 @@ async def cb_camp_nueva(call: types.CallbackQuery, state: FSMContext):
     )
     await state.set_state(CampanaState.esperando_nombre)
     await state.update_data(user_id=call.from_user.id)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.message(CampanaState.esperando_nombre)
 async def recibir_nombre_campana(msg: types.Message, state: FSMContext):
@@ -918,7 +926,7 @@ async def cb_ok_sesiones(call: types.CallbackQuery, state: FSMContext):
         reply_markup=teclado
     )
     await state.set_state(CampanaState.eligiendo_grupos)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("grpsel_"))
 async def cb_sel_grupo(call: types.CallbackQuery):
@@ -965,7 +973,7 @@ async def cb_ok_grupos(call: types.CallbackQuery, state: FSMContext):
         f"Usa 🚀 Iniciar para lanzarla.\n\n{texto}",
         reply_markup=kb
     )
-    await call.answer()
+    await safe_answer(call)
 
 # Editar campana
 @dp.callback_query(F.data == "camp_editar")
@@ -1006,7 +1014,7 @@ async def cb_camp_edit_start(call: types.CallbackQuery, state: FSMContext):
         "Envia /cancelar para cancelar."
     )
     await state.set_state(EditarState.esperando_contenido)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.message(EditarState.esperando_contenido)
 async def recibir_edicion(msg: types.Message, state: FSMContext):
@@ -1051,7 +1059,7 @@ async def cb_camp_eliminar(call: types.CallbackQuery):
     botones.append([InlineKeyboardButton(text="🔙 Volver a Campanas", callback_data="sec_campanas")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, "🗑 Selecciona la campana a eliminar:", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("campdel_"))
 async def cb_camp_del_confirm(call: types.CallbackQuery):
@@ -1063,7 +1071,7 @@ async def cb_camp_del_confirm(call: types.CallbackQuery):
     texto, kb = await build_campanas_view(call.from_user.id)
     nombre = campana['nombre'] if campana else '?'
     await safe_edit(call.message, f"✅ Campana '{nombre}' eliminada.\n\n{texto}", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 # Ver detalle de campana
 @dp.callback_query(F.data == "camp_detalle")
@@ -1079,7 +1087,7 @@ async def cb_camp_detalle(call: types.CallbackQuery):
     botones.append([InlineKeyboardButton(text="🔙 Volver a Campanas", callback_data="sec_campanas")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, "📊 Selecciona campana para ver detalle:", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("campdet_"))
 async def cb_camp_detalle_ver(call: types.CallbackQuery):
@@ -1117,7 +1125,7 @@ async def cb_camp_detalle_ver(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a Campanas", callback_data="sec_campanas")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 # Clonar campana
 @dp.callback_query(F.data == "camp_clonar")
@@ -1133,7 +1141,7 @@ async def cb_camp_clonar(call: types.CallbackQuery):
     botones.append([InlineKeyboardButton(text="🔙 Volver a Campanas", callback_data="sec_campanas")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, "📋 Selecciona la campana a clonar:", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("campclone_"))
 async def cb_camp_clone_start(call: types.CallbackQuery, state: FSMContext):
@@ -1144,7 +1152,7 @@ async def cb_camp_clone_start(call: types.CallbackQuery, state: FSMContext):
         "Envia /cancelar para cancelar."
     )
     await state.set_state(ClonarState.esperando_nombre)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.message(ClonarState.esperando_nombre)
 async def recibir_nombre_clon(msg: types.Message, state: FSMContext):
@@ -1177,7 +1185,7 @@ async def cb_camp_reset(call: types.CallbackQuery):
     botones.append([InlineKeyboardButton(text="🔙 Volver a Campanas", callback_data="sec_campanas")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, "🔄 Selecciona campana para resetear stats:", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("campreset_"))
 async def cb_camp_reset_confirm(call: types.CallbackQuery):
@@ -1185,7 +1193,7 @@ async def cb_camp_reset_confirm(call: types.CallbackQuery):
     await db.resetear_stats_campana(campana_id)
     texto, kb = await build_campanas_view(call.from_user.id)
     await safe_edit(call.message, f"✅ Stats reseteados.\n\n{texto}", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 # Comando /campanas
 @dp.message(Command("campanas"))
@@ -1221,7 +1229,7 @@ async def cb_sec_iniciar(call: types.CallbackQuery):
     botones.append(kb_volver())
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("start_"))
 async def cb_iniciar(call: types.CallbackQuery):
@@ -1257,7 +1265,7 @@ async def cb_iniciar(call: types.CallbackQuery):
     botones = [kb_volver()]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "sec_detener")
 async def cb_sec_detener(call: types.CallbackQuery):
@@ -1283,7 +1291,7 @@ async def cb_sec_detener(call: types.CallbackQuery):
     botones.append(kb_volver())
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("stop_"))
 async def cb_detener(call: types.CallbackQuery):
@@ -1317,7 +1325,7 @@ async def cb_detener(call: types.CallbackQuery):
     botones = [kb_volver()]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 # Comandos directos /iniciar y /detener
 @dp.message(Command("iniciar"))
@@ -1384,7 +1392,7 @@ async def cb_sec_intervalo(call: types.CallbackQuery):
     botones.append(kb_volver())
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("intv_"))
 async def cb_intervalo_campana(call: types.CallbackQuery, state: FSMContext):
@@ -1398,7 +1406,7 @@ async def cb_intervalo_campana(call: types.CallbackQuery, state: FSMContext):
         f"Envia /cancelar para cancelar."
     )
     await state.set_state(IntervaloState.esperando_intervalo)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.message(IntervaloState.esperando_intervalo)
 async def recibir_intervalo(msg: types.Message, state: FSMContext):
@@ -1489,7 +1497,7 @@ async def cb_sec_responder(call: types.CallbackQuery):
         return
     texto, kb = await build_responder_view(call.from_user.id)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "resp_off")
 async def cb_resp_off(call: types.CallbackQuery):
@@ -1497,7 +1505,7 @@ async def cb_resp_off(call: types.CallbackQuery):
     await db.toggle_responder(call.from_user.id, 0)
     texto, kb = await build_responder_view(call.from_user.id)
     await safe_edit(call.message, f"🔴 Desactivado.\n\n{texto}", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "resp_on")
 async def cb_resp_on(call: types.CallbackQuery):
@@ -1515,7 +1523,7 @@ async def cb_resp_on(call: types.CallbackQuery):
     iniciar_responder(call.from_user.id, config['contacto'], keywords, loop, bot)
     texto, kb = await build_responder_view(call.from_user.id)
     await safe_edit(call.message, f"🟢 Reactivado!\n\n{texto}", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "resp_contacto")
 async def cb_resp_contacto(call: types.CallbackQuery, state: FSMContext):
@@ -1525,7 +1533,7 @@ async def cb_resp_contacto(call: types.CallbackQuery, state: FSMContext):
         "Envia /cancelar para cancelar."
     )
     await state.set_state(ResponderState.esperando_contacto)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.message(ResponderState.esperando_contacto)
 async def recibir_contacto_responder(msg: types.Message, state: FSMContext):
@@ -1601,7 +1609,7 @@ async def cb_resp_keywords(call: types.CallbackQuery, state: FSMContext):
         "Envia /cancelar para cancelar."
     )
     await state.set_state(ResponderState.esperando_keywords)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "resp_ver")
 async def cb_resp_ver(call: types.CallbackQuery):
@@ -1617,7 +1625,7 @@ async def cb_resp_ver(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a Responder", callback_data="sec_responder")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.message(Command("responder"))
 @dp.message(F.text == "🤖 Responder")
@@ -1643,7 +1651,7 @@ async def cb_sec_historial(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "hist_envios")
 async def cb_hist_envios(call: types.CallbackQuery):
@@ -1662,7 +1670,7 @@ async def cb_hist_envios(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a Historial", callback_data="sec_historial")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "hist_resp_kw")
 async def cb_hist_resp_kw(call: types.CallbackQuery):
@@ -1678,7 +1686,7 @@ async def cb_hist_resp_kw(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a Historial", callback_data="sec_historial")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "hist_resp_gr")
 async def cb_hist_resp_gr(call: types.CallbackQuery):
@@ -1697,7 +1705,7 @@ async def cb_hist_resp_gr(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a Historial", callback_data="sec_historial")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "hist_ultimos")
 async def cb_hist_ultimos(call: types.CallbackQuery):
@@ -1715,7 +1723,7 @@ async def cb_hist_ultimos(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a Historial", callback_data="sec_historial")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "hist_limpiar")
 async def cb_hist_limpiar(call: types.CallbackQuery):
@@ -1725,7 +1733,7 @@ async def cb_hist_limpiar(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, "⚠ Eliminar TODO el historial?", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "hist_limpiar_ok")
 async def cb_hist_limpiar_ok(call: types.CallbackQuery):
@@ -1740,7 +1748,7 @@ async def cb_hist_limpiar_ok(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.message(Command("historial"))
 @dp.message(F.text == "📊 Historial")
@@ -1798,7 +1806,7 @@ async def cb_sec_membresia(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "sec_planes")
 async def cb_sec_planes(call: types.CallbackQuery):
@@ -1825,7 +1833,7 @@ async def cb_sec_planes(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "sec_pagar")
 async def cb_sec_pagar(call: types.CallbackQuery):
@@ -1837,7 +1845,7 @@ async def cb_sec_pagar(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, "💳 Que plan deseas pagar?", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("pagar_"))
 async def cb_pagar(call: types.CallbackQuery, state: FSMContext):
@@ -1866,7 +1874,7 @@ async def cb_pagar(call: types.CallbackQuery, state: FSMContext):
     )
     await call.message.answer(texto, reply_markup=ReplyKeyboardRemove())
     await state.set_state(PagoState.esperando_captura)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.message(PagoState.esperando_captura)
 async def recibir_captura_pago(msg: types.Message, state: FSMContext):
@@ -2087,7 +2095,7 @@ async def cb_sec_eliminar(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.message(Command("eliminar"))
 async def cmd_eliminar(msg: types.Message):
@@ -2122,7 +2130,7 @@ async def cb_sec_dashboard(call: types.CallbackQuery):
     botones = [kb_volver()]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.message(Command("me"))
 @dp.message(Command("perfil"))
@@ -2221,7 +2229,7 @@ async def cmd_estado(msg: types.Message):
 async def cb_sec_cmds(call: types.CallbackQuery):
     texto = await build_menu_text(call.from_user.id)
     await safe_edit(call.message, texto, reply_markup=kb_inline_menu(call.from_user.id))
-    await call.answer()
+    await safe_answer(call)
 
 @dp.message(Command("cmds"))
 @dp.message(Command("ayuda"))
@@ -2244,7 +2252,7 @@ async def cb_detectar_grupos_tg(call: types.CallbackQuery):
         botones = [[InlineKeyboardButton(text="🔙 Volver a Grupos", callback_data="sec_grupos")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, "❌ No tienes cuentas TG vinculadas.\nVincula una cuenta primero.", reply_markup=kb)
-        await call.answer()
+        await safe_answer(call)
         return
     if len(sesiones) == 1:
         # Solo una cuenta, ir directo al menu de opciones
@@ -2257,7 +2265,7 @@ async def cb_detectar_grupos_tg(call: types.CallbackQuery):
     botones.append([InlineKeyboardButton(text="🔙 Volver a Grupos", callback_data="sec_grupos")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data.startswith("grp_detect_menu:"))
 async def cb_grp_detect_menu(call: types.CallbackQuery, cuenta_override=None):
@@ -2281,7 +2289,7 @@ async def cb_grp_detect_menu(call: types.CallbackQuery, cuenta_override=None):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.callback_query(F.data.startswith("grp_detect_todos:"))
@@ -2290,7 +2298,7 @@ async def cb_detect_todos(call: types.CallbackQuery, state: FSMContext):
         return
     cuenta = call.data.split(":", 1)[1]
     await safe_edit(call.message, f"⏳ Escaneando grupos de '{cuenta}'...\nEsto puede tardar unos segundos.")
-    await call.answer()
+    await safe_answer(call)
 
     grupos, info = await detectar_grupos_telegram(call.from_user.id, cuenta)
 
@@ -2397,7 +2405,7 @@ async def cb_detect_carpetas(call: types.CallbackQuery, state: FSMContext):
         cuenta = call.data.split(":", 1)[1]
     await state.update_data(tg_detect_cuenta=cuenta)
     await safe_edit(call.message, "⏳ Leyendo carpetas de Telegram...")
-    await call.answer()
+    await safe_answer(call)
 
     carpetas, info = await detectar_carpetas_telegram(call.from_user.id, cuenta)
 
@@ -2445,7 +2453,7 @@ async def cb_detect_carpeta_grupos(call: types.CallbackQuery, state: FSMContext)
         cuenta = data.get("tg_detect_cuenta")
     folder_id = int(folder_id_str)
     await safe_edit(call.message, "⏳ Leyendo grupos de la carpeta...")
-    await call.answer()
+    await safe_answer(call)
 
     grupos, info = await detectar_grupos_carpeta(call.from_user.id, folder_id, cuenta)
 
@@ -2537,7 +2545,7 @@ async def cb_detect_estado(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
     await safe_edit(call.message, "⏳ Verificando estado de tus grupos...\nEsto puede tardar varios segundos.")
-    await call.answer()
+    await safe_answer(call)
 
     resultados, info = await verificar_grupos_estado(call.from_user.id)
 
@@ -2614,7 +2622,7 @@ async def cb_detect_limpiar(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
     await safe_edit(call.message, "⏳ Verificando y limpiando...")
-    await call.answer()
+    await safe_answer(call)
 
     resultados, info = await verificar_grupos_estado(call.from_user.id)
 
@@ -2677,7 +2685,7 @@ async def cb_sec_cmdtlg(call: types.CallbackQuery):
     """Redirige al menú principal completo."""
     texto = await build_menu_text(call.from_user.id)
     await safe_edit(call.message, texto, reply_markup=kb_inline_menu(call.from_user.id))
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.callback_query(F.data == "sec_cmdwsp")
@@ -2700,7 +2708,7 @@ async def cb_menu_principal(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # ╔══════════════════════════════════════╗
@@ -2725,7 +2733,7 @@ async def cb_tg_programados(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.callback_query(F.data == "tg_listanegra")
@@ -2747,7 +2755,7 @@ async def cb_tg_listanegra(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.callback_query(F.data == "tg_config")
@@ -2771,7 +2779,7 @@ async def cb_tg_config(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.callback_query(F.data == "tg_stats")
@@ -2795,7 +2803,7 @@ async def cb_tg_stats(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.callback_query(F.data == "tg_membresia")
@@ -2816,7 +2824,7 @@ async def cb_tg_membresia(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.callback_query(F.data == "tg_panelweb")
@@ -2836,7 +2844,7 @@ async def cb_tg_panelweb(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_cmdtlg")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # ╔══════════════════════════════════════╗
@@ -2890,7 +2898,7 @@ async def cb_sec_wsp(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- CUENTAS WSP ---
@@ -2904,7 +2912,7 @@ async def cb_wsp_cuentas(call: types.CallbackQuery):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, f"❌ Error: {r.get('error', 'sin conexión')}", reply_markup=kb)
-        await call.answer()
+        await safe_answer(call)
         return
 
     sesiones = r.get("sesiones", [])
@@ -2924,7 +2932,7 @@ async def cb_wsp_cuentas(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.message(Command("vincularwsp"))
@@ -2967,7 +2975,7 @@ async def cb_wsp_grupos(call: types.CallbackQuery):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, f"❌ Error: {r.get('error', 'sin conexión')}", reply_markup=kb)
-        await call.answer()
+        await safe_answer(call)
         return
 
     grupos = r.get("grupos", [])
@@ -2995,7 +3003,7 @@ async def cb_wsp_grupos(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.message(Command("wspgrupo"))
@@ -3028,7 +3036,7 @@ async def cb_wsp_grupos_delall(call: types.CallbackQuery):
         await safe_edit(call.message, "🗑 Todos los grupos WSP eliminados.", reply_markup=kb)
     else:
         await safe_edit(call.message, f"❌ Error: {r.get('error')}", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- ENVIO PERSONAL WSP ---
@@ -3042,7 +3050,7 @@ async def cb_wsp_personal(call: types.CallbackQuery):
     kb_back = InlineKeyboardMarkup(inline_keyboard=botones_back)
     if not r.get("ok"):
         await safe_edit(call.message, f"Error: {r.get('error')}", reply_markup=kb_back)
-        await call.answer()
+        await safe_answer(call)
         return
 
     total = r.get("total", 0)
@@ -3060,7 +3068,7 @@ async def cb_wsp_personal(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.message(Command("wsppersonal"))
@@ -3105,7 +3113,7 @@ async def cb_wsp_cancelar_personal(call: types.CallbackQuery):
         await safe_edit(call.message, "Envio personal cancelado.", reply_markup=kb)
     else:
         await safe_edit(call.message, "No hay envio personal activo.", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- CAMPAÑAS WSP ---
@@ -3119,7 +3127,7 @@ async def cb_wsp_campanas(call: types.CallbackQuery):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, f"❌ Error: {r.get('error', 'sin conexión')}", reply_markup=kb)
-        await call.answer()
+        await safe_answer(call)
         return
 
     campanas = r.get("campanas", [])
@@ -3137,7 +3145,7 @@ async def cb_wsp_campanas(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.message(Command("wspcampana"))
@@ -3173,7 +3181,7 @@ async def cb_wsp_iniciar(call: types.CallbackQuery, state: FSMContext):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, "📭 No tienes campañas WSP.\nCrea una con /wspcampana nombre | mensaje", reply_markup=kb)
-        await call.answer()
+        await safe_answer(call)
         return
 
     campanas = r["campanas"]
@@ -3187,7 +3195,7 @@ async def cb_wsp_iniciar(call: types.CallbackQuery, state: FSMContext):
     botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, "🚀 Selecciona campaña WSP para iniciar:", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.callback_query(F.data.startswith("wsp_start_"))
@@ -3203,7 +3211,7 @@ async def cb_wsp_start(call: types.CallbackQuery):
         await safe_edit(call.message, f"🚀 Campaña WSP '{r.get('campana', '')}' iniciada!", reply_markup=kb)
     else:
         await safe_edit(call.message, f"❌ Error: {r.get('error')}", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.message(Command("wspstart"))
@@ -3232,7 +3240,7 @@ async def cb_wsp_detener(call: types.CallbackQuery):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, "📭 No hay campañas WSP activas.", reply_markup=kb)
-        await call.answer()
+        await safe_answer(call)
         return
 
     botones = []
@@ -3244,7 +3252,7 @@ async def cb_wsp_detener(call: types.CallbackQuery):
     botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, "🛑 Selecciona campaña WSP para detener:", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.callback_query(F.data.startswith("wsp_stop_"))
@@ -3260,7 +3268,7 @@ async def cb_wsp_stop(call: types.CallbackQuery):
         await safe_edit(call.message, f"🛑 Campaña WSP #{camp_id} detenida.", reply_markup=kb)
     else:
         await safe_edit(call.message, f"❌ Error: {r.get('error')}", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.message(Command("wspstop"))
@@ -3289,7 +3297,7 @@ async def cb_wsp_historial(call: types.CallbackQuery):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, f"❌ Error: {r.get('error')}", reply_markup=kb)
-        await call.answer()
+        await safe_answer(call)
         return
 
     envios = r.get("envios", [])
@@ -3310,7 +3318,7 @@ async def cb_wsp_historial(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.callback_query(F.data == "wsp_dashboard")
@@ -3323,7 +3331,7 @@ async def cb_wsp_dashboard(call: types.CallbackQuery):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, f"❌ Error: {r.get('error')}", reply_markup=kb)
-        await call.answer()
+        await safe_answer(call)
         return
 
     d = r.get("dashboard", {})
@@ -3340,7 +3348,7 @@ async def cb_wsp_dashboard(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- COMANDO PRINCIPAL WSP ---
@@ -3405,7 +3413,7 @@ async def cb_wsp_membresia(call: types.CallbackQuery):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, f"❌ Error: {r.get('error')}", reply_markup=kb)
-        await call.answer()
+        await safe_answer(call)
         return
 
     usuarios = r.get("usuarios", [])
@@ -3432,7 +3440,7 @@ async def cb_wsp_membresia(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @dp.message(Command("wspactivar"))
@@ -3528,13 +3536,13 @@ async def cmd_wsp_membresia(msg: types.Message):
 async def cb_wsp_detectar(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
+    await safe_answer(call)
     import wsp_bridge as wsp
     r = await wsp.wsp_sesiones(call.from_user.id)
     if not r.get("ok") or not r.get("sesiones"):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, "❌ No tienes cuentas WSP vinculadas.\nVincula una cuenta primero desde 👤 Cuentas WSP.", reply_markup=kb)
-        await call.answer()
         return
     sesiones = r["sesiones"]
     if len(sesiones) == 1:
@@ -3548,12 +3556,12 @@ async def cb_wsp_detectar(call: types.CallbackQuery):
     botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
 
 @dp.callback_query(F.data.startswith("wsp_detectar_cuenta:"))
 async def cb_wsp_detectar_cuenta(call: types.CallbackQuery, cuenta_override=None):
     if not await verificar_membresia_cb(call):
         return
+    await safe_answer(call)
     cuenta = cuenta_override or call.data.split(":", 1)[1]
     import wsp_bridge as wsp
     await safe_edit(call.message, f"🔍 Detectando grupos de la cuenta '{cuenta}'...\nEsto puede tardar unos segundos.")
@@ -3562,7 +3570,6 @@ async def cb_wsp_detectar_cuenta(call: types.CallbackQuery, cuenta_override=None
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, f"❌ Error: {r.get('error', 'sin conexión')}", reply_markup=kb)
-        await call.answer()
         return
     grupos = r.get("grupos", [])
     texto = f"🔍 GRUPOS WSP de '{cuenta}' ({len(grupos)}):\n\n"
@@ -3579,7 +3586,6 @@ async def cb_wsp_detectar_cuenta(call: types.CallbackQuery, cuenta_override=None
     botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
 
 
 # --- MENSAJES WSP ---
@@ -3593,7 +3599,7 @@ async def cb_wsp_mensajes(call: types.CallbackQuery):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, f"❌ Error: {r.get('error', 'sin conexión')}", reply_markup=kb)
-        await call.answer()
+        await safe_answer(call)
         return
     mensajes = r.get("mensajes", [])
     texto = f"📝 MENSAJES/PLANTILLAS WSP ({len(mensajes)}):\n\n"
@@ -3611,7 +3617,7 @@ async def cb_wsp_mensajes(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- ENVIO UNICO WSP ---
@@ -3628,7 +3634,7 @@ async def cb_wsp_envio_unico(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- PROGRAMADOS WSP ---
@@ -3659,7 +3665,7 @@ async def cb_wsp_programados(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- ENVIO A MIEMBROS WSP ---
@@ -3679,7 +3685,7 @@ async def cb_wsp_envio_miembros(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- CONFIG ENVIO WSP ---
@@ -3708,7 +3714,7 @@ async def cb_wsp_config(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- LISTA NEGRA WSP ---
@@ -3735,7 +3741,7 @@ async def cb_wsp_listanegra(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- AUTO-RESPONDER WSP ---
@@ -3764,7 +3770,7 @@ async def cb_wsp_autoresponder(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- ENVIO INTERACTIVO WSP ---
@@ -3783,7 +3789,7 @@ async def cb_wsp_interactivo(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- STATS GRUPOS WSP ---
@@ -3817,7 +3823,7 @@ async def cb_wsp_stats(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- PANEL WEB ---
@@ -3837,7 +3843,7 @@ async def cb_wsp_panelweb(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # --- COMANDOS WSP RAPIDOS ---
@@ -3889,7 +3895,7 @@ async def cb_wsp_check_link(call: types.CallbackQuery):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
         await safe_edit(call.message, f"❌ Error: {r.get('error')}", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 # ╔══════════════════════════════════════╗
@@ -3923,7 +3929,7 @@ async def cb_sec_admin(call: types.CallbackQuery):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "adm_usuarios")
 async def cb_adm_usuarios(call: types.CallbackQuery):
@@ -3944,7 +3950,7 @@ async def cb_adm_usuarios(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a Admin", callback_data="sec_admin")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 @dp.callback_query(F.data == "adm_stats")
 async def cb_adm_stats(call: types.CallbackQuery):
@@ -3967,7 +3973,7 @@ async def cb_adm_stats(call: types.CallbackQuery):
     botones = [[InlineKeyboardButton(text="🔙 Volver a Admin", callback_data="sec_admin")]]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 # Admin commands (text)
 @dp.message(Command("activar"))
