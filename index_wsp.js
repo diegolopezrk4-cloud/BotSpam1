@@ -1048,6 +1048,9 @@ poll();
                     // p.jid is always @s.whatsapp.net (resolved from attrs.phone_number)
                     const myJid = sock.user?.id || "";
                     const myNum = jidToNumber(myJid);
+                    // Load blacklist numbers to skip
+                    const blacklist = db.getBlacklist(body.u);
+                    const blNums = new Set(blacklist.map(b => (b.grupo_link || "").replace(/[^0-9]/g, "")));
                     const seen = new Set();
                     const jids = [];
                     for (const p of rawParticipants) {
@@ -1063,8 +1066,9 @@ poll();
                         if (jid.endsWith("@lid")) continue;
                         const num = jidToNumber(jid);
                         if (!num || !/^\d{7,15}$/.test(num)) continue;
-                        // Skip sender's own JID and duplicates
+                        // Skip sender's own JID, blacklisted numbers, and duplicates
                         if (num === myNum) continue;
+                        if (blNums.has(num)) continue;
                         if (seen.has(num)) continue;
                         seen.add(num);
                         jids.push(jid);
