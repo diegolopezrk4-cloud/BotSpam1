@@ -857,18 +857,30 @@ async def api_tg_sync_membresia(request):
     plan = body.get("plan", "")
     if not user_id:
         return web.json_response({"ok": False, "error": "falta telegram_id"}, status=400)
-    user = await db.get_usuario(user_id)
+    try:
+        tid = int(user_id)
+    except (ValueError, TypeError):
+        return web.json_response({"ok": False, "error": "telegram_id invalido"}, status=400)
+    user = await db.get_usuario(tid)
     if not user:
-        await db.crear_usuario(user_id, body.get("username", ""))
-    if plan == "permanente":
+        await db.crear_usuario(tid, body.get("username", ""))
+    if plan == "desactivado" or (dias == 0 and plan != "permanente"):
+        async with db._connect() as conn:
+            await conn.execute(
+                "UPDATE usuarios SET plan='desactivado', activo=0, fecha_expira=NULL WHERE telegram_id=?",
+                (tid,)
+            )
+            await conn.commit()
+    elif plan == "permanente":
         async with db._connect() as conn:
             await conn.execute(
                 "UPDATE usuarios SET plan='permanente', activo=1, fecha_expira=NULL WHERE telegram_id=?",
-                (int(user_id),)
+                (tid,)
             )
             await conn.commit()
     elif dias > 0:
-        await db.activar_membresia(user_id, dias)
+        await db.activar_membresia(tid, dias)
+    logger.info(f"[sync_membresia] TG updated: tid={tid}, dias={dias}, plan={plan}")
     return web.json_response({"ok": True})
 
 

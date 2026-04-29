@@ -603,6 +603,17 @@ poll();
                 const body = await readBody();
                 if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
                 const r = db.panelRegistro(body.telegram_id, body.password, body.username || '');
+                // Sync 1-day demo to TG database
+                if (r.ok) {
+                    try {
+                        const http = require("http");
+                        const syncData = JSON.stringify({ telegram_id: body.telegram_id, dias: 1, plan: "demo", username: body.username || "" });
+                        const syncReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                        syncReq.on("error", () => {});
+                        syncReq.write(syncData);
+                        syncReq.end();
+                    } catch (_) {}
+                }
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
             }
@@ -1134,6 +1145,32 @@ poll();
                 try {
                     const http = require("http");
                     const syncData = JSON.stringify({ telegram_id: tid, dias, plan, username: body.username || "" });
+                    console.log(`[sync_membresia] Syncing to TG: tid=${tid}, dias=${dias}, plan=${plan}`);
+                    const syncReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } }, (syncRes) => {
+                        let data = "";
+                        syncRes.on("data", (chunk) => data += chunk);
+                        syncRes.on("end", () => console.log(`[sync_membresia] TG response: ${syncRes.statusCode} ${data}`));
+                    });
+                    syncReq.on("error", (e) => console.error(`[sync_membresia] TG sync error: ${e.message}`));
+                    syncReq.write(syncData);
+                    syncReq.end();
+                } catch (e) { console.error(`[sync_membresia] TG sync exception: ${e.message}`); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/admin/desactivar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const tid = body.telegram_id || body.user_id;
+                if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                const user = db.getUsuario(tid) || db.findUserByNumber(tid);
+                if (user) {
+                    db.getDb().prepare("UPDATE usuarios SET activo = 0, plan = 'desactivado', fecha_expira = NULL WHERE wsp_id = ?").run(user.wsp_id);
+                }
+                // Sync deactivation to TG
+                try {
+                    const http = require("http");
+                    const syncData = JSON.stringify({ telegram_id: tid, dias: 0, plan: "desactivado" });
                     const syncReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
                     syncReq.on("error", () => {});
                     syncReq.write(syncData);

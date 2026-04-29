@@ -2351,6 +2351,8 @@ async function loadAdminUsuarios(){
     h+=`<button class="btn btn-sm btn-primary" onclick="adminActivar('${u.telegram_id}','semanal',7)" title="Semanal 7 dias">7d</button>`;
     h+=`<button class="btn btn-sm btn-success" onclick="adminActivar('${u.telegram_id}','mensual',30)" title="Mensual 30 dias">30d</button>`;
     h+=`<button class="btn btn-sm btn-outline" onclick="adminActivar('${u.telegram_id}','permanente',36500)" title="Permanente" style="border-color:var(--success);color:var(--success)">\u221e</button>`;
+    h+=`<button class="btn btn-sm btn-outline" onclick="showAdminDias('${u.telegram_id}')" title="Dias personalizados">\ud83d\udcc5</button>`;
+    if(activo)h+=`<button class="btn btn-sm btn-danger" onclick="adminDesactivar('${u.telegram_id}')" title="Desactivar membresia">\u274c</button>`;
     h+=`<button class="btn btn-sm btn-outline" onclick="showAdminTipo('${u.telegram_id}')" title="Tipo WSP/TG">\ud83d\udcf1</button>`;
     if(!u.es_admin)h+=`<button class="btn btn-sm btn-outline" onclick="adminSetAdmin('${u.telegram_id}',true)">+Admin</button>`;
     else h+=`<button class="btn btn-sm btn-danger" onclick="adminSetAdmin('${u.telegram_id}',false)">-Admin</button>`;
@@ -2380,6 +2382,27 @@ async function adminActivar(tid,plan,dias){
   if(!confirm('Activar '+label+' para '+tid+'?'))return;
   const r=await api('/api/admin/membresia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid,plan,dias})});
   toast(r.ok?'Membresia activada':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadAdminUsuarios();
+}
+function showAdminDias(tid){
+  showModal(`<h3>\ud83d\udcc5 Dias Personalizados</h3>
+    <p style="color:var(--text2);margin-bottom:15px">Activar membresia para <b>${tid}</b> por X dias:</p>
+    <div class="form-group"><label>Cantidad de dias</label><input id="adminDiasInput" type="number" min="1" value="2" placeholder="Ej: 2, 4, 15"></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="adminActivarDias('${tid}')">Activar</button></div>`);
+}
+async function adminActivarDias(tid){
+  const dias=parseInt($('adminDiasInput').value)||0;
+  if(dias<1){toast('Minimo 1 dia','error');return}
+  closeModal();
+  const plan=dias>=36500?'permanente':dias>=30?'mensual':dias>=7?'semanal':'diario';
+  const r=await api('/api/admin/membresia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid,plan,dias})});
+  toast(r.ok?'Membresia activada por '+dias+' dias':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadAdminUsuarios();
+}
+async function adminDesactivar(tid){
+  if(!confirm('Desactivar membresia de '+tid+'?'))return;
+  const r=await api('/api/admin/desactivar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid})});
+  toast(r.ok?'Membresia desactivada':'Error: '+(r.error||''),r.ok?'success':'error');
   if(r.ok)loadAdminUsuarios();
 }
 async function adminSetAdmin(tid,val){
