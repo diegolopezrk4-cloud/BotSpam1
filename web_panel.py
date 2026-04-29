@@ -486,24 +486,30 @@ async def api_tg_campanas_editar(request):
         reader = await request.multipart()
         fields = {}
         foto_path = None
+        foto_data = None
+        foto_filename = None
         while True:
             part = await reader.next()
             if part is None:
                 break
             if part.name == "foto" and part.filename:
-                import os
-                fotos_dir = os.path.join(os.path.dirname(__file__), "fotos_campanas")
-                os.makedirs(fotos_dir, exist_ok=True)
-                foto_path = os.path.join(fotos_dir, f"campana_{fields.get('id', 'tmp')}_{part.filename}")
-                with open(foto_path, "wb") as f:
-                    while True:
-                        chunk = await part.read_chunk()
-                        if not chunk:
-                            break
-                        f.write(chunk)
+                foto_filename = part.filename
+                chunks = []
+                while True:
+                    chunk = await part.read_chunk()
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                foto_data = b"".join(chunks)
             else:
                 data = await part.read(decode=True)
                 fields[part.name] = data.decode("utf-8", errors="replace")
+        if foto_data and foto_filename:
+            fotos_dir = os.path.join(os.path.dirname(__file__), "fotos_campanas")
+            os.makedirs(fotos_dir, exist_ok=True)
+            foto_path = os.path.join(fotos_dir, f"campana_{fields.get('id', 'tmp')}_{foto_filename}")
+            with open(foto_path, "wb") as f:
+                f.write(foto_data)
     except Exception:
         body = await request.json()
         fields = body

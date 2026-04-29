@@ -962,8 +962,8 @@ function checkMembresia(userId) {
 function editarTemplate(templateId, nombre, mensaje) {
     const existing = db.prepare("SELECT * FROM templates WHERE id = ?").get(templateId);
     if (!existing) return false;
-    if (nombre) db.prepare("UPDATE templates SET nombre = ? WHERE id = ?").run(nombre, templateId);
-    if (mensaje) db.prepare("UPDATE templates SET mensaje = ? WHERE id = ?").run(mensaje, templateId);
+    if (nombre !== undefined && nombre !== null) db.prepare("UPDATE templates SET nombre = ? WHERE id = ?").run(nombre, templateId);
+    if (mensaje !== undefined && mensaje !== null) db.prepare("UPDATE templates SET mensaje = ? WHERE id = ?").run(mensaje, templateId);
     return true;
 }
 
