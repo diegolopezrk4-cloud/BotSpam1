@@ -355,7 +355,8 @@ poll();
                 if (body.imagen_b64 && body.imagen_nombre) {
                     const fotosDir = path.join(__dirname, "fotos_campanas_wsp");
                     fs.mkdirSync(fotosDir, { recursive: true });
-                    imagenPath = path.join(fotosDir, `camp_${body.id}_${body.imagen_nombre}`);
+                    const safeName = path.basename(body.imagen_nombre).replace(/[^a-zA-Z0-9._-]/g, '_');
+                    imagenPath = path.join(fotosDir, `camp_${body.id}_${safeName}`);
                     const buf = Buffer.from(body.imagen_b64, "base64");
                     fs.writeFileSync(imagenPath, buf);
                 }
@@ -368,12 +369,12 @@ poll();
                 db.setCampanaConfig(body.id, imin, imax, conf.espera_cuenta, eciclo);
                 // Update campaign accounts if provided
                 if (Array.isArray(body.sesiones)) {
-                    db.prepare("DELETE FROM campana_sesiones WHERE campana_id = ?").run(body.id);
+                    db.getDb().prepare("DELETE FROM campana_sesiones WHERE campana_id = ?").run(body.id);
                     for (const s of body.sesiones) db.agregarSesionCampana(body.id, s);
                 }
                 // Update campaign groups if provided
                 if (Array.isArray(body.grupos)) {
-                    db.prepare("DELETE FROM campana_grupos WHERE campana_id = ?").run(body.id);
+                    db.getDb().prepare("DELETE FROM campana_grupos WHERE campana_id = ?").run(body.id);
                     for (const g of body.grupos) db.agregarGrupoCampana(body.id, g);
                 }
                 res.writeHead(200);
