@@ -195,7 +195,7 @@ body{background:#111;color:#fff;font-family:Arial;text-align:center;padding:40px
 </style></head><body>
 <div class="box">
 <h1>\u{1F4F1} Vincular Cuenta</h1>
-<h2>${nombre}</h2>
+<h2>${nombre.replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":"&#39;"}[c]))}</h2>
 <div id="content"><div class="status disconnected">\u23F3 Preparando QR...</div><p>Espera unos segundos...</p></div>
 </div>
 <script>

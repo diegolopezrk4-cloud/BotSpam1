@@ -339,10 +339,9 @@ function banByCodigo(codigo) {
 }
 
 function activarMembresia(wspId, dias) {
-    const id = normalizeId(wspId);
     const expira = expiraPeru(dias);
     const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : "mensual";
-    db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, id);
+    db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, wspId);
 }
 
 function activarMembresiaByNumber(phoneNumber, dias) {
