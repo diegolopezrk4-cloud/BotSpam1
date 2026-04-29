@@ -1151,4 +1151,5 @@ module.exports = {
     enviarASeleccionados,
     detenerEnvioPersonal,
     sendToGroup,
+    resolveGroupJid,
 };

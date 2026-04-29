@@ -727,7 +727,9 @@ poll();
                 let exitosos = 0, fallidos = 0;
                 for (const g of grupos) {
                     try {
-                        const result = motor.sendToGroup ? await motor.sendToGroup(botSock, g.link, template.mensaje) : null;
+                        const groupJid = await motor.resolveGroupJid(botSock, g.link);
+                        if (!groupJid) { db.registrarEnvio(body.u, 0, g.link, "error"); fallidos++; continue; }
+                        const result = motor.sendToGroup ? await motor.sendToGroup(botSock, groupJid, template.mensaje) : null;
                         if (result && result.sent) {
                             db.registrarEnvio(body.u, 0, g.link, "enviado");
                             exitosos++;

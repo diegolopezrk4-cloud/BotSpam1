@@ -937,7 +937,13 @@ function panelCambiarPassword(telegramId, oldPass, newPass) {
 function checkMembresia(userId) {
     const user = getUsuario(userId);
     const usu = user;
-    const esAdmin = usu ? (usu.es_admin === 1) : false;
+    let esAdmin = usu ? (usu.es_admin === 1) : false;
+    if (!esAdmin) {
+        try {
+            const cfg = require("./config_wsp");
+            if (cfg.ADMIN_TELEGRAM_IDS && cfg.ADMIN_TELEGRAM_IDS.includes(String(userId))) esAdmin = true;
+        } catch (e) {}
+    }
     if (!user) return { ok: true, activa: false, es_admin: esAdmin, membresia: null };
     const activo = user.activo && (user.plan === 'permanente' || (user.fecha_expira && new Date(user.fecha_expira) > new Date()));
     return {
