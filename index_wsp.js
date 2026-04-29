@@ -1165,15 +1165,14 @@ poll();
                     }).filter(jid => jid && jid.endsWith("@s.whatsapp.net"));
                     res.writeHead(200);
                     res.end(JSON.stringify({ ok: true, total: jids.length, message: "Agregando miembros en segundo plano..." }));
-                    // Run in background — add slowly to avoid WhatsApp disconnection
+                    // Run in background — add with moderate delays to avoid WhatsApp disconnection
                     let agregados = 0, fallidos = 0;
-                    const BATCH_SIZE = 3; // Small batches to avoid WhatsApp anti-abuse
-                    const DELAY_BETWEEN_MEMBERS = 8000 + Math.floor(Math.random() * 7000); // 8-15s random between adds
-                    const DELAY_BETWEEN_BATCHES = 90000; // 90s pause between batches
-                    const DELAY_AFTER_ERROR = 60000; // 60s pause after any error
+                    const BATCH_SIZE = 5; // 5 members per batch
+                    const DELAY_BETWEEN_BATCHES = 45000; // 45s pause between batches
+                    const DELAY_AFTER_ERROR = 45000; // 45s pause after any error
                     // Initial delay before starting to add (let connection stabilize)
-                    console.log(`[agregar_miembros] Iniciando en 5s... (${jids.length} miembros por agregar)`);
-                    await new Promise(r => setTimeout(r, 5000));
+                    console.log(`[agregar_miembros] Iniciando en 3s... (${jids.length} miembros por agregar)`);
+                    await new Promise(r => setTimeout(r, 3000));
                     for (let i = 0; i < jids.length; i++) {
                         try {
                             // Re-check connection before each add
@@ -1215,12 +1214,12 @@ poll();
                             }
                             // Non-connection errors (e.g. "not authorized", "forbidden") — skip member and continue
                         }
-                        // Random delay between individual adds (8-15 seconds)
-                        const memberDelay = 8000 + Math.floor(Math.random() * 7000);
+                        // Random delay between individual adds (5-8 seconds)
+                        const memberDelay = 5000 + Math.floor(Math.random() * 3000);
                         await new Promise(r => setTimeout(r, memberDelay));
                         // Longer pause every BATCH_SIZE members
                         if ((i + 1) % BATCH_SIZE === 0 && i + 1 < jids.length) {
-                            const batchPause = DELAY_BETWEEN_BATCHES + Math.floor(Math.random() * 30000); // 90-120s
+                            const batchPause = DELAY_BETWEEN_BATCHES + Math.floor(Math.random() * 15000); // 45-60s
                             console.log(`[agregar_miembros] Lote de ${BATCH_SIZE} completado (${i + 1}/${jids.length}), pausa ${Math.round(batchPause/1000)}s...`);
                             db.agregarLog(body.u, 'info', `Lote ${Math.ceil((i+1)/BATCH_SIZE)} completado: ${agregados} ok, ${fallidos} error. Pausa ${Math.round(batchPause/1000)}s`);
                             await new Promise(r => setTimeout(r, batchPause));

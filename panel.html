@@ -2778,9 +2778,13 @@ async function enviarPromoTodoEnUno(){
     imagenNombre=imgInput.files[0].name;
     imagenB64=await fileToBase64(imgInput);
   }
+  const respAceptarImgB64=await fileToBase64($('promoRespAceptarImg'));
+  const respRechazarImgB64=await fileToBase64($('promoRespRechazarImg'));
   toast('Enviando promo y activando escucha...','success');
   const payload={u:userId,mensaje,palabra_aceptar:aceptar,palabra_rechazar:rechazar,respuesta_aceptar:respAceptar,respuesta_rechazar:respRechazar,cuenta,timeout_horas:timeoutHoras,recordatorio_activo:recordatorio,mensaje_recordatorio:msgRecordatorio};
   if(imagenB64){payload.imagen_b64=imagenB64;payload.imagen_nombre=imagenNombre}
+  if(respAceptarImgB64)payload.resp_aceptar_imagen_b64=respAceptarImgB64;
+  if(respRechazarImgB64)payload.resp_rechazar_imagen_b64=respRechazarImgB64;
   const r=await api('/api/promo/enviar_y_escuchar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   if(r.ok){
     toast('Promo enviada y escucha activada!','success');
