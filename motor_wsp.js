@@ -1,8 +1,8 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay, fetchLatestBaileysVersion, Browsers } = require("@whiskeysockets/baileys");
 const path = require("path");
 const fs = require("fs");
-const db = require("./db");
-const config = require("./config");
+const db = require("./db_wsp");
+const config = require("./config_wsp");
 
 const tareasActivas = {};    // { campanaId: { running, cancel } }
 const responderActivos = {}; // { userId: { running, cancel } }
@@ -1086,4 +1086,5 @@ module.exports = {
     enviarAPersonales,
     enviarASeleccionados,
     detenerEnvioPersonal,
+    sendToGroup,
 };
