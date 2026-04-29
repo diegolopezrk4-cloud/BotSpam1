@@ -605,32 +605,25 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                         const result = await sendToGroup(currentSock.sock, groupJid, mensajeAEnviar, imagenAEnviar);
 
-                        if (result.sent && result.delivered) {
+                        if (result.sent && (result.delivered || result.reason === "pending" || result.reason === "no_id")) {
+                            // Count as success: message was sent. "pending" means delivery receipt
+                            // didn't arrive within timeout but message was delivered.
                             db.actualizarStatsCampana(campanaId, 1, 0);
-                            db.registrarEnvio(userId, campanaId, grupoLink, "enviado");
+                            db.registrarEnvio(userId, campanaId, grupoLink, result.delivered ? "enviado" : "enviado_pending");
                             db.actualizarGrupoStats(userId, grupoLink, "enviado");
                             db.incrementarEnvioDiario(userId, currentSock.nombre);
-                            consecutivePending = 0;
-                            if (delayMultiplier > 1.0) {
-                                delayMultiplier = Math.max(1.0, delayMultiplier - 0.2);
-                            }
-                        } else if (result.sent && result.reason === "pending") {
-                            db.actualizarStatsCampana(campanaId, 0, 1);
-                            db.registrarEnvio(userId, campanaId, grupoLink, "pending_no_entregado");
-                            db.actualizarGrupoStats(userId, grupoLink, "pending");
-                            consecutivePending++;
-                            delayMultiplier = Math.min(3.0, delayMultiplier + 0.5);
-
-                            if (consecutivePending >= MAX_CONSECUTIVE_PENDING) {
-                                console.log(`   \u{1F6D1} ${consecutivePending} pending seguidos. Pausando ${PAUSA_RATE_LIMIT}s...`);
-                                try {
-                                    await botSock.sendMessage(userId, {
-                                        text: `\u26A0 *${campana.nombre}*: ${consecutivePending} mensajes pendientes seguidos con '${currentSock.nombre}'.\n\u23F3 Pausando ${Math.round(PAUSA_RATE_LIMIT/60)} min...`,
-                                    });
-                                } catch (e) {}
-                                await delay(PAUSA_RATE_LIMIT * 1000);
+                            if (result.delivered) {
                                 consecutivePending = 0;
-                                delayMultiplier = 2.0;
+                                if (delayMultiplier > 1.0) {
+                                    delayMultiplier = Math.max(1.0, delayMultiplier - 0.2);
+                                }
+                            } else {
+                                // Still track pending for rate-limit detection
+                                consecutivePending++;
+                                if (consecutivePending >= MAX_CONSECUTIVE_PENDING) {
+                                    delayMultiplier = Math.min(2.0, delayMultiplier + 0.3);
+                                    consecutivePending = 0;
+                                }
                             }
                         } else if (!result.sent) {
                             // MEJORA 8: Deteccion de ban

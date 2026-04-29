@@ -857,7 +857,7 @@ function limpiarSinonimos(userId) {
 // --- REPORTE DIARIO ---
 function getReporteDiario(userId) {
     const hoy = hoyPeru();
-    const envios = db.prepare("SELECT COUNT(*) as total, SUM(CASE WHEN resultado='enviado' THEN 1 ELSE 0 END) as exitosos FROM historial_envios WHERE user_id = ? AND fecha LIKE ?").get(userId, hoy + "%");
+    const envios = db.prepare("SELECT COUNT(*) as total, SUM(CASE WHEN resultado IN ('enviado','enviado_pending','enviado_personal') THEN 1 ELSE 0 END) as exitosos FROM historial_envios WHERE user_id = ? AND fecha LIKE ?").get(userId, hoy + "%");
     const respuestas = db.prepare("SELECT COUNT(*) as total FROM historial_respuestas WHERE user_id = ? AND fecha LIKE ?").get(userId, hoy + "%");
     const cuentasEnvios = db.prepare("SELECT cuenta_nombre, total FROM envios_diarios WHERE user_id = ? AND fecha = ?").all(userId, hoy);
     return {

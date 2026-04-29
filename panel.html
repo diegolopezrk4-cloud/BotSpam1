@@ -2089,7 +2089,7 @@ async function enviarAMiembros(){
   if(cuenta)payload.cuenta=cuenta;
   if(batchSize){payload.batch_size=parseInt(batchSize);payload.delay_minutes=parseInt(delayMinutes);}
   const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');}
+  if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.filtered?' ('+r.filtered+' filtrados)':'')+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');}
   else{toast('Error: '+(r.error||''),'error');}
 }
 async function agregarMiembrosAGrupo(){if(!requireMembresia())return;
@@ -2614,7 +2614,7 @@ async function loadHistorial(){
   let h='<div class="table-wrap"><div class="table-header"><h3>📜 '+h_data.length+' registros</h3></div>';
   h+='<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Destino</th><th>Mensaje</th><th>Total</th><th>OK</th><th>Error</th><th>Estado</th></tr></thead><tbody>';
   h_data.forEach(x=>{
-    const badge=x.resultado==='exitoso'||x.resultado==='enviado'?'badge-success':x.resultado==='fallido'?'badge-danger':'badge-warn';
+    const badge=x.resultado==='exitoso'||x.resultado==='enviado'||x.resultado==='enviado_pending'?'badge-success':x.resultado==='fallido'?'badge-danger':'badge-warn';
     h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.tipo||'?'}</td><td style="font-size:11px">${(x.destino||'').slice(0,30)}</td><td style="font-size:11px;color:var(--text2)">${(x.mensaje_preview||'').slice(0,30)}</td>`;
     h+=`<td>${x.total||0}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td>`;
     h+=`<td><span class="badge ${badge}">${x.resultado||'?'}</span></td></tr>`;

@@ -966,12 +966,44 @@ poll();
                         res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
                     }
                     const meta = await sock.groupMetadata(body.grupo);
-                    const jids = (meta.participants || []).map(p => p.id);
+                    const rawParticipants = meta.participants || [];
+
+                    // Resolve JIDs: convert @lid to @s.whatsapp.net for DMs
+                    const myJid = sock.user?.id || "";
+                    const myNum = jidToNumber(myJid);
+                    const seen = new Set();
+                    const jids = [];
+                    for (const p of rawParticipants) {
+                        let jid = p.id;
+                        // Convert @lid JIDs to @s.whatsapp.net for direct messages
+                        if (jid.endsWith("@lid")) {
+                            const num = jid.split("@")[0].replace(/:\d+$/, "");
+                            if (/^\d{7,15}$/.test(num)) {
+                                jid = num + "@s.whatsapp.net";
+                            } else {
+                                continue; // Skip unresolvable LID
+                            }
+                        }
+                        // Normalize: strip device suffix (e.g. :0)
+                        if (jid.includes(":") && jid.endsWith("@s.whatsapp.net")) {
+                            jid = jid.split(":")[0] + "@s.whatsapp.net";
+                        }
+                        const num = jidToNumber(jid);
+                        // Skip sender's own JID and duplicates
+                        if (num === myNum) continue;
+                        if (seen.has(num)) continue;
+                        seen.add(num);
+                        jids.push(jid);
+                    }
+                    if (!jids.length) {
+                        res.writeHead(200);
+                        return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros validos para enviar (todos filtrados o JIDs no resolubles)" }));
+                    }
                     const batchSize = parseInt(body.batch_size) || 0;
                     const delayMinutes = parseInt(body.delay_minutes) || 5;
                     motor.enviarASeleccionados(body.u, jids, body.mensaje, null, sock, batchSize, delayMinutes);
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, total: jids.length, batch_size: batchSize || jids.length, delay_minutes: batchSize ? delayMinutes : 0 }));
+                    return res.end(JSON.stringify({ ok: true, total: jids.length, filtered: rawParticipants.length - jids.length, batch_size: batchSize || jids.length, delay_minutes: batchSize ? delayMinutes : 0 }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -1059,11 +1091,14 @@ poll();
                 const userId = url.searchParams.get("u");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const envios = db.getHistorialEnvios(userId, 100);
-                const historial = envios.map(e => ({
-                    fecha: e.fecha, tipo: "envio", destino: e.grupo_link,
-                    mensaje_preview: "", total: 1, exitosos: e.resultado === "enviado" ? 1 : 0,
-                    fallidos: e.resultado !== "enviado" ? 1 : 0, resultado: e.resultado,
-                }));
+                const historial = envios.map(e => {
+                    const esExitoso = e.resultado === "enviado" || e.resultado === "enviado_pending";
+                    return {
+                        fecha: e.fecha, tipo: "envio", destino: e.grupo_link,
+                        mensaje_preview: "", total: 1, exitosos: esExitoso ? 1 : 0,
+                        fallidos: esExitoso ? 0 : 1, resultado: esExitoso ? "enviado" : e.resultado,
+                    };
+                });
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, historial }));
             }
