@@ -627,6 +627,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <div style="display:flex;gap:10px;align-items:center">
           <select id="emCuenta" style="flex:1"><option value="">-- Cargando cuentas... --</option></select>
           <button class="btn btn-primary" onclick="cargarGruposCuenta()">🔄 Cargar Grupos</button>
+          <button class="btn btn-outline" onclick="cargarGruposCuenta(true)" title="Forzar recarga desde WhatsApp">♻ Refrescar</button>
         </div>
       </div>
       <div class="grid" style="grid-template-columns:1fr 1fr;margin-bottom:15px">
@@ -808,7 +809,18 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <!-- Envio Todo en Uno (Mejora 1) -->
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent2)">
         <h3 style="margin-bottom:12px;color:var(--accent2)">🚀 Enviar Promo + Activar Escucha (Todo en Uno)</h3>
-        <p style="color:var(--text2);font-size:13px;margin-bottom:12px">Escribe tu mensaje promo, adjunta una imagen (opcional) y el bot lo enviara a todos tus contactos personales y activara la escucha automaticamente.</p>
+        <p style="color:var(--text2);font-size:13px;margin-bottom:12px">Escribe tu mensaje promo, adjunta una imagen (opcional) y el bot lo enviara y activara la escucha automaticamente.</p>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>📨 Tipo de envio</label>
+          <div style="display:flex;gap:10px">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;padding:8px 15px;border-radius:8px;border:2px solid var(--accent);background:var(--bg2)" id="promoTipoPersonalLabel">
+              <input type="radio" name="promoTipo" value="personal" checked onchange="togglePromoTipo()"> 💬 Envio Personal
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;padding:8px 15px;border-radius:8px;border:2px solid var(--border);background:var(--bg2)" id="promoTipoMiembrosLabel">
+              <input type="radio" name="promoTipo" value="miembros" onchange="togglePromoTipo()"> 👥 Envio a Miembros
+            </label>
+          </div>
+        </div>
         <div class="form-group">
           <label>📝 Mensaje de la promo</label>
           <textarea id="promoMensaje" rows="3" placeholder="Ej: Hola! Tenemos una oferta especial para ti. Responde SI si te interesa o NO si no." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:14px;resize:vertical"></textarea>
@@ -817,8 +829,23 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <label>🖼 Imagen de la promo (opcional)</label>
           <input type="file" id="promoImagen" accept="image/*" style="font-size:13px">
         </div>
+        <!-- Miembros mode: extra fields -->
+        <div id="promoMiembrosFields" style="display:none">
+          <div class="form-group">
+            <label>📂 Cuenta para cargar grupos (puede ser diferente a la cuenta de envio)</label>
+            <div style="display:flex;gap:10px;align-items:center">
+              <select id="promoGrupoCuenta" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)"><option value="">-- Selecciona cuenta --</option></select>
+              <button class="btn btn-primary" onclick="cargarGruposPromoMiembros()">🔄 Cargar Grupos</button>
+              <button class="btn btn-outline" onclick="cargarGruposPromoMiembros(true)" title="Forzar recarga desde WhatsApp" style="padding:6px 10px;font-size:12px">♻</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>👥 Grupo (de donde tomar miembros)</label>
+            <select id="promoGrupo" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%"><option value="">-- Carga grupos primero --</option></select>
+          </div>
+        </div>
         <div class="form-group">
-          <label>Cuenta WhatsApp</label>
+          <label>📤 Cuenta WhatsApp para enviar</label>
           <select id="promoCuenta" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%">
             <option value="">-- Usar cuenta principal --</option>
           </select>
@@ -1191,7 +1218,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-primary" onclick="verificarNumeroWsp()">🔍 Verificar WSP</button>
       </div>
       <div id="verificarResult" style="display:none;padding:10px;background:var(--bg3);border-radius:8px;margin-bottom:15px;font-size:13px"></div>
-      <div style="margin-bottom:10px"><button class="btn btn-danger" onclick="showModal('Limpiar toda la lista negra de numeros?','confLimpBLNum()')">🗑 Limpiar Todo</button></div>
+      <div style="margin-bottom:10px"><button class="btn btn-danger" onclick="limpiarBlacklistNumeros()">🗑 Limpiar Todo</button></div>
       <div id="blacklistNumerosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
@@ -1231,8 +1258,12 @@ let currentPlatform='wsp';
 
 function $(id){return document.getElementById(id)}
 async function api(path,opts){
-  try{const r=opts?await fetch(API+path,opts):await fetch(API+path);return await r.json()}
-  catch(e){return{ok:false,error:e.message}}
+  try{
+    const r=opts?await fetch(API+path,opts):await fetch(API+path);
+    const ct=r.headers.get('content-type')||'';
+    if(!ct.includes('json')){const t=await r.text();return{ok:false,error:'Servidor no responde (HTTP '+r.status+')'}}
+    return await r.json();
+  }catch(e){return{ok:false,error:e.message}}
 }
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/`/g,'&#96;')}
 function toast(msg,type='success'){
@@ -2372,14 +2403,16 @@ async function descartarProgreso(){
   $('resumeBar').style.display='none';
   toast('Progreso descartado','success');
 }
-async function cargarGruposCuenta(){
+async function cargarGruposCuenta(forceRefresh){
   const cuenta=$('emCuenta').value;
   if(!cuenta){toast('Selecciona una cuenta primero','error');return}
   toast('Cargando grupos de '+cuenta+'...','success');
   const sel=$('emGrupo'),sel2=$('emDestino');
   sel.innerHTML='<option value="">-- Cargando... --</option>';
   sel2.innerHTML='<option value="">-- Cargando... --</option>';
-  const r=await api('/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
+  let url='/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta);
+  if(forceRefresh)url+='&refresh=1';
+  const r=await api(url);
   sel.innerHTML='<option value="">-- Selecciona grupo origen --</option>';
   sel2.innerHTML='<option value="">-- Opcional: grupo destino --</option>';
   if(r.ok){
@@ -2392,7 +2425,8 @@ async function cargarGruposCuenta(){
       sel.innerHTML+=`<option value="${g.jid}">${info}</option>`;
       sel2.innerHTML+=`<option value="${g.jid}">${info}</option>`;
     });
-    toast(postables.length+' grupos cargados ('+grupos.length+' total, filtrados solo donde puedes enviar)','success');
+    const cacheMsg=r.from_cache?' (desde cache)':' (actualizado)';
+    toast(postables.length+' grupos cargados'+cacheMsg,'success');
   }else{toast('Error: '+(r.error||''),'error')}
 }
 let _miembrosCache=[];
@@ -2764,6 +2798,11 @@ async function enviarPromoTodoEnUno(){
   if(!requireMembresia())return;
   const mensaje=$('promoMensaje')?.value?.trim();
   if(!mensaje){toast('Escribe un mensaje para la promo','error');return}
+  const tipoEnvio=document.querySelector('input[name="promoTipo"]:checked')?.value||'personal';
+  if(tipoEnvio==='miembros'){
+    const grupo=$('promoGrupo')?.value;
+    if(!grupo){toast('Selecciona un grupo para tomar miembros','error');return}
+  }
   const aceptar=$('promoAceptar').value.trim()||'si';
   const rechazar=$('promoRechazar').value.trim()||'no';
   const respAceptar=$('promoRespAceptar')?.value?.trim()||'';
@@ -2781,7 +2820,11 @@ async function enviarPromoTodoEnUno(){
   const respAceptarImgB64=await fileToBase64($('promoRespAceptarImg'));
   const respRechazarImgB64=await fileToBase64($('promoRespRechazarImg'));
   toast('Enviando promo y activando escucha...','success');
-  const payload={u:userId,mensaje,palabra_aceptar:aceptar,palabra_rechazar:rechazar,respuesta_aceptar:respAceptar,respuesta_rechazar:respRechazar,cuenta,timeout_horas:timeoutHoras,recordatorio_activo:recordatorio,mensaje_recordatorio:msgRecordatorio};
+  const payload={u:userId,mensaje,palabra_aceptar:aceptar,palabra_rechazar:rechazar,respuesta_aceptar:respAceptar,respuesta_rechazar:respRechazar,cuenta,timeout_horas:timeoutHoras,recordatorio_activo:recordatorio,mensaje_recordatorio:msgRecordatorio,tipo_envio:tipoEnvio};
+  if(tipoEnvio==='miembros'){
+    payload.grupo=$('promoGrupo').value;
+    payload.grupo_cuenta=$('promoGrupoCuenta').value;
+  }
   if(imagenB64){payload.imagen_b64=imagenB64;payload.imagen_nombre=imagenNombre}
   if(respAceptarImgB64)payload.resp_aceptar_imagen_b64=respAceptarImgB64;
   if(respRechazarImgB64)payload.resp_rechazar_imagen_b64=respRechazarImgB64;
@@ -2828,7 +2871,46 @@ async function loadPromoCuentas(){
   const r=await api('/api/sesiones?u='+userId);
   const sel=$('promoCuenta');if(!sel)return;
   sel.innerHTML='<option value="">-- Usar cuenta principal --</option>';
-  if(r.ok&&r.sesiones){r.sesiones.forEach(s=>{sel.innerHTML+='<option value="'+s.nombre+'">'+s.nombre+(s.telefono?' ('+s.telefono+')':'')+'</option>'})}
+  const sel2=$('promoGrupoCuenta');
+  if(sel2)sel2.innerHTML='<option value="">-- Selecciona cuenta --</option>';
+  if(r.ok&&r.sesiones){r.sesiones.forEach(s=>{
+    const opt='<option value="'+s.nombre+'">'+s.nombre+(s.telefono?' ('+s.telefono+')':'')+'</option>';
+    sel.innerHTML+=opt;
+    if(sel2)sel2.innerHTML+=opt;
+  })}
+}
+function togglePromoTipo(){
+  const tipo=document.querySelector('input[name="promoTipo"]:checked')?.value||'personal';
+  const fields=$('promoMiembrosFields');
+  const lP=$('promoTipoPersonalLabel'),lM=$('promoTipoMiembrosLabel');
+  if(tipo==='miembros'){
+    fields.style.display='block';
+    lM.style.borderColor='var(--accent)';lP.style.borderColor='var(--border)';
+  }else{
+    fields.style.display='none';
+    lP.style.borderColor='var(--accent)';lM.style.borderColor='var(--border)';
+  }
+}
+async function cargarGruposPromoMiembros(forceRefresh){
+  const cuenta=$('promoGrupoCuenta').value;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
+  toast('Cargando grupos de '+cuenta+'...','success');
+  const sel=$('promoGrupo');
+  sel.innerHTML='<option value="">-- Cargando... --</option>';
+  let url='/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta);
+  if(forceRefresh)url+='&refresh=1';
+  const r=await api(url);
+  sel.innerHTML='<option value="">-- Selecciona grupo --</option>';
+  if(r.ok){
+    const grupos=(r.grupos||[]).sort((a,b)=>(a.subject||'').localeCompare(b.subject||''));
+    grupos.forEach(g=>{
+      const name=g.subject||'Sin nombre';
+      const badge=g.esAdmin?' [Admin]':'';
+      sel.innerHTML+=`<option value="${g.jid}">${name}${badge} (${g.size} miembros)</option>`;
+    });
+    const cacheMsg=r.from_cache?' (desde cache)':' (actualizado)';
+    toast(grupos.length+' grupos cargados'+cacheMsg,'success');
+  }else{toast('Error: '+(r.error||''),'error')}
 }
 
 // --- LOGS (Mejora 6) ---
@@ -3201,7 +3283,7 @@ function exportarHistorialCSV(){
 // --- BLACKLIST NUMEROS ---
 async function loadListaNegraNumeros(){
   const r=await api('/api/blacklist_numeros?u='+userId);
-  if(!r.ok){$('blacklistNumerosContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  if(!r.ok){$('blacklistNumerosContent').innerHTML='<div class="empty-state"><p>Error: '+esc(r.error||'desconocido')+'</p></div>';return}
   const nums=r.numeros||[];
   if(!nums.length){$('blacklistNumerosContent').innerHTML='<div class="empty-state"><div class="icon">🚫</div><p>Sin numeros bloqueados</p></div>';return}
   let h='<div class="table-wrap"><div class="table-header"><h3>🚫 '+nums.length+' numeros bloqueados</h3></div>';
@@ -3217,19 +3299,24 @@ async function agregarBlacklistNumero(){
   const num=$('inputBlacklistNumero')?.value?.trim();
   const razon=$('inputBlacklistNumeroRazon')?.value?.trim();
   if(!num){toast('Escribe un numero','error');return}
-  await api('/api/blacklist_numeros',{u:userId,accion:'agregar',numero:num,razon});
+  const r=await api('/api/blacklist_numeros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'agregar',numero:num,razon})});
+  if(!r.ok){toast('Error: '+(r.error||''),'error');return}
   $('inputBlacklistNumero').value='';
   $('inputBlacklistNumeroRazon').value='';
   toast('Numero bloqueado');
   loadListaNegraNumeros();
 }
 async function elimBlNum(id){
-  await api('/api/blacklist_numeros',{u:userId,accion:'eliminar',id});
+  const r=await api('/api/blacklist_numeros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'eliminar',id})});
+  if(!r.ok){toast('Error: '+(r.error||''),'error');return}
   toast('Numero desbloqueado');
   loadListaNegraNumeros();
 }
+function limpiarBlacklistNumeros(){showModal(`<h3>🗑 Limpiar lista negra?</h3><p>Se eliminaran todos los numeros bloqueados.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confLimpBLNum()">Limpiar</button></div>`)}
 async function confLimpBLNum(){
-  await api('/api/blacklist_numeros',{u:userId,accion:'limpiar'});
+  closeModal();
+  const r=await api('/api/blacklist_numeros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'limpiar'})});
+  if(!r.ok){toast('Error: '+(r.error||''),'error');return}
   toast('Lista negra limpiada');
   loadListaNegraNumeros();
 }
@@ -3239,7 +3326,7 @@ async function verificarNumeroWsp(){
   $('verificarResult').style.display='block';
   $('verificarResult').innerHTML='<span class="spinner" style="display:inline-block"></span> Verificando...';
   try{
-    const r=await api('/api/verificar_whatsapp',{u:userId,numero:num});
+    const r=await api('/api/verificar_whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,numero:num})});
     if(r.ok){
       $('verificarResult').innerHTML=r.existe?
         '<span style="color:var(--success)">✅ El numero <b>'+esc(num)+'</b> TIENE WhatsApp (JID: '+esc(r.jid||'')+')</span>':
@@ -3323,7 +3410,8 @@ async function crearProgramadoMiembros(){
   const bs=parseInt($('emBatchSize')?.value)||0;
   const dm=parseInt($('emDelayMinutes')?.value)||5;
   const grupoNombre=$('emGrupo')?.selectedOptions[0]?.text||grupo;
-  await api('/api/programados_miembros',{u:userId,accion:'crear',grupo,grupo_nombre:grupoNombre,mensaje:msg,cuenta,hora_envio:hora,dias_semana:diasSel,country_code:cc,admin_filter:af,batch_size:bs,delay_minutes:dm});
+  const r=await api('/api/programados_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'crear',grupo,grupo_nombre:grupoNombre,mensaje:msg,cuenta,hora_envio:hora,dias_semana:diasSel,country_code:cc,admin_filter:af,batch_size:bs,delay_minutes:dm})});
+  if(!r.ok){toast('Error: '+(r.error||''),'error');return}
   toast('Envio programado creado');
   loadProgramadosMiembros();
 }
@@ -3345,8 +3433,8 @@ async function loadProgramadosMiembros(){
   h+='</tbody></table></div>';
   $('programadosMiembrosContent').innerHTML=h;
 }
-async function toggleProgMiembros(id){await api('/api/programados_miembros',{u:userId,accion:'toggle',id});loadProgramadosMiembros();}
-async function elimProgMiembros(id){await api('/api/programados_miembros',{u:userId,accion:'eliminar',id});toast('Eliminado');loadProgramadosMiembros();}
+async function toggleProgMiembros(id){const r=await api('/api/programados_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'toggle',id})});if(!r.ok){toast('Error: '+(r.error||''),'error');return}loadProgramadosMiembros();}
+async function elimProgMiembros(id){const r=await api('/api/programados_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'eliminar',id})});if(!r.ok){toast('Error: '+(r.error||''),'error');return}toast('Eliminado');loadProgramadosMiembros();}
 
 // --- ACTIVIDAD ---
 async function loadActividad(){

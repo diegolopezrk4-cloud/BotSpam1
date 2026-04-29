@@ -906,9 +906,19 @@ poll();
             if (url.pathname === "/api/detectar_cliente" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 const cuenta = url.searchParams.get("cuenta");
+                const forceRefresh = url.searchParams.get("refresh") === "1";
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 try {
+                    // Check cache first (unless force refresh)
+                    if (cuenta && !forceRefresh) {
+                        const cached = db.getGruposCacheSesion(userId, cuenta);
+                        if (cached.length > 0) {
+                            res.writeHead(200);
+                            return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true }));
+                        }
+                    }
                     let sock;
+                    const sesionNombre = cuenta || null;
                     if (cuenta) {
                         sock = await motor.getOrConnectClient(userId, cuenta);
                     } else {
@@ -937,6 +947,10 @@ poll();
                             announce: g.announce || false, esAdmin, canPost
                         };
                     });
+                    // Cache groups for this session
+                    if (sesionNombre) {
+                        try { db.cacheGruposSesion(userId, sesionNombre, grupos); } catch (e) {}
+                    }
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, grupos }));
                 } catch (e) {
@@ -1335,12 +1349,18 @@ poll();
                 const hasta = url.searchParams.get("hasta") || null;
                 const envios = db.getHistorialEnvios(userId, 200, tipoFiltro, resultadoFiltro, desde, hasta);
                 const stats = db.getHistorialStats(userId);
+                const userGrupos = db.getGrupos(userId);
+                const grupoNombreMap = {};
+                for (const g of userGrupos) {
+                    if (g.link && g.nombre) grupoNombreMap[g.link] = g.nombre;
+                }
                 const historial = envios.map(e => {
                     const esExitoso = e.resultado === "enviado" || e.resultado === "enviado_pending" || e.resultado === "enviado_personal";
                     let destino = e.grupo_link || "";
-                    if (e.grupo_nombre) {
+                    let nombre = e.grupo_nombre || grupoNombreMap[destino] || null;
+                    if (nombre) {
                         const numPart = destino.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/@g\.us$/, "");
-                        destino = `[${e.grupo_nombre}] ${numPart}`;
+                        destino = `[${nombre}] ${numPart}`;
                     }
                     return {
                         fecha: e.fecha, tipo: e.tipo_envio || "envio", destino,
@@ -1716,10 +1736,28 @@ poll();
                 if (!sock) sock = botSock;
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 // Send the promo message
-                const started = await motor.enviarAPersonales(body.u, body.mensaje, imagenPath, sock);
-                db.agregarLog(body.u, 'promo', 'Promo enviada + escucha activada');
-                res.writeHead(200);
-                return res.end(JSON.stringify({ ok: started, message: started ? "promo enviada y escucha activada" : "ya hay un envio activo" }));
+                if (body.tipo_envio === 'miembros' && body.grupo) {
+                    // Get members from group (possibly using a different session)
+                    let grupSock = sock;
+                    if (body.grupo_cuenta) {
+                        try { grupSock = await motor.getOrConnectClient(body.u, body.grupo_cuenta); } catch (e) {}
+                    }
+                    const meta = await grupSock.groupMetadata(body.grupo);
+                    const grupoNombre = meta.subject || body.grupo;
+                    const jids = (meta.participants || [])
+                        .map(p => (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id)
+                        .filter(j => j && j.endsWith("@s.whatsapp.net"));
+                    if (!jids.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros en el grupo" })); }
+                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, 0, 5, grupoNombre, body.grupo);
+                    db.agregarLog(body.u, 'promo', `Promo enviada a ${jids.length} miembros de ${grupoNombre} + escucha activada`);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, message: `promo enviada a ${jids.length} miembros y escucha activada`, total: jids.length, grupo_nombre: grupoNombre }));
+                } else {
+                    const started = await motor.enviarAPersonales(body.u, body.mensaje, imagenPath, sock);
+                    db.agregarLog(body.u, 'promo', 'Promo enviada + escucha activada');
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: started, message: started ? "promo enviada y escucha activada" : "ya hay un envio activo" }));
+                }
             }
 
             // ─── PROMO KEYWORDS (Mejora 7) ───
