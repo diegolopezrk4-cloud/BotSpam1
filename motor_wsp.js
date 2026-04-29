@@ -337,7 +337,7 @@ function grupoTieneActividadNueva(campanaId, grupoJid) {
     if (!row) return true; // never sent = treat as new
     const envioTime = new Date(row.ultimo_envio + "Z").getTime();
     const ultimaActividad = grupoUltimaActividad[grupoJid];
-    if (!ultimaActividad) return false; // no activity from others since we sent
+    if (ultimaActividad === undefined) return true; // no data (e.g. after restart) — allow send
     return ultimaActividad > envioTime;
 }
 

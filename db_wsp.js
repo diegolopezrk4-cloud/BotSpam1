@@ -583,6 +583,7 @@ function eliminarCampana(campanaId) {
     db.prepare("DELETE FROM campana_sesiones WHERE campana_id = ?").run(campanaId);
     db.prepare("DELETE FROM campana_config WHERE campana_id = ?").run(campanaId);
     db.prepare("DELETE FROM campana_horario WHERE campana_id = ?").run(campanaId);
+    db.prepare("DELETE FROM campana_grupo_envio WHERE campana_id = ?").run(campanaId);
     db.prepare("DELETE FROM campanas WHERE id = ?").run(campanaId);
 }
 
