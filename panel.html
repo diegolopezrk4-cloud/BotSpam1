@@ -644,6 +644,25 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-danger" onclick="descartarProgreso()" style="padding:5px 12px;font-size:12px">✖ Descartar</button>
       </div>
       <div id="miembrosContent" class="empty-state"><div class="icon">👥</div><p>Selecciona una cuenta y carga sus grupos</p></div>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-top:15px;border:1px solid var(--border)">
+        <h4 style="margin:0 0 10px 0">🔧 Debug: Probar envio individual</h4>
+        <p style="color:var(--text2);font-size:12px;margin-bottom:10px">Envia un mensaje de prueba a un numero especifico para verificar que el envio funciona.</p>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div class="form-group" style="margin:0">
+            <label>Numero (con codigo de pais, ej: 573001234567)</label>
+            <input type="text" id="debugNumero" placeholder="573001234567">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Mensaje de prueba</label>
+            <input type="text" id="debugMsg" placeholder="Hola test" value="Test de envio BotSpam1">
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:10px">
+          <button class="btn btn-primary" onclick="debugTestSend()">📤 Enviar Test</button>
+          <button class="btn" onclick="debugRawParticipants()">🔍 Ver Datos Crudos del Grupo</button>
+        </div>
+        <pre id="debugResult" style="background:#111;color:#0f0;padding:10px;border-radius:8px;font-size:11px;max-height:300px;overflow:auto;display:none;white-space:pre-wrap"></pre>
+      </div>
     </div>
 
     <!-- ENVIO INTERACTIVO -->
@@ -2151,6 +2170,26 @@ async function enviarAMiembros(){
   const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.grupo_nombre?' de '+r.grupo_nombre:'')+(r.filtered?' ('+r.filtered+' filtrados)':'')+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');}
   else{toast('Error: '+(r.error||''),'error');}
+}
+async function debugTestSend(){
+  const numero=$('debugNumero').value.trim(),msg=$('debugMsg').value.trim(),cuenta=$('emCuenta').value;
+  const pre=$('debugResult');pre.style.display='block';
+  if(!numero){pre.textContent='ERROR: Escribe un numero de telefono';return}
+  pre.textContent='Enviando test a '+numero+'...';
+  const payload={u:userId,numero,mensaje:msg||'Test'};
+  if(cuenta)payload.cuenta=cuenta;
+  const r=await api('/api/debug_test_send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  pre.textContent=JSON.stringify(r,null,2);
+}
+async function debugRawParticipants(){
+  const grupo=$('emGrupo').value,cuenta=$('emCuenta').value;
+  const pre=$('debugResult');pre.style.display='block';
+  if(!grupo){pre.textContent='ERROR: Selecciona un grupo primero';return}
+  pre.textContent='Cargando datos crudos...';
+  let url='/api/debug_miembros?u='+userId+'&grupo='+encodeURIComponent(grupo);
+  if(cuenta)url+='&cuenta='+encodeURIComponent(cuenta);
+  const r=await api(url);
+  pre.textContent=JSON.stringify(r,null,2);
 }
 async function agregarMiembrosAGrupo(){if(!requireMembresia())return;
   const origen=$('emGrupo').value,destino=$('emDestino').value,cuenta=$('emCuenta').value;

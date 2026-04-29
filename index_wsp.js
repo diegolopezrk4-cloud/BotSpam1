@@ -969,6 +969,37 @@ poll();
                 }
             }
 
+            // ─── DEBUG: Test single message send ───
+            if (url.pathname === "/api/debug_test_send" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.numero) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o numero" })); }
+                try {
+                    let sock;
+                    if (body.cuenta) { sock = await motor.getOrConnectClient(body.u, body.cuenta); }
+                    else if (botSock) { sock = botSock; }
+                    else { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" })); }
+                    const targetJid = body.numero.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+                    const myJid = sock.user?.id || "unknown";
+                    const msg = body.mensaje || "Test de envio desde BotSpam1";
+                    console.log(`[DEBUG_SEND] From: ${myJid} → To: ${targetJid} Msg: ${msg.substring(0,30)}...`);
+                    const result = await sock.sendMessage(targetJid, { text: msg });
+                    console.log(`[DEBUG_SEND] Result: key.id=${result?.key?.id} key.remoteJid=${result?.key?.remoteJid} status=${result?.status}`);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({
+                        ok: true,
+                        from: myJid,
+                        to: targetJid,
+                        key: result?.key || null,
+                        status: result?.status || null,
+                        messageTimestamp: result?.messageTimestamp || null,
+                    }, null, 2));
+                } catch (e) {
+                    console.log(`[DEBUG_SEND] ERROR: ${e.message}`);
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message, stack: e.stack?.split("\n").slice(0,3) }));
+                }
+            }
+
             // ─── ENVIAR A MIEMBROS WSP ───
             if (url.pathname === "/api/enviar_miembros" && req.method === "POST") {
                 const body = await readBody();
