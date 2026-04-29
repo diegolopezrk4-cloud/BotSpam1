@@ -478,10 +478,18 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- GRUPOS -->
     <div class="section" id="sec-grupos">
       <h2>🌐 Grupos WhatsApp</h2>
-      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn btn-primary" onclick="detectarGrupos()">🔍 Detectar Grupos</button>
-        <button class="btn btn-success" onclick="showAutoJoin()">🔗 Auto-unirse a Grupos</button>
-        <button class="btn btn-outline" onclick="loadGrupos()">🔄 Refrescar</button>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent)">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+            <label>Cuenta para detectar</label>
+            <select id="wspDetectCuenta" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%">
+              <option value="">-- Seleccionar cuenta --</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="detectarGrupos()">🔍 Detectar Grupos</button>
+          <button class="btn btn-success" onclick="showAutoJoin()">🔗 Auto-unirse</button>
+          <button class="btn btn-outline" onclick="loadGrupos()">🔄 Refrescar</button>
+        </div>
       </div>
       <div id="gruposContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
@@ -1476,6 +1484,15 @@ async function loadTgStats(){
 
 // --- GRUPOS ---
 async function loadGrupos(){
+  // Populate WSP account selector
+  const sel=$('wspDetectCuenta');
+  if(sel){
+    sel.innerHTML='<option value="">-- Seleccionar cuenta --</option>';
+    const sr=await api('/api/sesiones?u='+userId);
+    if(sr.ok&&sr.sesiones){
+      sr.sesiones.forEach(s=>{sel.innerHTML+='<option value="'+esc(s.nombre)+'">'+esc(s.nombre)+' ('+esc(s.telefono||'?')+')</option>'});
+    }
+  }
   const r=await api('/api/grupos?u='+userId);
   if(!r.ok){$('gruposContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
   const g=r.grupos||[];
@@ -1487,8 +1504,10 @@ async function loadGrupos(){
 async function eliminarGrupo(l){if(!requireMembresia())return;const r=await api('/api/grupos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:decodeURIComponent(l)})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadGrupos()}
 async function detectarGrupos(){
   if(!requireMembresia())return;
+  const cuenta=$('wspDetectCuenta').value;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
   $('gruposContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Detectando...</div>';
-  const r=await api('/api/detectar_cliente?u='+userId);
+  const r=await api('/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
   if(!r.ok){toast('Error: '+(r.error||''),'error');loadGrupos();return}
   const g=r.grupos||[];if(!g.length){toast('No se detectaron grupos','error');loadGrupos();return}
   let h='<div class="table-wrap"><div class="table-header"><h3>Detectados ('+g.length+')</h3><button class="btn btn-success btn-sm" onclick="agregarTodos()">✅ Agregar Todos</button></div><table><thead><tr><th>✓</th><th>#</th><th>Nombre</th><th>Miembros</th></tr></thead><tbody>';

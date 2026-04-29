@@ -461,13 +461,32 @@ poll();
                 return res.end(JSON.stringify({ ok: true, activas }));
             }
 
-            // GET /api/detectar?u=USER_ID — Detectar grupos de WhatsApp (solo donde se puede comentar)
+            // GET /api/detectar?u=USER_ID&cuenta=NOMBRE — Detectar grupos de WhatsApp usando cuenta del usuario
             if (url.pathname === "/api/detectar" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
+                const cuenta = url.searchParams.get("cuenta");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 try {
-                    const allGroups = await botSock.groupFetchAllParticipating();
+                    let sock;
+                    if (cuenta) {
+                        sock = await motor.getOrConnectClient(userId, cuenta);
+                    } else {
+                        // Sin cuenta especifica: usar primera sesion disponible
+                        const sesiones = db.getSesiones(userId);
+                        if (sesiones.length > 0) {
+                            sock = await motor.getOrConnectClient(userId, sesiones[0].nombre);
+                        } else if (botSock) {
+                            sock = botSock;
+                        } else {
+                            res.writeHead(503);
+                            return res.end(JSON.stringify({ ok: false, error: "No tienes cuentas WSP vinculadas. Vincula una primero." }));
+                        }
+                    }
+                    if (!sock || !sock.user) {
+                        res.writeHead(503);
+                        return res.end(JSON.stringify({ ok: false, error: "Cuenta no conectada. Intenta vincularla de nuevo." }));
+                    }
+                    const allGroups = await sock.groupFetchAllParticipating();
                     const grupos = [];
                     let filtrados = 0;
                     for (const [jid, meta] of Object.entries(allGroups)) {
@@ -786,9 +805,26 @@ poll();
                 const userId = url.searchParams.get("u");
                 const cuenta = url.searchParams.get("cuenta");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 try {
-                    const allGroups = await botSock.groupFetchAllParticipating();
+                    let sock;
+                    if (cuenta) {
+                        sock = await motor.getOrConnectClient(userId, cuenta);
+                    } else {
+                        const sesiones = db.getSesiones(userId);
+                        if (sesiones.length > 0) {
+                            sock = await motor.getOrConnectClient(userId, sesiones[0].nombre);
+                        } else if (botSock) {
+                            sock = botSock;
+                        } else {
+                            res.writeHead(503);
+                            return res.end(JSON.stringify({ ok: false, error: "No tienes cuentas WSP vinculadas." }));
+                        }
+                    }
+                    if (!sock || !sock.user) {
+                        res.writeHead(503);
+                        return res.end(JSON.stringify({ ok: false, error: "Cuenta no conectada." }));
+                    }
+                    const allGroups = await sock.groupFetchAllParticipating();
                     const grupos = Object.values(allGroups).filter(g => motor.esGrupoReal(g.id, g)).map(g => ({
                         jid: g.id, subject: g.subject, size: (g.participants || []).length
                     }));

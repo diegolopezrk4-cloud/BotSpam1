@@ -75,8 +75,11 @@ async def wsp_historial(user_id):
 async def wsp_dashboard(user_id):
     return await _get("/api/dashboard", {"u": str(user_id)})
 
-async def wsp_detectar_grupos(user_id):
-    return await _get("/api/detectar", {"u": str(user_id)})
+async def wsp_detectar_grupos(user_id, cuenta=None):
+    params = {"u": str(user_id)}
+    if cuenta:
+        params["cuenta"] = cuenta
+    return await _get("/api/detectar", params)
 
 # --- MEMBRESIA ---
 async def wsp_usuarios_todos():

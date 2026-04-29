@@ -789,7 +789,7 @@ def detener_responder(user_id):
 # ─────────────────────────────────────────
 #   DETECTAR GRUPOS Y CARPETAS DE TELEGRAM
 # ─────────────────────────────────────────
-async def detectar_grupos_telegram(user_id):
+async def detectar_grupos_telegram(user_id, nombre=None):
     """Lee todos los grupos/supergrupos del Telegram del usuario.
     Retorna lista de dicts con info de cada grupo."""
     from telethon.tl.types import Channel, Chat
@@ -797,7 +797,11 @@ async def detectar_grupos_telegram(user_id):
     if not sesiones:
         return None, "No tienes cuentas registradas."
 
-    nombre = sesiones[0]['nombre']
+    if nombre is None:
+        nombre = sesiones[0]['nombre']
+    else:
+        if not any(s['nombre'] == nombre for s in sesiones):
+            return None, f"Cuenta '{nombre}' no encontrada."
     path = get_session_path(user_id, nombre)
     client = TelegramClient(path, API_ID, API_HASH)
 
@@ -849,7 +853,7 @@ async def detectar_grupos_telegram(user_id):
             pass
 
 
-async def detectar_carpetas_telegram(user_id):
+async def detectar_carpetas_telegram(user_id, nombre=None):
     """Lee las carpetas (folders) del Telegram del usuario.
     Retorna lista de carpetas con id y nombre."""
     from telethon.tl.functions.messages import GetDialogFiltersRequest
@@ -857,7 +861,11 @@ async def detectar_carpetas_telegram(user_id):
     if not sesiones:
         return None, "No tienes cuentas registradas."
 
-    nombre = sesiones[0]['nombre']
+    if nombre is None:
+        nombre = sesiones[0]['nombre']
+    else:
+        if not any(s['nombre'] == nombre for s in sesiones):
+            return None, f"Cuenta '{nombre}' no encontrada."
     path = get_session_path(user_id, nombre)
     client = TelegramClient(path, API_ID, API_HASH)
 
@@ -890,7 +898,7 @@ async def detectar_carpetas_telegram(user_id):
             pass
 
 
-async def detectar_grupos_carpeta(user_id, folder_id):
+async def detectar_grupos_carpeta(user_id, folder_id, nombre=None):
     """Lee los grupos de una carpeta específica de Telegram.
     Retorna lista de grupos filtrados por esa carpeta."""
     from telethon.tl.functions.messages import GetDialogFiltersRequest
@@ -899,7 +907,11 @@ async def detectar_grupos_carpeta(user_id, folder_id):
     if not sesiones:
         return None, "No tienes cuentas registradas."
 
-    nombre = sesiones[0]['nombre']
+    if nombre is None:
+        nombre = sesiones[0]['nombre']
+    else:
+        if not any(s['nombre'] == nombre for s in sesiones):
+            return None, f"Cuenta '{nombre}' no encontrada."
     path = get_session_path(user_id, nombre)
     client = TelegramClient(path, API_ID, API_HASH)
 

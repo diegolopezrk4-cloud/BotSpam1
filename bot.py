@@ -2283,8 +2283,35 @@ async def cmd_cmds(msg: types.Message):
 async def cb_detectar_grupos_tg(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
+    sesiones = await db.get_sesiones(call.from_user.id)
+    if not sesiones:
+        botones = [[InlineKeyboardButton(text="🔙 Volver a Grupos", callback_data="sec_grupos")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, "❌ No tienes cuentas TG vinculadas.\nVincula una cuenta primero.", reply_markup=kb)
+        await call.answer()
+        return
+    if len(sesiones) == 1:
+        # Solo una cuenta, ir directo al menu de opciones
+        call.data = f"grp_detect_menu:{sesiones[0]['nombre']}"
+        await cb_grp_detect_menu(call)
+        return
+    texto = "🔍 DETECTAR GRUPOS DE TELEGRAM\n\nElige la cuenta para detectar grupos:\n"
+    botones = []
+    for s in sesiones:
+        botones.append([InlineKeyboardButton(text=f"📱 {s['nombre']} — {s.get('telefono', '?')}", callback_data=f"grp_detect_menu:{s['nombre']}")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a Grupos", callback_data="sec_grupos")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("grp_detect_menu:"))
+async def cb_grp_detect_menu(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    cuenta = call.data.split(":", 1)[1]
     texto = (
-        "🔍 DETECTAR GRUPOS DE TELEGRAM\n\n"
+        f"🔍 DETECTAR GRUPOS DE TELEGRAM\n"
+        f"📱 Cuenta: {cuenta}\n\n"
         "Opciones:\n\n"
         "1️⃣ Ver TODOS los grupos de tu cuenta\n"
         "2️⃣ Ver grupos por CARPETA\n"
@@ -2292,24 +2319,25 @@ async def cb_detectar_grupos_tg(call: types.CallbackQuery):
         "   (baneados, sin permiso, etc.)"
     )
     botones = [
-        [InlineKeyboardButton(text="📋 Todos mis grupos", callback_data="grp_detect_todos")],
-        [InlineKeyboardButton(text="📂 Por carpeta", callback_data="grp_detect_carpetas")],
+        [InlineKeyboardButton(text="📋 Todos mis grupos", callback_data=f"grp_detect_todos:{cuenta}")],
+        [InlineKeyboardButton(text="📂 Por carpeta", callback_data=f"grp_detect_carpetas:{cuenta}")],
         [InlineKeyboardButton(text="🔎 Verificar estado", callback_data="grp_detect_estado")],
-        [InlineKeyboardButton(text="🔙 Volver a Grupos", callback_data="sec_grupos")],
+        [InlineKeyboardButton(text="🔙 Volver", callback_data="grp_detectar_tg")],
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await call.answer()
 
 
-@dp.callback_query(F.data == "grp_detect_todos")
+@dp.callback_query(F.data.startswith("grp_detect_todos:"))
 async def cb_detect_todos(call: types.CallbackQuery, state: FSMContext):
     if not await verificar_membresia_cb(call):
         return
-    await safe_edit(call.message, "⏳ Escaneando tus grupos de Telegram...\nEsto puede tardar unos segundos.")
+    cuenta = call.data.split(":", 1)[1]
+    await safe_edit(call.message, f"⏳ Escaneando grupos de '{cuenta}'...\nEsto puede tardar unos segundos.")
     await call.answer()
 
-    grupos, info = await detectar_grupos_telegram(call.from_user.id)
+    grupos, info = await detectar_grupos_telegram(call.from_user.id, cuenta)
 
     if grupos is None:
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="grp_detectar_tg")]]
@@ -2405,14 +2433,18 @@ async def recibir_seleccion_grupos_detect(msg: types.Message, state: FSMContext)
     )
 
 
-@dp.callback_query(F.data == "grp_detect_carpetas")
+@dp.callback_query(F.data.startswith("grp_detect_carpetas"))
 async def cb_detect_carpetas(call: types.CallbackQuery, state: FSMContext):
     if not await verificar_membresia_cb(call):
         return
+    cuenta = None
+    if ":" in call.data:
+        cuenta = call.data.split(":", 1)[1]
+    await state.update_data(tg_detect_cuenta=cuenta)
     await safe_edit(call.message, "⏳ Leyendo carpetas de Telegram...")
     await call.answer()
 
-    carpetas, info = await detectar_carpetas_telegram(call.from_user.id)
+    carpetas, info = await detectar_carpetas_telegram(call.from_user.id, cuenta)
 
     if carpetas is None:
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="grp_detectar_tg")]]
@@ -2430,9 +2462,12 @@ async def cb_detect_carpetas(call: types.CallbackQuery, state: FSMContext):
     botones = []
     for i, c in enumerate(carpetas, 1):
         texto += f"{i}. 📁 {c['title']}\n"
+        cb_data = f"grp_folder_{c['id']}"
+        if cuenta:
+            cb_data += f":{cuenta}"
         botones.append([InlineKeyboardButton(
             text=f"📁 {c['title']}",
-            callback_data=f"grp_folder_{c['id']}"
+            callback_data=cb_data
         )])
 
     texto += "\n👇 Selecciona una carpeta para ver sus grupos:"
@@ -2446,11 +2481,18 @@ async def cb_detect_carpetas(call: types.CallbackQuery, state: FSMContext):
 async def cb_detect_carpeta_grupos(call: types.CallbackQuery, state: FSMContext):
     if not await verificar_membresia_cb(call):
         return
-    folder_id = int(call.data.replace("grp_folder_", ""))
+    parts = call.data.replace("grp_folder_", "")
+    if ":" in parts:
+        folder_id_str, cuenta = parts.split(":", 1)
+    else:
+        folder_id_str = parts
+        data = await state.get_data()
+        cuenta = data.get("tg_detect_cuenta")
+    folder_id = int(folder_id_str)
     await safe_edit(call.message, "⏳ Leyendo grupos de la carpeta...")
     await call.answer()
 
-    grupos, info = await detectar_grupos_carpeta(call.from_user.id, folder_id)
+    grupos, info = await detectar_grupos_carpeta(call.from_user.id, folder_id, cuenta)
 
     if grupos is None:
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="grp_detect_carpetas")]]
@@ -2645,13 +2687,28 @@ async def cb_detect_limpiar(call: types.CallbackQuery):
 async def cmd_detectar(msg: types.Message):
     if not await verificar_membresia(msg):
         return
-    texto = "🔍 DETECTAR GRUPOS DE TELEGRAM\n\nOpciones:"
-    botones = [
-        [InlineKeyboardButton(text="📋 Todos mis grupos", callback_data="grp_detect_todos")],
-        [InlineKeyboardButton(text="📂 Por carpeta", callback_data="grp_detect_carpetas")],
-        [InlineKeyboardButton(text="🔎 Verificar estado", callback_data="grp_detect_estado")],
-        kb_volver(),
-    ]
+    sesiones = await db.get_sesiones(msg.from_user.id)
+    if not sesiones:
+        await msg.answer("❌ No tienes cuentas TG vinculadas.\nVincula una cuenta primero.")
+        return
+    if len(sesiones) == 1:
+        cuenta = sesiones[0]['nombre']
+        texto = (
+            f"🔍 DETECTAR GRUPOS DE TELEGRAM\n"
+            f"📱 Cuenta: {cuenta}\n\nOpciones:"
+        )
+        botones = [
+            [InlineKeyboardButton(text="📋 Todos mis grupos", callback_data=f"grp_detect_todos:{cuenta}")],
+            [InlineKeyboardButton(text="📂 Por carpeta", callback_data=f"grp_detect_carpetas:{cuenta}")],
+            [InlineKeyboardButton(text="🔎 Verificar estado", callback_data="grp_detect_estado")],
+            kb_volver(),
+        ]
+    else:
+        texto = "🔍 DETECTAR GRUPOS DE TELEGRAM\n\nElige la cuenta:"
+        botones = []
+        for s in sesiones:
+            botones.append([InlineKeyboardButton(text=f"📱 {s['nombre']} — {s.get('telefono', '?')}", callback_data=f"grp_detect_menu:{s['nombre']}")])
+        botones.append(kb_volver())
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await msg.answer(texto, reply_markup=kb)
 
@@ -3546,7 +3603,36 @@ async def cb_wsp_detectar(call: types.CallbackQuery):
     if not await verificar_membresia_cb(call):
         return
     import wsp_bridge as wsp
-    r = await wsp.wsp_detectar_grupos(call.from_user.id)
+    r = await wsp.wsp_sesiones(call.from_user.id)
+    if not r.get("ok") or not r.get("sesiones"):
+        botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
+        kb = InlineKeyboardMarkup(inline_keyboard=botones)
+        await safe_edit(call.message, "❌ No tienes cuentas WSP vinculadas.\nVincula una cuenta primero desde 👤 Cuentas WSP.", reply_markup=kb)
+        await call.answer()
+        return
+    sesiones = r["sesiones"]
+    if len(sesiones) == 1:
+        # Solo una cuenta, detectar directo
+        call.data = f"wsp_detectar_cuenta:{sesiones[0]['nombre']}"
+        await cb_wsp_detectar_cuenta(call)
+        return
+    texto = "🔍 DETECTAR GRUPOS WSP\n\nElige la cuenta para detectar grupos:\n"
+    botones = []
+    for s in sesiones:
+        botones.append([InlineKeyboardButton(text=f"📱 {s['nombre']} — {s.get('telefono', '?')}", callback_data=f"wsp_detectar_cuenta:{s['nombre']}")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, texto, reply_markup=kb)
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("wsp_detectar_cuenta:"))
+async def cb_wsp_detectar_cuenta(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    cuenta = call.data.split(":", 1)[1]
+    import wsp_bridge as wsp
+    await safe_edit(call.message, f"🔍 Detectando grupos de la cuenta '{cuenta}'...\nEsto puede tardar unos segundos.")
+    r = await wsp.wsp_detectar_grupos(call.from_user.id, cuenta)
     if not r.get("ok"):
         botones = [[InlineKeyboardButton(text="🔙 Volver", callback_data="sec_wsp")]]
         kb = InlineKeyboardMarkup(inline_keyboard=botones)
@@ -3554,7 +3640,7 @@ async def cb_wsp_detectar(call: types.CallbackQuery):
         await call.answer()
         return
     grupos = r.get("grupos", [])
-    texto = f"🔍 DETECTAR GRUPOS WSP ({len(grupos)}):\n\n"
+    texto = f"🔍 GRUPOS WSP de '{cuenta}' ({len(grupos)}):\n\n"
     if grupos:
         for i, g in enumerate(grupos[:30], 1):
             nombre = g.get("subject", g.get("name", "Sin nombre"))

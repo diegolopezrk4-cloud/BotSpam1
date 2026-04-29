@@ -364,11 +364,12 @@ async def api_tg_mensajes(request):
     campanas = await db.get_campanas(user_id)
     mensajes = []
     for c in campanas:
+        c_dict = dict(c)
         mensajes.append({
-            "id": c["id"],
-            "nombre": c["nombre"],
-            "texto": c["mensaje"] or "",
-            "foto": c.get("foto_path") or None,
+            "id": c_dict["id"],
+            "nombre": c_dict["nombre"],
+            "texto": c_dict.get("mensaje") or "",
+            "foto": c_dict.get("foto_path") or None,
         })
     return web.json_response({"ok": True, "mensajes": mensajes})
 
@@ -441,22 +442,23 @@ async def api_tg_campanas(request):
     campanas = await db.get_campanas(user_id)
     result = []
     for c in campanas:
-        config = await db.get_campana_config(c["id"])
-        grupos = await db.get_grupos_campana(c["id"])
-        sesiones = await db.get_sesiones_campana(c["id"])
+        c_dict = dict(c)
+        config = await db.get_campana_config(c_dict["id"])
+        grupos = await db.get_grupos_campana(c_dict["id"])
+        sesiones = await db.get_sesiones_campana(c_dict["id"])
         result.append({
-            "id": c["id"],
-            "nombre": c["nombre"],
-            "mensaje": c["mensaje"] or "",
-            "foto": c.get("foto_path") or None,
-            "activa": bool(c["activa"]),
-            "enviados": c["enviados"],
-            "errores": c["errores"],
+            "id": c_dict["id"],
+            "nombre": c_dict["nombre"],
+            "mensaje": c_dict.get("mensaje") or "",
+            "foto": c_dict.get("foto_path") or None,
+            "activa": bool(c_dict.get("activa", 0)),
+            "enviados": c_dict.get("enviados", 0),
+            "errores": c_dict.get("errores", 0),
             "intervalo_min": config["intervalo_min"] if config else 30,
             "intervalo_max": config["intervalo_max"] if config else 60,
             "grupos": len(grupos),
             "sesiones": len(sesiones),
-            "en_ejecucion": c["id"] in tareas_activas,
+            "en_ejecucion": c_dict["id"] in tareas_activas,
         })
     return web.json_response({"ok": True, "campanas": result})
 
@@ -751,13 +753,16 @@ async def api_tg_stats(request):
 async def api_tg_detectar(request):
     user_id = int(request.query.get("u", 0))
     cuenta = request.query.get("cuenta", "")
-    if not user_id or not cuenta:
+    if not user_id:
         return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
     try:
-        grupos = await detectar_grupos_telegram(user_id, cuenta)
+        grupos, info = await detectar_grupos_telegram(user_id, cuenta if cuenta else None)
+        if grupos is None:
+            return web.json_response({"ok": False, "error": info})
         return web.json_response({
             "ok": True,
-            "grupos": [{"title": g.get("title", ""), "link": g.get("link", ""), "id": g.get("id", 0)} for g in grupos]
+            "cuenta": info,
+            "grupos": [{"title": g.get("title", ""), "link": g.get("link", ""), "id": g.get("id", 0), "participants": g.get("participants", 0)} for g in grupos]
         })
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)})
