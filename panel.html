@@ -1231,8 +1231,12 @@ let currentPlatform='wsp';
 
 function $(id){return document.getElementById(id)}
 async function api(path,opts){
-  try{const r=opts?await fetch(API+path,opts):await fetch(API+path);return await r.json()}
-  catch(e){return{ok:false,error:e.message}}
+  try{
+    const r=opts?await fetch(API+path,opts):await fetch(API+path);
+    const ct=r.headers.get('content-type')||'';
+    if(!ct.includes('json')){const t=await r.text();return{ok:false,error:'Servidor no responde (HTTP '+r.status+')'}}
+    return await r.json();
+  }catch(e){return{ok:false,error:e.message}}
 }
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/`/g,'&#96;')}
 function toast(msg,type='success'){

@@ -1335,12 +1335,18 @@ poll();
                 const hasta = url.searchParams.get("hasta") || null;
                 const envios = db.getHistorialEnvios(userId, 200, tipoFiltro, resultadoFiltro, desde, hasta);
                 const stats = db.getHistorialStats(userId);
+                const userGrupos = db.getGrupos(userId);
+                const grupoNombreMap = {};
+                for (const g of userGrupos) {
+                    if (g.link && g.nombre) grupoNombreMap[g.link] = g.nombre;
+                }
                 const historial = envios.map(e => {
                     const esExitoso = e.resultado === "enviado" || e.resultado === "enviado_pending" || e.resultado === "enviado_personal";
                     let destino = e.grupo_link || "";
-                    if (e.grupo_nombre) {
+                    let nombre = e.grupo_nombre || grupoNombreMap[destino] || null;
+                    if (nombre) {
                         const numPart = destino.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/@g\.us$/, "");
-                        destino = `[${e.grupo_nombre}] ${numPart}`;
+                        destino = `[${nombre}] ${numPart}`;
                     }
                     return {
                         fecha: e.fecha, tipo: e.tipo_envio || "envio", destino,
