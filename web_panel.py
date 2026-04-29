@@ -458,6 +458,8 @@ async def api_tg_campanas(request):
             "intervalo_max": config["intervalo_max"] if config else 60,
             "grupos": len(grupos),
             "sesiones": len(sesiones),
+            "camp_sesiones": sesiones,
+            "camp_grupos": grupos,
             "en_ejecucion": c_dict["id"] in tareas_activas,
         })
     return web.json_response({"ok": True, "campanas": result})
@@ -530,6 +532,26 @@ async def api_tg_campanas_editar(request):
         if imax < imin:
             imax = imin
         await db.set_campana_config(campana_id, imin, imax)
+
+    # Update campaign accounts if provided
+    sesiones_raw = fields.get("sesiones")
+    if sesiones_raw is not None:
+        import json as _json
+        sesiones_list = _json.loads(sesiones_raw) if isinstance(sesiones_raw, str) else sesiones_raw
+        if isinstance(sesiones_list, list):
+            await db.limpiar_sesiones_campana(campana_id)
+            for s in sesiones_list:
+                await db.agregar_sesion_campana(campana_id, s)
+
+    # Update campaign groups if provided
+    grupos_raw = fields.get("grupos")
+    if grupos_raw is not None:
+        import json as _json
+        grupos_list = _json.loads(grupos_raw) if isinstance(grupos_raw, str) else grupos_raw
+        if isinstance(grupos_list, list):
+            await db.limpiar_grupos_campana(campana_id)
+            for g in grupos_list:
+                await db.agregar_grupo_campana(campana_id, g)
 
     return web.json_response({"ok": True})
 

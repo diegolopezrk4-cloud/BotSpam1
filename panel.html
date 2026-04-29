@@ -1328,15 +1328,21 @@ async function detenerTgCampana(id){
   const r=await api('/api/tg/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});
   toast(r.ok?'Campana detenida':(r.error||'Error'),r.ok?'success':'error');loadTgCampanas();
 }
-function showEditTgCampMsg(id){
+async function showEditTgCampMsg(id){
   if(!requireMembresia())return;
   const d=_tgCampanasData[id]||{};
   const msg=d.mensaje||'';
   const imin=d.intervalo_min||30;
   const imax=d.intervalo_max||60;
   const foto=d.foto||'';
+  const campSesiones=d.camp_sesiones||[];
+  const campGrupos=d.camp_grupos||[];
+  // Fetch all accounts and groups
+  const [sr,gr]=await Promise.all([api('/api/sesiones_tg?u='+userId),api('/api/tg/grupos?u='+userId)]);
+  const allSesiones=(sr.ok&&sr.sesiones)?sr.sesiones:[];
+  const allGrupos=(gr.ok&&gr.grupos)?gr.grupos:[];
   let html='<h3>Editar Campana TG: '+esc(d.nombre||'')+'</h3>';
-  html+='<div class="form-group"><label>Mensaje a enviar</label><textarea id="tgCampEditMsg" rows="6" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">'+esc(msg)+'</textarea></div>';
+  html+='<div class="form-group"><label>Mensaje a enviar</label><textarea id="tgCampEditMsg" rows="4" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">'+esc(msg)+'</textarea></div>';
   html+='<div class="form-group"><label>Foto (opcional)</label><input type="file" id="tgCampEditFoto" accept="image/*" style="padding:5px">';
   if(foto)html+='<p style="font-size:11px;color:var(--text2);margin-top:4px">📷 Foto actual: '+esc(foto.split('/').pop())+'</p>';
   html+='</div>';
@@ -1344,6 +1350,27 @@ function showEditTgCampMsg(id){
   html+='<div class="form-group" style="margin:0"><label>Intervalo min (seg)</label><input type="number" id="tgCampEditIMin" value="'+imin+'" min="5" placeholder="30"></div>';
   html+='<div class="form-group" style="margin:0"><label>Intervalo max (seg)</label><input type="number" id="tgCampEditIMax" value="'+imax+'" min="5" placeholder="60"></div>';
   html+='</div>';
+  // Account selection
+  html+='<div class="form-group"><label>Cuentas que usara esta campana</label><div id="tgCampCuentas" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:5px">';
+  allSesiones.forEach(s=>{
+    const nombre=s.nombre||s.session_name||'';
+    const checked=campSesiones.includes(nombre)?'checked':'';
+    html+=`<label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer"><input type="checkbox" class="tgCampSes" value="${esc(nombre)}" ${checked}> ${esc(nombre)}</label>`;
+  });
+  if(!allSesiones.length)html+='<span style="color:var(--text2);font-size:12px">No hay cuentas TG vinculadas</span>';
+  html+='</div></div>';
+  // Group selection
+  html+='<div class="form-group"><label>Grupos que spameara esta campana</label>';
+  html+='<div style="margin:5px 0;display:flex;gap:6px"><button class="btn btn-sm btn-outline" onclick="document.querySelectorAll(\'.tgCampGrp\').forEach(c=>c.checked=true)">Todos</button><button class="btn btn-sm btn-outline" onclick="document.querySelectorAll(\'.tgCampGrp\').forEach(c=>c.checked=false)">Ninguno</button></div>';
+  html+='<div id="tgCampGrupos" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px">';
+  allGrupos.forEach(g=>{
+    const link=g.link||'';
+    const nombre=g.nombre||link;
+    const checked=campGrupos.includes(link)?'checked':'';
+    html+=`<label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;margin-bottom:4px"><input type="checkbox" class="tgCampGrp" value="${esc(link)}" ${checked}> ${esc(nombre)}</label>`;
+  });
+  if(!allGrupos.length)html+='<span style="color:var(--text2);font-size:12px">No hay grupos TG</span>';
+  html+='</div></div>';
   html+='<div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="editTgCampMsgPanel('+id+')">Guardar</button></div>';
   showModal(html);
 }
@@ -1352,6 +1379,9 @@ async function editTgCampMsgPanel(id){
   const imin=$('tgCampEditIMin').value;
   const imax=$('tgCampEditIMax').value;
   const fotoInput=$('tgCampEditFoto');
+  // Collect selected accounts and groups
+  const sesiones=[...document.querySelectorAll('.tgCampSes:checked')].map(c=>c.value);
+  const grupos=[...document.querySelectorAll('.tgCampGrp:checked')].map(c=>c.value);
   closeModal();
   const fd=new FormData();
   fd.append('u',userId);
@@ -1359,6 +1389,8 @@ async function editTgCampMsgPanel(id){
   if(msg)fd.append('texto',msg);
   if(imin)fd.append('intervalo_min',imin);
   if(imax)fd.append('intervalo_max',imax);
+  fd.append('sesiones',JSON.stringify(sesiones));
+  fd.append('grupos',JSON.stringify(grupos));
   if(fotoInput&&fotoInput.files&&fotoInput.files[0])fd.append('foto',fotoInput.files[0]);
   const r=await fetch('/api/tg/campanas/editar',{method:'POST',body:fd}).then(r=>r.json()).catch(e=>({ok:false,error:e.message}));
   toast(r.ok?'Campana actualizada':'Error: '+(r.error||''),r.ok?'success':'error');loadTgCampanas();
@@ -1725,7 +1757,7 @@ async function crearCamp(){const n=$('cN').value.trim(),m=$('cM').value.trim(),i
 async function iniciarCamp(id){const r=await api('/api/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast(r.ok?'Iniciada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas()}
 async function detenerCamp(id){await api('/api/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast('Detenida','success');loadCampanas()}
 async function elimCamp(id){await api('/api/campanas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminada','success');loadCampanas()}
-function showEditWspCamp(id){
+async function showEditWspCamp(id){
   if(!requireMembresia())return;
   const d=_wspCampanasData[id]||{};
   const msg=d.mensaje||'';
@@ -1733,11 +1765,33 @@ function showEditWspCamp(id){
   const imax=d.intervalo_max||60;
   const eciclo=Math.round((d.espera_ciclo||600)/60);
   const foto=d.imagen_path||'';
+  const campSesiones=d.camp_sesiones||[];
+  const campGrupos=d.camp_grupos||[];
+  // Fetch user's accounts and groups
+  const [sr,gr]=await Promise.all([api('/api/sesiones?u='+userId),api('/api/grupos?u='+userId)]);
+  const allSesiones=(sr.ok&&sr.sesiones)?sr.sesiones:[];
+  const allGrupos=(gr.ok&&gr.grupos)?gr.grupos:[];
   let html='<h3>Editar Campana WSP: '+esc(d.nombre||'')+'</h3>';
-  html+='<div class="form-group"><label>Mensaje a enviar</label><textarea id="wspCampEditMsg" rows="6" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">'+esc(msg)+'</textarea></div>';
+  html+='<div class="form-group"><label>Mensaje a enviar</label><textarea id="wspCampEditMsg" rows="4" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">'+esc(msg)+'</textarea></div>';
   html+='<div class="form-group"><label>Foto (opcional)</label><input type="file" id="wspCampEditFoto" accept="image/*" style="padding:5px">';
   if(foto)html+='<p style="font-size:11px;color:var(--text2);margin-top:4px">📷 Foto actual: '+esc(foto.split('/').pop())+'</p>';
   html+='</div>';
+  // Account selection
+  html+='<div class="form-group"><label>Cuentas que usara esta campana</label><div id="wspCampCuentas" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:5px">';
+  allSesiones.forEach(s=>{
+    const checked=campSesiones.includes(s.nombre)?'checked':'';
+    html+=`<label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer"><input type="checkbox" class="wspCampSes" value="${esc(s.nombre)}" ${checked}> ${esc(s.nombre)} (${esc(s.telefono||'?')})</label>`;
+  });
+  html+='</div></div>';
+  // Group selection
+  html+='<div class="form-group"><label>Grupos a spamear <button type="button" class="btn btn-outline btn-sm" style="margin-left:8px;font-size:11px" onclick="document.querySelectorAll(\'.wspCampGrp\').forEach(c=>c.checked=true)">Todos</button> <button type="button" class="btn btn-outline btn-sm" style="font-size:11px" onclick="document.querySelectorAll(\'.wspCampGrp\').forEach(c=>c.checked=false)">Ninguno</button></label>';
+  html+='<div style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:5px">';
+  allGrupos.forEach((g,i)=>{
+    const checked=campGrupos.includes(g.link)?'checked':'';
+    const name=g.nombre||g.link;
+    html+=`<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:2px 0"><input type="checkbox" class="wspCampGrp" value="${esc(g.link)}" ${checked}> ${i+1}. ${esc(name.length>40?name.slice(0,40)+'...':name)}</label>`;
+  });
+  html+='</div></div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:15px">';
   html+='<div class="form-group" style="margin:0"><label>Intervalo min (seg)</label><input type="number" id="wspCampEditIMin" value="'+imin+'" min="5" placeholder="20"></div>';
   html+='<div class="form-group" style="margin:0"><label>Intervalo max (seg)</label><input type="number" id="wspCampEditIMax" value="'+imax+'" min="5" placeholder="60"></div>';
@@ -1753,25 +1807,30 @@ async function editWspCampPanel(id){
   const imax=$('wspCampEditIMax').value;
   const pausa=$('wspCampEditPausa').value;
   const fotoInput=$('wspCampEditFoto');
+  // Collect selected accounts and groups
+  const sesiones=[...document.querySelectorAll('.wspCampSes:checked')].map(c=>c.value);
+  const grupos=[...document.querySelectorAll('.wspCampGrp:checked')].map(c=>c.value);
   closeModal();
-  const payload={u:userId,id};
+  const payload={u:userId,id,sesiones,grupos};
   if(msg)payload.mensaje=msg;
   if(imin)payload.intervalo_min=parseInt(imin);
   if(imax)payload.intervalo_max=parseInt(imax);
   if(pausa)payload.espera_ciclo=parseInt(pausa)*60;
+  async function sendPayload(){
+    const r=await api('/api/campanas/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    toast(r.ok?'Campana actualizada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas();
+  }
   if(fotoInput&&fotoInput.files&&fotoInput.files[0]){
     const file=fotoInput.files[0];
     const reader=new FileReader();
     reader.onload=async function(){
       payload.imagen_b64=reader.result.split(',')[1];
       payload.imagen_nombre=file.name;
-      const r=await api('/api/campanas/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-      toast(r.ok?'Campana actualizada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas();
+      await sendPayload();
     };
     reader.readAsDataURL(file);
   } else {
-    const r=await api('/api/campanas/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    toast(r.ok?'Campana actualizada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas();
+    await sendPayload();
   }
 }
 

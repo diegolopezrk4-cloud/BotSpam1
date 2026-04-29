@@ -3,6 +3,7 @@ const pino = require("pino");
 const QRCode = require("qrcode");
 const http = require("http");
 const fs = require("fs");
+const path = require("path");
 const config = require("./config_wsp");
 const db = require("./db_wsp");
 const motor = require("./motor_wsp");
@@ -315,7 +316,7 @@ poll();
                     const conf = db.getCampanaConfig(c.id);
                     const grupos = db.getGruposCampana(c.id);
                     const sesiones = db.getSesionesCampana(c.id);
-                    return { ...c, intervalo_min: conf.intervalo_min, intervalo_max: conf.intervalo_max, espera_ciclo: conf.espera_ciclo, grupos_count: grupos.length, sesiones_count: sesiones.length };
+                    return { ...c, intervalo_min: conf.intervalo_min, intervalo_max: conf.intervalo_max, espera_ciclo: conf.espera_ciclo, grupos_count: grupos.length, sesiones_count: sesiones.length, camp_sesiones: sesiones, camp_grupos: grupos };
                 });
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campanas }));
@@ -365,6 +366,16 @@ poll();
                 const imax = body.intervalo_max !== undefined ? parseInt(body.intervalo_max) : conf.intervalo_max;
                 const eciclo = body.espera_ciclo !== undefined ? parseInt(body.espera_ciclo) : conf.espera_ciclo;
                 db.setCampanaConfig(body.id, imin, imax, conf.espera_cuenta, eciclo);
+                // Update campaign accounts if provided
+                if (Array.isArray(body.sesiones)) {
+                    db.prepare("DELETE FROM campana_sesiones WHERE campana_id = ?").run(body.id);
+                    for (const s of body.sesiones) db.agregarSesionCampana(body.id, s);
+                }
+                // Update campaign groups if provided
+                if (Array.isArray(body.grupos)) {
+                    db.prepare("DELETE FROM campana_grupos WHERE campana_id = ?").run(body.id);
+                    for (const g of body.grupos) db.agregarGrupoCampana(body.id, g);
+                }
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
@@ -554,6 +565,7 @@ poll();
 
             // POST /api/enviar_personal — Enviar mensaje a chats personales
             if (url.pathname === "/api/enviar_personal" && req.method === "POST") {
+                const body = await readBody();
                 const userId = body.u;
                 const mensaje = body.mensaje;
                 if (!userId || !mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje" })); }
@@ -570,6 +582,7 @@ poll();
 
             // POST /api/cancelar_envio_personal — Cancelar envio personal
             if (url.pathname === "/api/cancelar_envio_personal" && req.method === "POST") {
+                const body = await readBody();
                 const userId = body.u;
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const stopped = motor.detenerEnvioPersonal(userId);
@@ -594,6 +607,7 @@ poll();
             }
             if (url.pathname === "/api/panel_cambiar_password" && req.method === "POST") {
                 const body = await readBody();
+                if (!body.telegram_id || !body.old_password || !body.new_password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id, old_password o new_password" })); }
                 const r = db.panelCambiarPassword(body.telegram_id, body.old_password, body.new_password);
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
@@ -712,9 +726,14 @@ poll();
                 let exitosos = 0, fallidos = 0;
                 for (const g of grupos) {
                     try {
-                        await motor.sendToGroup ? await motor.sendToGroup(botSock, g.link, template.mensaje) : null;
-                        db.registrarEnvio(body.u, 0, g.link, "enviado");
-                        exitosos++;
+                        const result = motor.sendToGroup ? await motor.sendToGroup(botSock, g.link, template.mensaje) : null;
+                        if (result && result.sent) {
+                            db.registrarEnvio(body.u, 0, g.link, "enviado");
+                            exitosos++;
+                        } else {
+                            db.registrarEnvio(body.u, 0, g.link, "error");
+                            fallidos++;
+                        }
                     } catch (e) {
                         db.registrarEnvio(body.u, 0, g.link, "error");
                         fallidos++;

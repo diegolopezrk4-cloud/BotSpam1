@@ -976,7 +976,7 @@ function getUserEnvioConfig(userId) {
 
 function setUserEnvioConfig(userId, config) {
     db.prepare("INSERT OR REPLACE INTO user_envio_config (user_id, delay_seg, lote_tamano, lote_pausa_seg, hora_inicio, hora_fin) VALUES (?, ?, ?, ?, ?, ?)").run(
-        userId, config.delay_seg || 10, config.lote_tamano || 0, config.lote_pausa_seg || 30, config.hora_inicio || 0, config.hora_fin || 24
+        userId, config.delay_seg ?? 10, config.lote_tamano ?? 0, config.lote_pausa_seg ?? 30, config.hora_inicio ?? 0, config.hora_fin ?? 24
     );
 }
 

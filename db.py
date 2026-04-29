@@ -443,6 +443,16 @@ async def agregar_grupo_campana(campana_id, grupo_link):
         )
         await db.commit()
 
+async def limpiar_sesiones_campana(campana_id):
+    async with _connect() as db:
+        await db.execute("DELETE FROM campana_sesiones WHERE campana_id=?", (campana_id,))
+        await db.commit()
+
+async def limpiar_grupos_campana(campana_id):
+    async with _connect() as db:
+        await db.execute("DELETE FROM campana_grupos WHERE campana_id=?", (campana_id,))
+        await db.commit()
+
 # ─────────────────────────────────────────
 #   CONFIGURACIÓN DE CAMPAÑA (INTERVALO)
 # ─────────────────────────────────────────
