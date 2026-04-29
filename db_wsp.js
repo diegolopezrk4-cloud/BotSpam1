@@ -324,6 +324,47 @@ function init() {
         db.exec("ALTER TABLE historial_envios ADD COLUMN mensaje_preview TEXT DEFAULT NULL");
         console.log("   Columna 'mensaje_preview' agregada a historial_envios");
     }
+    // Table for manually added personal numbers
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS numeros_manuales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            cuenta TEXT,
+            numero TEXT,
+            jid TEXT,
+            nombre TEXT DEFAULT '',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            UNIQUE(user_id, cuenta, numero)
+        );
+    `);
+    // Table for promo/interactive listening
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS promo_escucha (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            palabra_aceptar TEXT DEFAULT 'si',
+            palabra_rechazar TEXT DEFAULT 'no',
+            respuesta_aceptar TEXT DEFAULT '',
+            respuesta_rechazar TEXT DEFAULT '',
+            activo INTEGER DEFAULT 1,
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            UNIQUE(user_id)
+        );
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS promo_respuestas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            jid TEXT,
+            numero TEXT,
+            nombre TEXT DEFAULT '',
+            tipo TEXT DEFAULT 'aceptado',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+    `);
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -1306,6 +1347,55 @@ function getDmStats(userId) {
     };
 }
 
+// --- NUMEROS MANUALES (Envio Personal) ---
+function getNumerosManuales(userId, cuenta) {
+    return db.prepare("SELECT * FROM numeros_manuales WHERE user_id = ? AND cuenta = ? ORDER BY fecha DESC").all(userId, cuenta);
+}
+function agregarNumeroManual(userId, cuenta, numero) {
+    const jid = numero.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+    try {
+        db.prepare("INSERT OR IGNORE INTO numeros_manuales (user_id, cuenta, numero, jid) VALUES (?, ?, ?, ?)").run(userId, cuenta, numero.replace(/[^0-9]/g, ""), jid);
+    } catch (e) {}
+}
+function agregarNumerosManualesBulk(userId, cuenta, numeros) {
+    const stmt = db.prepare("INSERT OR IGNORE INTO numeros_manuales (user_id, cuenta, numero, jid) VALUES (?, ?, ?, ?)");
+    const tx = db.transaction((nums) => {
+        for (const n of nums) {
+            const clean = n.replace(/[^0-9]/g, "");
+            if (clean.length >= 7) {
+                stmt.run(userId, cuenta, clean, clean + "@s.whatsapp.net");
+            }
+        }
+    });
+    tx(numeros);
+}
+function eliminarNumeroManual(userId, cuenta, numero) {
+    db.prepare("DELETE FROM numeros_manuales WHERE user_id = ? AND cuenta = ? AND numero = ?").run(userId, cuenta, numero.replace(/[^0-9]/g, ""));
+}
+function limpiarNumerosManuales(userId, cuenta) {
+    db.prepare("DELETE FROM numeros_manuales WHERE user_id = ? AND cuenta = ?").run(userId, cuenta);
+}
+
+// --- PROMO ESCUCHA (Envio Interactivo) ---
+function getPromoEscucha(userId) {
+    return db.prepare("SELECT * FROM promo_escucha WHERE user_id = ? AND activo = 1").get(userId);
+}
+function registrarPromoEscucha(userId, palabraAceptar, palabraRechazar, respAceptar, respRechazar) {
+    db.prepare("INSERT OR REPLACE INTO promo_escucha (user_id, palabra_aceptar, palabra_rechazar, respuesta_aceptar, respuesta_rechazar, activo, fecha) VALUES (?, ?, ?, ?, ?, 1, datetime('now'))").run(userId, palabraAceptar || 'si', palabraRechazar || 'no', respAceptar || '', respRechazar || '');
+}
+function detenerPromoEscucha(userId) {
+    db.prepare("UPDATE promo_escucha SET activo = 0 WHERE user_id = ?").run(userId);
+}
+function registrarPromoRespuesta(userId, jid, numero, nombre, tipo) {
+    db.prepare("INSERT INTO promo_respuestas (user_id, jid, numero, nombre, tipo) VALUES (?, ?, ?, ?, ?)").run(userId, jid, numero, nombre || '', tipo);
+}
+function getPromoRespuestas(userId) {
+    return db.prepare("SELECT * FROM promo_respuestas WHERE user_id = ? ORDER BY fecha DESC").all(userId);
+}
+function limpiarPromoRespuestas(userId) {
+    db.prepare("DELETE FROM promo_respuestas WHERE user_id = ?").run(userId);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -1347,4 +1437,8 @@ module.exports = {
     getProgramadosMiembros, crearProgramadoMiembros, toggleProgramadoMiembros, eliminarProgramadoMiembros, actualizarUltimoEnvioProgramado,
     // DM Stats
     getDmStats,
+    // Numeros manuales
+    getNumerosManuales, agregarNumeroManual, agregarNumerosManualesBulk, eliminarNumeroManual, limpiarNumerosManuales,
+    // Promo escucha
+    getPromoEscucha, registrarPromoEscucha, detenerPromoEscucha, registrarPromoRespuesta, getPromoRespuestas, limpiarPromoRespuestas,
 };

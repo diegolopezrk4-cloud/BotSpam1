@@ -1391,6 +1391,59 @@ function iniciarSchedulerMiembros(botSock) {
     }, 60000);
 }
 
+// --- PROMO ESCUCHA (Envio Interactivo) ---
+const _promoListeners = {}; // { userId: { handlers: [], cancel: fn } }
+
+function iniciarPromoEscucha(userId, sock, palabraAceptar, palabraRechazar, respAceptar, respRechazar) {
+    // Add listener to this sock for promo responses
+    if (!_promoListeners[userId]) {
+        _promoListeners[userId] = { handlers: [], cancelled: false };
+    }
+    const state = _promoListeners[userId];
+    const acLower = (palabraAceptar || 'si').toLowerCase().trim();
+    const reLower = (palabraRechazar || 'no').toLowerCase().trim();
+
+    const handler = async ({ messages }) => {
+        if (state.cancelled) return;
+        for (const msg of messages) {
+            if (!msg.message || msg.key.fromMe) continue;
+            const jid = msg.key.remoteJid;
+            if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") continue;
+
+            const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase().trim();
+            const pushName = msg.pushName || "";
+            const numero = jid.replace(/@s\.whatsapp\.net$/, "");
+
+            if (text.includes(acLower)) {
+                db.registrarPromoRespuesta(userId, jid, numero, pushName, 'aceptado');
+                console.log(`[Promo] ${numero} (${pushName}) ACEPTO con "${text}"`);
+                if (respAceptar) {
+                    try { await sock.sendMessage(jid, { text: respAceptar }); } catch (e) {}
+                }
+            } else if (text.includes(reLower)) {
+                db.registrarPromoRespuesta(userId, jid, numero, pushName, 'rechazado');
+                console.log(`[Promo] ${numero} (${pushName}) RECHAZO con "${text}"`);
+                if (respRechazar) {
+                    try { await sock.sendMessage(jid, { text: respRechazar }); } catch (e) {}
+                }
+            }
+        }
+    };
+    sock.ev.on("messages.upsert", handler);
+    state.handlers.push({ sock, handler });
+}
+
+function detenerPromoEscuchaFn(userId) {
+    const state = _promoListeners[userId];
+    if (state) {
+        state.cancelled = true;
+        for (const { sock, handler } of state.handlers) {
+            try { sock.ev.off("messages.upsert", handler); } catch (e) {}
+        }
+        delete _promoListeners[userId];
+    }
+}
+
 module.exports = {
     tareasActivas,
     getCampanasActivas,
@@ -1425,4 +1478,6 @@ module.exports = {
     resolveGroupJid,
     registrarActividadGrupo,
     iniciarSchedulerMiembros,
+    iniciarPromoEscucha,
+    detenerPromoEscucha: detenerPromoEscuchaFn,
 };

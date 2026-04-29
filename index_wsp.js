@@ -551,13 +551,34 @@ poll();
                 }
             }
 
-            // GET /api/chats_personales?u=USER_ID — Listar chats personales
+            // GET /api/chats_personales?u=USER_ID&cuenta=X — Listar chats personales
             if (url.pathname === "/api/chats_personales" && req.method === "GET") {
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                const userId = url.searchParams.get("u");
+                const cuenta = url.searchParams.get("cuenta");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 try {
-                    const chats = await motor.listarChatsPersonales(botSock);
+                    let sock;
+                    if (cuenta) {
+                        sock = await motor.getOrConnectClient(userId, cuenta);
+                    } else if (botSock) {
+                        sock = botSock;
+                    }
+                    let chats = [];
+                    if (sock) {
+                        chats = await motor.listarChatsPersonales(sock);
+                    }
+                    // Also include manually added numbers
+                    if (cuenta) {
+                        const manuales = db.getNumerosManuales(userId, cuenta);
+                        const existingJids = new Set(chats.map(c => c.jid));
+                        for (const m of manuales) {
+                            if (!existingJids.has(m.jid)) {
+                                chats.push({ jid: m.jid, nombre: m.nombre || m.numero, numero: m.numero, manual: true });
+                            }
+                        }
+                    }
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, total: chats.length, chats }));
+                    return res.end(JSON.stringify({ ok: true, total: chats.length, chats, cuenta }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -570,9 +591,25 @@ poll();
                 const userId = body.u;
                 const mensaje = body.mensaje;
                 if (!userId || !mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje" })); }
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                // Handle image (base64)
+                let imagenPath = null;
+                if (body.imagen_b64 && body.imagen_nombre) {
+                    const fotosDir = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir)) fs.mkdirSync(fotosDir, { recursive: true });
+                    const safeName = path.basename(body.imagen_nombre).replace(/[^a-zA-Z0-9._-]/g, '_');
+                    imagenPath = path.join(fotosDir, `personal_${Date.now()}_${safeName}`);
+                    const buf = Buffer.from(body.imagen_b64, "base64");
+                    fs.writeFileSync(imagenPath, buf);
+                }
+                // Use selected account or botSock
+                let sock;
+                if (body.cuenta) {
+                    try { sock = await motor.getOrConnectClient(userId, body.cuenta); } catch (e) {}
+                }
+                if (!sock) sock = botSock;
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 try {
-                    const started = await motor.enviarAPersonales(userId, mensaje, null, botSock);
+                    const started = await motor.enviarAPersonales(userId, mensaje, imagenPath, sock);
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
                 } catch (e) {
@@ -1083,7 +1120,17 @@ poll();
                     const batchSize = parseInt(body.batch_size) || 0;
                     const delayMinutes = parseInt(body.delay_minutes) || 5;
                     const startIndex = parseInt(body.start_index) || 0;
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, null, sock, batchSize, delayMinutes, grupoNombre, body.grupo, startIndex);
+                    // Handle image (base64)
+                    let imagenPath = null;
+                    if (body.imagen_b64 && body.imagen_nombre) {
+                        const fotosDir = path.join(__dirname, "fotos");
+                        if (!fs.existsSync(fotosDir)) fs.mkdirSync(fotosDir, { recursive: true });
+                        const safeName = path.basename(body.imagen_nombre).replace(/[^a-zA-Z0-9._-]/g, '_');
+                        imagenPath = path.join(fotosDir, `miembros_${Date.now()}_${safeName}`);
+                        const buf = Buffer.from(body.imagen_b64, "base64");
+                        fs.writeFileSync(imagenPath, buf);
+                    }
+                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo, startIndex);
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, total: jids.length, filtered: rawParticipants.length - jids.length, batch_size: batchSize || jids.length, delay_minutes: batchSize ? delayMinutes : 0, grupo_nombre: grupoNombre }));
                 } catch (e) {
@@ -1116,41 +1163,48 @@ poll();
                     }).filter(jid => jid && jid.endsWith("@s.whatsapp.net"));
                     res.writeHead(200);
                     res.end(JSON.stringify({ ok: true, total: jids.length, message: "Agregando miembros en segundo plano..." }));
-                    // Run in background to avoid timeout and crash
+                    // Run in background — add in batches of 10 to avoid WhatsApp disconnection
                     let agregados = 0, fallidos = 0;
-                    const BATCH = 5;
-                    const DELAY_BETWEEN = 5000;
-                    const DELAY_BATCH = 30000;
+                    const BATCH_SIZE = 10;
+                    const DELAY_BETWEEN_MEMBERS = 3000; // 3s between individual adds
+                    const DELAY_BETWEEN_BATCHES = 60000; // 60s pause between batches of 10
                     for (let i = 0; i < jids.length; i++) {
                         try {
                             // Re-check connection before each add
                             if (body.cuenta) {
-                                sock = await motor.getOrConnectClient(body.u, body.cuenta);
+                                try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (reconErr) {
+                                    console.log(`[agregar_miembros] Reconexion fallida, esperando 30s...`);
+                                    await new Promise(r => setTimeout(r, 30000));
+                                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) { break; }
+                                }
                             }
                             if (!sock || !sock.ws || sock.ws.readyState !== 1) {
-                                console.log(`[agregar_miembros] Socket cerrado, reconectando...`);
+                                console.log(`[agregar_miembros] Socket cerrado, esperando 15s y reconectando...`);
+                                await new Promise(r => setTimeout(r, 15000));
                                 if (body.cuenta) {
-                                    sock = await motor.getOrConnectClient(body.u, body.cuenta);
-                                } else {
-                                    break;
-                                }
+                                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) { break; }
+                                } else { break; }
                             }
                             await sock.groupParticipantsUpdate(body.destino, [jids[i]], "add");
                             agregados++;
+                            console.log(`[agregar_miembros] ${i+1}/${jids.length} agregado: ${jids[i]}`);
                         } catch (e) {
                             console.log(`[agregar_miembros] Error ${jids[i]}: ${e.message}`);
                             fallidos++;
-                            if (e.message && (e.message.includes("closed") || e.message.includes("disconnect") || e.message.includes("timed out"))) {
-                                await new Promise(r => setTimeout(r, 10000));
+                            if (e.message && (e.message.includes("closed") || e.message.includes("disconnect") || e.message.includes("timed out") || e.message.includes("Connection"))) {
+                                console.log(`[agregar_miembros] Conexion perdida, pausa 30s antes de reintentar...`);
+                                await new Promise(r => setTimeout(r, 30000));
                                 if (body.cuenta) {
                                     try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) { break; }
                                 } else { break; }
                             }
                         }
-                        await new Promise(r => setTimeout(r, DELAY_BETWEEN));
-                        if ((i + 1) % BATCH === 0 && i + 1 < jids.length) {
-                            console.log(`[agregar_miembros] Pausa de lote (${i + 1}/${jids.length})`);
-                            await new Promise(r => setTimeout(r, DELAY_BATCH));
+                        // Delay between individual adds
+                        await new Promise(r => setTimeout(r, DELAY_BETWEEN_MEMBERS));
+                        // Longer pause every BATCH_SIZE members
+                        if ((i + 1) % BATCH_SIZE === 0 && i + 1 < jids.length) {
+                            console.log(`[agregar_miembros] Lote de ${BATCH_SIZE} completado (${i + 1}/${jids.length}), pausa ${DELAY_BETWEEN_BATCHES/1000}s...`);
+                            await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES));
                         }
                     }
                     console.log(`[agregar_miembros] Completado: ${agregados} ok, ${fallidos} error de ${jids.length}`);
@@ -1166,6 +1220,14 @@ poll();
             if (url.pathname === "/api/chat_personal_agregar" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.u || !body.numero) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o numero" })); }
+                const cuenta = body.cuenta || '';
+                if (body.numeros && Array.isArray(body.numeros)) {
+                    // Bulk add from TXT
+                    db.agregarNumerosManualesBulk(body.u, cuenta, body.numeros);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, total: body.numeros.length }));
+                }
+                db.agregarNumeroManual(body.u, cuenta, body.numero);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
@@ -1520,21 +1582,45 @@ poll();
                 return res.end(JSON.stringify({ ok: true, logs: [] }));
             }
 
-            // ─── PROMO ENDPOINTS ───
+            // ─── PROMO / ENVIO INTERACTIVO ENDPOINTS ───
             if (url.pathname === "/api/promo/registrar" && req.method === "POST") {
                 const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.registrarPromoEscucha(body.u, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '');
+                db.limpiarPromoRespuestas(body.u);
+                // Start listening on all connected accounts
+                try {
+                    const sesiones = db.getSesiones(body.u);
+                    for (const s of sesiones) {
+                        try {
+                            const sock = await motor.getOrConnectClient(body.u, s.nombre);
+                            motor.iniciarPromoEscucha(body.u, sock, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '');
+                        } catch (e) {}
+                    }
+                } catch (e) {}
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
             if (url.pathname === "/api/promo/detener" && req.method === "POST") {
                 const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.detenerPromoEscucha(body.u);
+                motor.detenerPromoEscucha(body.u);
+                const respuestas = db.getPromoRespuestas(body.u);
+                const aceptados = respuestas.filter(r => r.tipo === 'aceptado');
+                const rechazados = respuestas.filter(r => r.tipo === 'rechazado');
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true }));
+                return res.end(JSON.stringify({ ok: true, aceptados, rechazados }));
             }
             if ((url.pathname === "/api/promo/respuestas") && req.method === "GET") {
                 const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const escucha = db.getPromoEscucha(userId);
+                const respuestas = db.getPromoRespuestas(userId);
+                const aceptados = respuestas.filter(r => r.tipo === 'aceptado');
+                const rechazados = respuestas.filter(r => r.tipo === 'rechazado');
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, respuestas: [] }));
+                return res.end(JSON.stringify({ ok: true, activo: !!escucha, aceptados, rechazados }));
             }
 
             // ─── GRUPOS/DEL con soporte link ───

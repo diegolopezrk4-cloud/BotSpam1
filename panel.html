@@ -588,11 +588,18 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       </div>
       <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-outline" onclick="showAgregarNumero()">➕ Agregar Numero</button>
+        <label class="btn btn-outline" style="cursor:pointer;margin:0">📄 Subir TXT
+          <input type="file" id="epTxtFile" accept=".txt" style="display:none" onchange="subirTxtNumeros()">
+        </label>
         <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Cancelar Envio</button>
       </div>
       <div class="form-group">
         <label>Mensaje a enviar</label>
         <textarea id="epMensaje" rows="4" placeholder="Escribe el mensaje que se enviara a tus contactos..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>📷 Imagen (opcional)</label>
+        <input type="file" id="epImagen" accept="image/*">
       </div>
       <div style="margin-bottom:15px">
         <button class="btn btn-success" onclick="enviarPersonal()">📤 Enviar a Todos los Chats</button>
@@ -640,6 +647,10 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div class="form-group">
         <label>Mensaje DM (dejar vacio si solo quieres agregar miembros)</label>
         <textarea id="emMensaje" rows="4" placeholder="Mensaje que se enviara como DM a cada miembro..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>📷 Imagen (opcional)</label>
+        <input type="file" id="emImagen" accept="image/*">
       </div>
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
         <h4 style="margin:0 0 10px 0">⏰ Envio por Lotes (Anti-Baneo)</h4>
@@ -725,6 +736,14 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <div class="form-group">
           <label>Palabra para RECHAZAR (el cliente responde esto para ignorar)</label>
           <input type="text" id="promoRechazar" placeholder="Ej: no" value="no">
+        </div>
+        <div class="form-group">
+          <label>📝 Respuesta automatica cuando ACEPTAN (dejar vacio para no responder)</label>
+          <input type="text" id="promoRespAceptar" placeholder="Ej: Genial! Te envio los detalles...">
+        </div>
+        <div class="form-group">
+          <label>📝 Respuesta automatica cuando RECHAZAN (dejar vacio para no responder)</label>
+          <input type="text" id="promoRespRechazar" placeholder="Ej: Entendido, gracias por tu tiempo!">
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn btn-success" onclick="iniciarPromo()">📨 Activar Escucha de Respuestas</button>
@@ -2081,7 +2100,7 @@ async function cargarChatsPersonales(){
   const cuenta=$('epCuenta').value;
   if(!cuenta){toast('Selecciona una cuenta primero','error');return}
   epCuentaActual=cuenta;
-  $('personalContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando chats...</div>';
+  $('personalContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando chats... (puede tardar unos segundos)</div>';
   const r=await api('/api/chats_personales?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
   if(!r.ok){$('personalContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'sin conexion')+'</p></div>';return}
   const chats=r.chats||[];
@@ -2121,6 +2140,19 @@ async function agregarNumeroManual(){
   if(r.ok){closeModal();toast('Numero agregado','success');cargarChatsPersonales();}
   else{toast('Error','error')}
 }
+async function subirTxtNumeros(){
+  const file=$('epTxtFile').files[0];
+  if(!file){return}
+  const cuenta=$('epCuenta').value||epCuentaActual;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
+  const text=await file.text();
+  const nums=text.split(/[\n\r,;]+/).map(n=>n.trim().replace(/[^0-9]/g,'')).filter(n=>n.length>=7);
+  if(!nums.length){toast('No se encontraron numeros validos en el archivo','error');return}
+  const r=await api('/api/chat_personal_agregar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,cuenta,numero:nums[0],numeros:nums})});
+  if(r.ok){toast(nums.length+' numeros agregados','success');cargarChatsPersonales();}
+  else{toast('Error al agregar','error')}
+  $('epTxtFile').value='';
+}
 async function enviarPersonal(){
   if(!requireMembresia())return;
   const msg=$('epMensaje').value.trim();
@@ -2129,7 +2161,15 @@ async function enviarPersonal(){
   if(!cuenta){toast('Selecciona una cuenta primero','error');return}
   if(!confirm('Enviar este mensaje a TODOS tus chats personales?'))return;
   toast('Iniciando envio personal...','success');
-  const r=await api('/api/enviar_personal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje:msg,cuenta})});
+  const payload={u:userId,mensaje:msg,cuenta};
+  // Handle image upload
+  const imgFile=$('epImagen')?.files?.[0];
+  if(imgFile){
+    const b64=await new Promise((res)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.readAsDataURL(imgFile)});
+    payload.imagen_b64=b64;
+    payload.imagen_nombre=imgFile.name;
+  }
+  const r=await api('/api/enviar_personal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   toast(r.ok?'Envio personal iniciado':'Error: '+(r.error||''),r.ok?'success':'error');
 }
 async function cancelarEnvioPersonal(){
@@ -2289,7 +2329,14 @@ async function enviarAMiembros(){
   if(paisFilter)payload.country_code=paisFilter;
   if(adminFilter)payload.admin_filter=adminFilter;
   if(batchSize){payload.batch_size=parseInt(batchSize);payload.delay_minutes=parseInt(delayMinutes);}
-  const r=await api('/api/enviar_miembros',payload);
+  // Handle image upload
+  const imgFile=$('emImagen')?.files?.[0];
+  if(imgFile){
+    const b64=await new Promise((res)=>{const rd=new FileReader();rd.onload=()=>res(rd.result.split(',')[1]);rd.readAsDataURL(imgFile)});
+    payload.imagen_b64=b64;
+    payload.imagen_nombre=imgFile.name;
+  }
+  const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.grupo_nombre?' de '+r.grupo_nombre:'')+(r.filtered?' ('+r.filtered+' filtrados)':'')+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');}
   else{toast('Error: '+(r.error||''),'error');}
 }
@@ -2506,7 +2553,9 @@ async function iniciarPromo(){
   if(!requireMembresia())return;
   const aceptar=$('promoAceptar').value.trim()||'si';
   const rechazar=$('promoRechazar').value.trim()||'no';
-  const r=await api('/api/promo/registrar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,palabra_aceptar:aceptar,palabra_rechazar:rechazar})});
+  const respAceptar=$('promoRespAceptar')?.value?.trim()||'';
+  const respRechazar=$('promoRespRechazar')?.value?.trim()||'';
+  const r=await api('/api/promo/registrar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,palabra_aceptar:aceptar,palabra_rechazar:rechazar,respuesta_aceptar:respAceptar,respuesta_rechazar:respRechazar})});
   if(r.ok){
     toast('Escucha de respuestas activada! Ahora envia tu promo.','success');
     $('promoEstado').style.background='#0a3d0a';$('promoEstado').style.color='#4caf50';$('promoEstado').style.borderColor='var(--success)';
