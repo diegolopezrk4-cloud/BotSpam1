@@ -386,6 +386,9 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="plantillas"><span class="icon">📋</span><span>Plantillas</span></a>
       <a href="#" data-section="historial" data-plat="wsp"><span class="icon">📜</span><span>Historial WSP</span></a>
       <a href="#" data-section="dmdashboard" data-plat="wsp"><span class="icon">📊</span><span>Dashboard DMs</span></a>
+      <div class="nav-group" data-plat="wsp">Monitoreo</div>
+      <a href="#" data-section="logs" data-plat="wsp"><span class="icon">📋</span><span>Logs del Bot</span></a>
+      <a href="#" data-section="retry" data-plat="wsp"><span class="icon">🔄</span><span>Cola de Reintentos</span></a>
       <div class="nav-group" data-plat="wsp">Config WSP</div>
       <a href="#" data-section="config" data-plat="wsp"><span class="icon">⚙</span><span>Config Envio</span></a>
       <a href="#" data-section="listanegra" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra Grupos</span></a>
@@ -735,8 +738,26 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- ENVIO INTERACTIVO -->
     <div class="section" id="sec-enviointeractivo">
       <h2>📨 Envio Interactivo (Promo)</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia una promocion y el bot espera la respuesta de los clientes. Te notifica cuando aceptan o rechazan.</p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia una promocion y el bot espera la respuesta de los clientes. Puedes enviar la promo directamente desde aqui (todo en uno) o activar solo la escucha y usar otros metodos de envio. Te notifica cuando aceptan o rechazan.</p>
+
+      <!-- Estadisticas en tiempo real (Mejora 2) -->
+      <div id="promoStatsBar" style="display:flex;gap:15px;flex-wrap:wrap;margin-bottom:15px">
+        <div style="background:var(--bg);padding:12px 20px;border-radius:10px;border:1px solid var(--success);flex:1;min-width:120px;text-align:center">
+          <div style="font-size:24px;font-weight:bold;color:var(--success)" id="promoStatAceptados">0</div>
+          <div style="font-size:12px;color:var(--text2)">Aceptaron</div>
+        </div>
+        <div style="background:var(--bg);padding:12px 20px;border-radius:10px;border:1px solid var(--danger);flex:1;min-width:120px;text-align:center">
+          <div style="font-size:24px;font-weight:bold;color:var(--danger)" id="promoStatRechazados">0</div>
+          <div style="font-size:12px;color:var(--text2)">Rechazaron</div>
+        </div>
+        <div style="background:var(--bg);padding:12px 20px;border-radius:10px;border:1px solid var(--accent);flex:1;min-width:120px;text-align:center">
+          <div style="font-size:24px;font-weight:bold;color:var(--accent)" id="promoStatTotal">0</div>
+          <div style="font-size:12px;color:var(--text2)">Total Respuestas</div>
+        </div>
+      </div>
+
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent)">
+        <h3 style="margin-bottom:12px;color:var(--accent)">📋 Configuracion de Escucha</h3>
         <div class="form-group">
           <label>Palabra para ACEPTAR (el cliente responde esto para aceptar)</label>
           <input type="text" id="promoAceptar" placeholder="Ej: si" value="si">
@@ -750,8 +771,32 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <input type="text" id="promoRespAceptar" placeholder="Ej: Genial! Te envio los detalles...">
         </div>
         <div class="form-group">
+          <label>🖼 Imagen para respuesta de ACEPTAR (opcional)</label>
+          <input type="file" id="promoRespAceptarImg" accept="image/*" style="font-size:13px">
+        </div>
+        <div class="form-group">
           <label>📝 Respuesta automatica cuando RECHAZAN (dejar vacio para no responder)</label>
           <input type="text" id="promoRespRechazar" placeholder="Ej: Entendido, gracias por tu tiempo!">
+        </div>
+        <div class="form-group">
+          <label>🖼 Imagen para respuesta de RECHAZAR (opcional)</label>
+          <input type="file" id="promoRespRechazarImg" accept="image/*" style="font-size:13px">
+        </div>
+        <!-- Timeout config (Mejora 3) -->
+        <div style="background:var(--bg2);padding:12px;border-radius:8px;margin-bottom:15px">
+          <h4 style="margin-bottom:8px;font-size:14px">⏱ Timeout de Respuesta</h4>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <div class="form-group" style="margin-bottom:0;min-width:120px">
+              <label style="font-size:12px">Horas limite</label>
+              <input type="number" id="promoTimeout" value="24" min="1" max="168" style="width:80px;padding:6px 10px;font-size:13px">
+            </div>
+            <label style="font-size:13px;display:flex;align-items:center;gap:5px;cursor:pointer">
+              <input type="checkbox" id="promoRecordatorio"> Enviar recordatorio antes de cerrar
+            </label>
+          </div>
+          <div class="form-group" style="margin-top:8px;margin-bottom:0">
+            <input type="text" id="promoMsgRecordatorio" placeholder="Mensaje de recordatorio (opcional)" style="font-size:13px">
+          </div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn btn-success" onclick="iniciarPromo()">📨 Activar Escucha de Respuestas</button>
@@ -759,13 +804,63 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <button class="btn btn-primary" onclick="verRespuestasPromo()">🔄 Actualizar Respuestas</button>
         </div>
       </div>
+
+      <!-- Envio Todo en Uno (Mejora 1) -->
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent2)">
+        <h3 style="margin-bottom:12px;color:var(--accent2)">🚀 Enviar Promo + Activar Escucha (Todo en Uno)</h3>
+        <p style="color:var(--text2);font-size:13px;margin-bottom:12px">Escribe tu mensaje promo, adjunta una imagen (opcional) y el bot lo enviara a todos tus contactos personales y activara la escucha automaticamente.</p>
+        <div class="form-group">
+          <label>📝 Mensaje de la promo</label>
+          <textarea id="promoMensaje" rows="3" placeholder="Ej: Hola! Tenemos una oferta especial para ti. Responde SI si te interesa o NO si no." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:14px;resize:vertical"></textarea>
+        </div>
+        <div class="form-group">
+          <label>🖼 Imagen de la promo (opcional)</label>
+          <input type="file" id="promoImagen" accept="image/*" style="font-size:13px">
+        </div>
+        <div class="form-group">
+          <label>Cuenta WhatsApp</label>
+          <select id="promoCuenta" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%">
+            <option value="">-- Usar cuenta principal --</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="enviarPromoTodoEnUno()" style="width:100%">🚀 Enviar Promo y Activar Escucha</button>
+      </div>
+
+      <!-- Multi-keyword (Mejora 7) -->
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
+        <h3 style="margin-bottom:12px">🔑 Palabras Clave Extra</h3>
+        <p style="color:var(--text2);font-size:13px;margin-bottom:12px">Ademas de aceptar/rechazar, puedes configurar palabras extra como "precio", "info", "horario", etc. Cada una con su propia respuesta.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:120px">
+            <label style="font-size:12px">Palabra</label>
+            <input type="text" id="kwPalabra" placeholder="Ej: precio">
+          </div>
+          <div class="form-group" style="margin-bottom:0;flex:2;min-width:200px">
+            <label style="font-size:12px">Respuesta</label>
+            <input type="text" id="kwRespuesta" placeholder="Ej: Nuestros precios son...">
+          </div>
+          <div class="form-group" style="margin-bottom:0;min-width:100px">
+            <label style="font-size:12px">Tipo</label>
+            <select id="kwTipo" style="padding:6px 10px;font-size:13px">
+              <option value="info">Info</option>
+              <option value="aceptar">Aceptar</option>
+              <option value="rechazar">Rechazar</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="agregarKeyword()">➕</button>
+        </div>
+        <div id="keywordsLista" style="max-height:200px;overflow-y:auto;font-size:13px"><p style="color:var(--text2)">Sin palabras clave extra</p></div>
+        <div style="margin-top:8px"><button class="btn btn-outline btn-sm" onclick="limpiarKeywordsPromo()">🗑 Limpiar Todo</button></div>
+      </div>
+
       <div style="background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border);font-size:13px;color:var(--text2)">
         <p>💡 <b>Como funciona:</b></p>
         <ol style="margin:8px 0 0 15px;line-height:1.8">
-          <li>Configura las palabras de aceptar/rechazar (ej: "si" / "no")</li>
-          <li>Activa la escucha de respuestas</li>
-          <li>Envia tu mensaje de promo usando <b>Envio Unico</b>, <b>Envio Personal</b> o <b>Envio a Miembros</b></li>
-          <li>Cuando los clientes respondan con la palabra clave, el bot te notificara automaticamente en Telegram</li>
+          <li>Configura las palabras de aceptar/rechazar y respuestas automaticas</li>
+          <li><b>Opcion A:</b> Activa solo la escucha y envia la promo por otro metodo (Envio Personal, Envio Unico, etc.)</li>
+          <li><b>Opcion B:</b> Usa "Todo en Uno" para enviar la promo y activar la escucha al mismo tiempo</li>
+          <li>Las estadisticas se actualizan automaticamente cada 5 segundos</li>
+          <li>Si configuras timeout, la escucha se detiene automaticamente despues del tiempo configurado</li>
         </ol>
       </div>
       <div id="promoEstado" style="padding:10px 15px;border-radius:8px;margin-bottom:15px;background:var(--bg);border:1px solid var(--border);font-weight:bold;text-align:center;color:var(--text2)">⏸ Escucha no iniciada</div>
@@ -778,6 +873,46 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <h3 style="color:var(--danger);margin-bottom:10px">❌ Rechazaron</h3>
           <div id="promoRechazados" style="max-height:300px;overflow-y:auto;font-size:13px"><p style="color:var(--text2)">Sin respuestas aun</p></div>
         </div>
+      </div>
+    </div>
+
+    <!-- LOGS (Mejora 6) -->
+    <div class="section" id="sec-logs">
+      <h2>📋 Logs del Bot</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Ve en tiempo real lo que hace el bot: envios, errores, conexiones, respuestas de promo. Esto te permite monitorear el bot sin necesidad de conectarte por SSH al servidor.</p>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="loadLogs()">🔄 Actualizar Logs</button>
+        <button class="btn btn-danger" onclick="limpiarLogsPanel()">🗑 Limpiar</button>
+        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="logsAutoRefresh" onchange="toggleLogsAutoRefresh()" checked> Auto-actualizar
+        </label>
+      </div>
+      <div id="logsContent" style="background:var(--bg);padding:15px;border-radius:10px;border:1px solid var(--border);max-height:500px;overflow-y:auto;font-family:monospace;font-size:12px;line-height:1.6">
+        <p style="color:var(--text2)">Cargando logs...</p>
+      </div>
+    </div>
+
+    <!-- RETRY QUEUE (Mejora 4) -->
+    <div class="section" id="sec-retry">
+      <h2>🔄 Cola de Reintentos</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Cuando un mensaje falla al enviarse (por error de red o timeout), se guarda aqui y el bot lo reintenta automaticamente hasta 3 veces. Cada reintento espera mas tiempo (5 min, 10 min, 15 min).</p>
+      <div style="display:flex;gap:15px;flex-wrap:wrap;margin-bottom:15px">
+        <div style="background:var(--bg);padding:12px 20px;border-radius:10px;border:1px solid var(--accent);flex:1;min-width:120px;text-align:center">
+          <div style="font-size:24px;font-weight:bold;color:var(--accent)" id="retryPendientes">0</div>
+          <div style="font-size:12px;color:var(--text2)">Pendientes</div>
+        </div>
+        <div style="background:var(--bg);padding:12px 20px;border-radius:10px;border:1px solid var(--success);flex:1;min-width:120px;text-align:center">
+          <div style="font-size:24px;font-weight:bold;color:var(--success)" id="retryEnviados">0</div>
+          <div style="font-size:12px;color:var(--text2)">Reenviados OK</div>
+        </div>
+        <div style="background:var(--bg);padding:12px 20px;border-radius:10px;border:1px solid var(--danger);flex:1;min-width:120px;text-align:center">
+          <div style="font-size:24px;font-weight:bold;color:var(--danger)" id="retryFallidos">0</div>
+          <div style="font-size:12px;color:var(--text2)">Fallidos (3 intentos)</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-primary" onclick="loadRetryStats()">🔄 Actualizar</button>
+        <button class="btn btn-danger" onclick="limpiarRetry()">🗑 Limpiar Completados</button>
       </div>
     </div>
 
@@ -1297,7 +1432,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:verRespuestasPromo,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,listanegranumeros:loadListaNegraNumeros,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,dmdashboard:loadDmDashboard,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,listanegranumeros:loadListaNegraNumeros,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,dmdashboard:loadDmDashboard,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -2559,17 +2694,34 @@ async function eliminarCuentaTg(nombre){
 
 // --- ENVIO INTERACTIVO (PROMO) ---
 let promoRefreshTimer=null;
+function fileToBase64(fileInput){
+  return new Promise((resolve)=>{
+    const file=fileInput.files[0];
+    if(!file){resolve(null);return}
+    const reader=new FileReader();
+    reader.onload=()=>resolve(reader.result.split(',')[1]);
+    reader.readAsDataURL(file);
+  });
+}
 async function iniciarPromo(){
   if(!requireMembresia())return;
   const aceptar=$('promoAceptar').value.trim()||'si';
   const rechazar=$('promoRechazar').value.trim()||'no';
   const respAceptar=$('promoRespAceptar')?.value?.trim()||'';
   const respRechazar=$('promoRespRechazar')?.value?.trim()||'';
-  const r=await api('/api/promo/registrar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,palabra_aceptar:aceptar,palabra_rechazar:rechazar,respuesta_aceptar:respAceptar,respuesta_rechazar:respRechazar})});
+  const timeoutHoras=parseInt($('promoTimeout')?.value)||24;
+  const recordatorio=$('promoRecordatorio')?.checked||false;
+  const msgRecordatorio=$('promoMsgRecordatorio')?.value?.trim()||'';
+  const respAceptarImgB64=await fileToBase64($('promoRespAceptarImg'));
+  const respRechazarImgB64=await fileToBase64($('promoRespRechazarImg'));
+  const payload={u:userId,palabra_aceptar:aceptar,palabra_rechazar:rechazar,respuesta_aceptar:respAceptar,respuesta_rechazar:respRechazar,timeout_horas:timeoutHoras,recordatorio_activo:recordatorio,mensaje_recordatorio:msgRecordatorio};
+  if(respAceptarImgB64)payload.resp_aceptar_imagen_b64=respAceptarImgB64;
+  if(respRechazarImgB64)payload.resp_rechazar_imagen_b64=respRechazarImgB64;
+  const r=await api('/api/promo/registrar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   if(r.ok){
-    toast('Escucha de respuestas activada! Ahora envia tu promo.','success');
+    toast('Escucha activada! Timeout: '+timeoutHoras+'h','success');
     $('promoEstado').style.background='#0a3d0a';$('promoEstado').style.color='#4caf50';$('promoEstado').style.borderColor='var(--success)';
-    $('promoEstado').textContent='🟢 Escucha ACTIVA — Esperando respuestas (aceptar: "'+aceptar+'", rechazar: "'+rechazar+'")';
+    $('promoEstado').textContent='🟢 Escucha ACTIVA — Esperando respuestas (aceptar: "'+aceptar+'", rechazar: "'+rechazar+'") — Timeout: '+timeoutHoras+'h';
     if(promoRefreshTimer)clearInterval(promoRefreshTimer);
     promoRefreshTimer=setInterval(verRespuestasPromo,5000);
   }else{toast('Error al activar','error')}
@@ -2588,9 +2740,12 @@ async function detenerPromo(){
 async function verRespuestasPromo(){
   const r=await api('/api/promo/respuestas?u='+userId);
   if(!r.ok)return;
+  // Update real-time stats (Mejora 2)
+  const ac=(r.aceptados||[]).length,re=(r.rechazados||[]).length;
+  try{$('promoStatAceptados').textContent=ac;$('promoStatRechazados').textContent=re;$('promoStatTotal').textContent=ac+re;}catch(e){}
   if(r.activo){
     $('promoEstado').style.background='#0a3d0a';$('promoEstado').style.color='#4caf50';$('promoEstado').style.borderColor='var(--success)';
-    $('promoEstado').textContent='🟢 Escucha ACTIVA — Aceptados: '+(r.aceptados||[]).length+' | Rechazados: '+(r.rechazados||[]).length;
+    $('promoEstado').textContent='🟢 Escucha ACTIVA — Aceptados: '+ac+' | Rechazados: '+re;
   }
   renderPromoResultados(r.aceptados||[],r.rechazados||[]);
 }
@@ -2603,6 +2758,112 @@ function renderPromoResultados(aceptados,rechazados){
     let h='';rechazados.forEach(x=>{h+='<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">❌ <b>'+(x.nombre||x.numero||x.jid||'Desconocido')+'</b>'+(x.numero?' ('+x.numero+')':'')+(x.fecha?' <span style="color:var(--text2);font-size:11px">'+x.fecha+'</span>':'')+'</div>'});
     $('promoRechazados').innerHTML=h;
   }else{$('promoRechazados').innerHTML='<p style="color:var(--text2)">Sin respuestas aun</p>'}
+}
+// Mejora 1: Enviar promo + escuchar todo en uno
+async function enviarPromoTodoEnUno(){
+  if(!requireMembresia())return;
+  const mensaje=$('promoMensaje')?.value?.trim();
+  if(!mensaje){toast('Escribe un mensaje para la promo','error');return}
+  const aceptar=$('promoAceptar').value.trim()||'si';
+  const rechazar=$('promoRechazar').value.trim()||'no';
+  const respAceptar=$('promoRespAceptar')?.value?.trim()||'';
+  const respRechazar=$('promoRespRechazar')?.value?.trim()||'';
+  const cuenta=$('promoCuenta')?.value||'';
+  const timeoutHoras=parseInt($('promoTimeout')?.value)||24;
+  const recordatorio=$('promoRecordatorio')?.checked||false;
+  const msgRecordatorio=$('promoMsgRecordatorio')?.value?.trim()||'';
+  let imagenB64=null,imagenNombre=null;
+  const imgInput=$('promoImagen');
+  if(imgInput&&imgInput.files[0]){
+    imagenNombre=imgInput.files[0].name;
+    imagenB64=await fileToBase64(imgInput);
+  }
+  toast('Enviando promo y activando escucha...','success');
+  const payload={u:userId,mensaje,palabra_aceptar:aceptar,palabra_rechazar:rechazar,respuesta_aceptar:respAceptar,respuesta_rechazar:respRechazar,cuenta,timeout_horas:timeoutHoras,recordatorio_activo:recordatorio,mensaje_recordatorio:msgRecordatorio};
+  if(imagenB64){payload.imagen_b64=imagenB64;payload.imagen_nombre=imagenNombre}
+  const r=await api('/api/promo/enviar_y_escuchar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r.ok){
+    toast('Promo enviada y escucha activada!','success');
+    $('promoEstado').style.background='#0a3d0a';$('promoEstado').style.color='#4caf50';$('promoEstado').style.borderColor='var(--success)';
+    $('promoEstado').textContent='🟢 Escucha ACTIVA + Promo enviandose...';
+    if(promoRefreshTimer)clearInterval(promoRefreshTimer);
+    promoRefreshTimer=setInterval(verRespuestasPromo,5000);
+  }else{toast('Error: '+(r.error||r.message||''),'error')}
+}
+// Mejora 7: Keywords management
+async function loadKeywords(){
+  const r=await api('/api/promo/keywords?u='+userId);
+  if(!r.ok)return;
+  const kws=r.keywords||[];
+  if(!kws.length){$('keywordsLista').innerHTML='<p style="color:var(--text2)">Sin palabras clave extra</p>';return}
+  let h='';
+  kws.forEach(k=>{h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)"><span><b>'+k.palabra+'</b> → '+k.respuesta_texto+' <span style="color:var(--text2);font-size:11px">('+k.tipo+')</span></span><button class="btn btn-sm btn-danger" onclick="eliminarKeyword('+k.id+')">🗑</button></div>'});
+  $('keywordsLista').innerHTML=h;
+}
+async function agregarKeyword(){
+  const palabra=$('kwPalabra')?.value?.trim();
+  const respuesta=$('kwRespuesta')?.value?.trim();
+  const tipo=$('kwTipo')?.value||'info';
+  if(!palabra){toast('Ingresa una palabra clave','error');return}
+  const r=await api('/api/promo/keywords/agregar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,palabra,respuesta_texto:respuesta,tipo})});
+  if(r.ok){toast('Keyword agregada','success');$('kwPalabra').value='';$('kwRespuesta').value='';loadKeywords()}
+  else{toast('Error','error')}
+}
+async function eliminarKeyword(id){
+  const r=await api('/api/promo/keywords/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  if(r.ok)loadKeywords();
+}
+async function limpiarKeywordsPromo(){
+  if(!confirm('Eliminar todas las palabras clave extra?'))return;
+  const r=await api('/api/promo/keywords/limpiar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  if(r.ok){toast('Keywords limpiadas','success');loadKeywords()}
+}
+
+// Load accounts for promo dropdown
+async function loadPromoCuentas(){
+  const r=await api('/api/sesiones?u='+userId);
+  const sel=$('promoCuenta');if(!sel)return;
+  sel.innerHTML='<option value="">-- Usar cuenta principal --</option>';
+  if(r.ok&&r.sesiones){r.sesiones.forEach(s=>{sel.innerHTML+='<option value="'+s.nombre+'">'+s.nombre+(s.telefono?' ('+s.telefono+')':'')+'</option>'})}
+}
+
+// --- LOGS (Mejora 6) ---
+let logsRefreshTimer=null;
+async function loadLogs(){
+  const r=await api('/api/logs?u='+userId+'&limite=100');
+  if(!r.ok){$('logsContent').innerHTML='<p style="color:var(--text2)">Error cargando logs</p>';return}
+  const logs=r.logs||[];
+  if(!logs.length){$('logsContent').innerHTML='<p style="color:var(--text2)">Sin logs aun</p>';return}
+  const colors={info:'var(--text)',error:'var(--danger)',promo:'var(--success)',envio:'var(--accent)',retry:'#ffeb3b',retry_error:'var(--danger)',promo_timeout:'#ff9800'};
+  let h='';
+  logs.forEach(l=>{
+    const color=colors[l.tipo]||'var(--text2)';
+    h+='<div style="color:'+color+';padding:2px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2);font-size:11px">['+l.fecha+']</span> <span style="font-weight:bold">['+l.tipo.toUpperCase()+']</span> '+l.mensaje+'</div>';
+  });
+  $('logsContent').innerHTML=h;
+}
+async function limpiarLogsPanel(){
+  if(!confirm('Limpiar todos los logs?'))return;
+  await api('/api/logs/limpiar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  toast('Logs limpiados','success');loadLogs();
+}
+function toggleLogsAutoRefresh(){
+  if($('logsAutoRefresh').checked){
+    if(logsRefreshTimer)clearInterval(logsRefreshTimer);
+    logsRefreshTimer=setInterval(loadLogs,5000);
+  }else{if(logsRefreshTimer){clearInterval(logsRefreshTimer);logsRefreshTimer=null}}
+}
+
+// --- RETRY QUEUE (Mejora 4) ---
+async function loadRetryStats(){
+  const r=await api('/api/retry/stats?u='+userId);
+  if(!r.ok)return;
+  try{$('retryPendientes').textContent=r.pendientes||0;$('retryEnviados').textContent=r.enviados||0;$('retryFallidos').textContent=r.fallidos||0;}catch(e){}
+}
+async function limpiarRetry(){
+  if(!confirm('Limpiar mensajes completados/fallidos de la cola?'))return;
+  await api('/api/retry/limpiar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  toast('Cola limpiada','success');loadRetryStats();
 }
 
 // --- ADMIN ---
