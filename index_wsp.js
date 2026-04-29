@@ -162,26 +162,20 @@ const server = http.createServer(async (req, res) => {
             return res.end("<h1>Error: falta parametro u (user) o n (nombre)</h1>");
         }
 
-        // Guardar sesion en DB si no existe
-        try {
-            const existentes = db.getSesiones(userId);
-            const yaExiste = existentes.some(s => s.nombre === nombre);
-            if (!yaExiste) {
-                db.agregarSesion(userId, nombre, "pendiente");
-            }
-        } catch (e) { console.error("Error guardando sesion:", e.message); }
-
-        // Iniciar proceso de vinculacion
+        // Iniciar proceso de vinculacion (sesion se guarda solo al conectar)
         motor.linkAccount(userId, nombre).then(() => {
-            // Actualizar telefono real cuando se vincula
             const key = `${userId}_${nombre}`;
             const sock = motor.clientSessions ? motor.clientSessions[key] : null;
-            if (sock && sock.user && sock.user.id) {
-                const realPhone = sock.user.id.split(":")[0].split("@")[0];
-                try {
+            const realPhone = (sock && sock.user && sock.user.id) ? sock.user.id.split(":")[0].split("@")[0] : "pendiente";
+            try {
+                const existentes = db.getSesiones(userId);
+                const yaExiste = existentes.some(s => s.nombre === nombre);
+                if (!yaExiste) {
+                    db.agregarSesion(userId, nombre, realPhone);
+                } else {
                     db.getDb().prepare("UPDATE sesiones SET telefono=? WHERE user_id=? AND nombre=?").run(realPhone, userId, nombre);
-                } catch (e) {}
-            }
+                }
+            } catch (e) { console.error("Error guardando sesion:", e.message); }
         }).catch(e => {
             console.error(`Link error: ${e.message}`);
         });
@@ -1010,6 +1004,32 @@ poll();
                 db.eliminarGrupoPorLink(body.u, body.link);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // Proxy TG endpoints to Python server (port 3002)
+            if (url.pathname.startsWith("/api/tg-auth/") || url.pathname.startsWith("/api/tg/") || url.pathname.startsWith("/api/sesiones_tg")) {
+                const tgBody = await readBody();
+                const tgBodyStr = JSON.stringify(tgBody);
+                return new Promise((resolve) => {
+                    const proxyOpts = {
+                        hostname: "127.0.0.1",
+                        port: 3002,
+                        path: req.url,
+                        method: req.method,
+                        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(tgBodyStr) }
+                    };
+                    const proxyReq = http.request(proxyOpts, (proxyRes) => {
+                        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+                        proxyRes.pipe(res);
+                        resolve();
+                    });
+                    proxyReq.on("error", (e) => {
+                        res.writeHead(502);
+                        res.end(JSON.stringify({ ok: false, error: "Bot TG no disponible: " + e.message }));
+                        resolve();
+                    });
+                    proxyReq.end(tgBodyStr);
+                });
             }
 
             // Endpoint no encontrado

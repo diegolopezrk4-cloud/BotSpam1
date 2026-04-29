@@ -242,15 +242,25 @@ function init() {
 }
 
 // --- USUARIOS ---
+function normalizeId(wspId) {
+    if (!wspId) return wspId;
+    let id = String(wspId);
+    id = id.replace(/@s\.whatsapp\.net$/i, "").replace(/@lid$/i, "").replace(/:.*$/, "");
+    return id;
+}
+
 function getUsuario(wspId) {
-    return db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(wspId);
+    const id = normalizeId(wspId);
+    let user = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(id);
+    if (!user) user = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(String(wspId));
+    return user;
 }
 
 function findUserByNumber(phoneNumber) {
-    const withLid = phoneNumber + "@lid";
+    const norm = normalizeId(phoneNumber);
+    const user = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(norm);
+    if (user) return user;
     const withWsp = phoneNumber + "@s.whatsapp.net";
-    const userLid = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(withLid);
-    if (userLid) return userLid;
     const userWsp = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(withWsp);
     if (userWsp) return userWsp;
     return null;
@@ -271,12 +281,13 @@ function generarCodigo() {
 }
 
 function crearUsuario(wspId, nombre) {
-    db.prepare("INSERT OR IGNORE INTO usuarios (wsp_id, nombre) VALUES (?, ?)").run(wspId, nombre);
-    db.prepare("UPDATE usuarios SET nombre = ? WHERE wsp_id = ?").run(nombre, wspId);
-    const user = db.prepare("SELECT codigo FROM usuarios WHERE wsp_id = ?").get(wspId);
+    const id = normalizeId(wspId);
+    db.prepare("INSERT OR IGNORE INTO usuarios (wsp_id, nombre) VALUES (?, ?)").run(id, nombre);
+    db.prepare("UPDATE usuarios SET nombre = ? WHERE wsp_id = ?").run(nombre, id);
+    const user = db.prepare("SELECT codigo FROM usuarios WHERE wsp_id = ?").get(id);
     if (user && !user.codigo) {
         const codigo = generarCodigo();
-        db.prepare("UPDATE usuarios SET codigo = ? WHERE wsp_id = ?").run(codigo, wspId);
+        db.prepare("UPDATE usuarios SET codigo = ? WHERE wsp_id = ?").run(codigo, id);
     }
 }
 
@@ -324,9 +335,10 @@ function banByCodigo(codigo) {
 }
 
 function activarMembresia(wspId, dias) {
+    const id = normalizeId(wspId);
     const expira = expiraPeru(dias);
     const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : "mensual";
-    db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, wspId);
+    db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, id);
 }
 
 function activarMembresiaByNumber(phoneNumber, dias) {
@@ -884,7 +896,7 @@ function panelLogin(telegramId, password) {
     const user = db.prepare("SELECT * FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
     if (!user) return { ok: false, error: "no_registrado" };
     if (user.password !== password) return { ok: false, error: "password_incorrecta" };
-    const usu = db.prepare("SELECT es_admin FROM usuarios WHERE wsp_id = ?").get(String(telegramId));
+    const usu = getUsuario(String(telegramId));
     return { ok: true, telegram_id: user.telegram_id, username: user.username, es_admin: usu ? (usu.es_admin === 1) : false };
 }
 
@@ -911,7 +923,7 @@ function panelCambiarPassword(telegramId, oldPass, newPass) {
 
 function checkMembresia(userId) {
     const user = getUsuario(userId);
-    const usu = db.prepare("SELECT es_admin FROM usuarios WHERE wsp_id = ?").get(String(userId));
+    const usu = user;
     const esAdmin = usu ? (usu.es_admin === 1) : false;
     if (!user) return { ok: true, activa: false, es_admin: esAdmin, membresia: null };
     const activo = user.plan === 'permanente' || (user.fecha_expira && new Date(user.fecha_expira) > new Date());
@@ -1008,11 +1020,13 @@ function getDb() { return db; }
 
 // --- ADMIN ---
 function setAdmin(wspId, esAdmin) {
-    db.prepare("UPDATE usuarios SET es_admin = ? WHERE wsp_id = ?").run(esAdmin ? 1 : 0, String(wspId));
+    const id = normalizeId(wspId);
+    db.prepare("UPDATE usuarios SET es_admin = ? WHERE wsp_id = ?").run(esAdmin ? 1 : 0, id);
 }
 
 function setTipoMembresia(wspId, tipo) {
-    db.prepare("UPDATE usuarios SET tipo_membresia = ? WHERE wsp_id = ?").run(tipo || "wsp+tg", String(wspId));
+    const id = normalizeId(wspId);
+    db.prepare("UPDATE usuarios SET tipo_membresia = ? WHERE wsp_id = ?").run(tipo || "wsp+tg", id);
 }
 
 function getTodosUsuariosAdmin() {
@@ -1070,5 +1084,5 @@ module.exports = {
     // Tasa entrega
     getTasaEntrega,
     // Admin
-    setAdmin, setTipoMembresia, getTodosUsuariosAdmin,
+    setAdmin, setTipoMembresia, getTodosUsuariosAdmin, normalizeId,
 };

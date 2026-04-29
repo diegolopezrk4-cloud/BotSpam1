@@ -2798,7 +2798,7 @@ async def cb_tg_stats(call: types.CallbackQuery):
     import wsp_bridge as wsp
     r = await wsp.wsp_dashboard(call.from_user.id)
     if r.get("ok"):
-        d = r
+        d = r.get("dashboard", r)
         texto = (
             "📈 STATS TG:\n\n"
             f"📤 Enviados: {d.get('enviados', 0)}\n"
