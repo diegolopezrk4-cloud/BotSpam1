@@ -556,6 +556,28 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <button class="btn btn-outline" onclick="loadGrupos()">🔄 Refrescar</button>
         </div>
       </div>
+      <!-- Barra de busqueda, filtros y acciones -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:15px">
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:180px">
+          <label>🔍 Buscar grupo</label>
+          <input type="text" id="gruposBuscar" placeholder="Buscar por nombre..." oninput="filtrarGruposPanel()">
+        </div>
+        <div class="form-group" style="margin-bottom:0;min-width:150px">
+          <label>📂 Seccion</label>
+          <select id="gruposSeccionFiltro" onchange="filtrarGruposPanel()"><option value="">Todas</option></select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;min-width:130px">
+          <label>↕ Ordenar</label>
+          <select id="gruposOrden" onchange="filtrarGruposPanel()">
+            <option value="nombre">Nombre A-Z</option>
+            <option value="nombre_desc">Nombre Z-A</option>
+            <option value="miembros">Mas miembros</option>
+            <option value="miembros_asc">Menos miembros</option>
+          </select>
+        </div>
+        <button class="btn btn-danger" onclick="eliminarTodosGruposPanel()" title="Eliminar todos los grupos">🗑 Eliminar Todos</button>
+        <button class="btn btn-primary" onclick="showAsignarSeccion()" title="Asignar seccion a grupos seleccionados">📂 Asignar Seccion</button>
+      </div>
       <div id="gruposContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
@@ -802,6 +824,22 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="section" id="sec-enviointeractivo">
       <h2>📨 Envio Interactivo (Promo)</h2>
       <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia una promocion y el bot espera la respuesta de los clientes. Puedes enviar la promo directamente desde aqui (todo en uno) o activar solo la escucha y usar otros metodos de envio. Te notifica cuando aceptan o rechazan.</p>
+
+      <!-- Plantillas de Promocion -->
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent2)">
+        <h3 style="margin-bottom:10px;color:var(--accent2)">📋 Plantillas de Promocion</h3>
+        <p style="color:var(--text2);font-size:12px;margin-bottom:10px">Guarda configuraciones de escucha para diferentes promociones y cargalas rapidamente.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+            <select id="promoPlantillaSelect" onchange="cargarPlantillaPromo()">
+              <option value="">-- Seleccionar plantilla --</option>
+            </select>
+          </div>
+          <button class="btn btn-success" onclick="guardarPlantillaPromo()">💾 Guardar Actual</button>
+          <button class="btn btn-danger btn-sm" onclick="eliminarPlantillaPromo()">🗑</button>
+        </div>
+        <div id="promoPlantillasLista" style="margin-top:10px"></div>
+      </div>
 
       <!-- Estadisticas en tiempo real (Mejora 2) -->
       <div id="promoStatsBar" style="display:flex;gap:15px;flex-wrap:wrap;margin-bottom:15px">
@@ -1550,7 +1588,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,listanegranumeros:loadListaNegraNumeros,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,dmdashboard:loadDmDashboard,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,listanegranumeros:loadListaNegraNumeros,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,dmdashboard:loadDmDashboard,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -2032,6 +2070,7 @@ async function loadTgStats(){
 }
 
 // --- GRUPOS ---
+let _gruposData=[];
 async function loadGrupos(){
   // Populate WSP account selector
   const sel=$('wspDetectCuenta');
@@ -2042,13 +2081,50 @@ async function loadGrupos(){
       sr.sesiones.forEach(s=>{sel.innerHTML+='<option value="'+esc(s.nombre)+'">'+esc(s.nombre)+' ('+esc(s.telefono||'?')+')</option>'});
     }
   }
-  const r=await api('/api/grupos?u='+userId);
+  const [r,secR]=await Promise.all([api('/api/grupos?u='+userId),api('/api/grupos/secciones?u='+userId)]);
   if(!r.ok){$('gruposContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
-  const g=r.grupos||[];
-  if(!g.length){$('gruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos.<br>Usa "Detectar" para buscar.</p></div>';return}
-  let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Link/JID</th><th>Acciones</th></tr></thead><tbody>';
-  g.forEach((x,i)=>{const l=x.link||x.jid||'?';const name=x.nombre||x.subject||'';h+=`<tr><td>${i+1}</td><td><b>${name?esc(name):'<span style="color:var(--text2)">—</span>'}</b></td><td style="font-size:11px;color:var(--text2)">${l.length>50?l.slice(0,50)+'...':l}</td><td><button class="btn btn-danger btn-sm" onclick="eliminarGrupo('${encodeURIComponent(l)}')">🗑</button></td></tr>`});
+  _gruposData=r.grupos||[];
+  // Populate seccion filter
+  const secFiltro=$('gruposSeccionFiltro');
+  if(secFiltro){
+    secFiltro.innerHTML='<option value="">Todas</option>';
+    if(secR.ok&&secR.secciones){secR.secciones.forEach(s=>{secFiltro.innerHTML+='<option value="'+esc(s)+'">'+esc(s)+'</option>'});}
+  }
+  filtrarGruposPanel();
+}
+function filtrarGruposPanel(){
+  const buscar=($('gruposBuscar')?.value||'').toLowerCase();
+  const seccion=$('gruposSeccionFiltro')?.value||'';
+  const orden=$('gruposOrden')?.value||'nombre';
+  let g=[..._gruposData];
+  if(buscar)g=g.filter(x=>(x.nombre||x.subject||x.link||'').toLowerCase().includes(buscar));
+  if(seccion)g=g.filter(x=>(x.seccion||'')==seccion);
+  g.sort((a,b)=>{
+    if(orden==='miembros')return(b.size||0)-(a.size||0);
+    if(orden==='miembros_asc')return(a.size||0)-(b.size||0);
+    if(orden==='nombre_desc')return(b.nombre||b.subject||'').localeCompare(a.nombre||a.subject||'');
+    return(a.nombre||a.subject||'').localeCompare(b.nombre||b.subject||'');
+  });
+  if(!g.length&&!_gruposData.length){$('gruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos.<br>Usa "Detectar" para buscar.</p></div>';return}
+  if(!g.length){$('gruposContent').innerHTML='<div class="empty-state"><p>No hay grupos que coincidan con el filtro.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+' de '+_gruposData.length+')</h3></div><table><thead><tr><th><input type="checkbox" id="gruposCheckAll" onchange="toggleGruposCheckAll(this)"></th><th>#</th><th>Nombre</th><th>Seccion</th><th>Miembros</th><th>Link/JID</th><th>Acciones</th></tr></thead><tbody>';
+  g.forEach((x,i)=>{const l=x.link||x.jid||'?';const name=x.nombre||x.subject||'';h+=`<tr><td><input type="checkbox" class="grupoCheck" value="${x.id}"></td><td>${i+1}</td><td><b>${name?esc(name):'<span style="color:var(--text2)">—</span>'}</b></td><td style="font-size:11px">${x.seccion?'<span style="background:var(--accent);color:#fff;padding:2px 6px;border-radius:4px;font-size:10px">'+esc(x.seccion)+'</span>':'—'}</td><td style="text-align:center">${x.size||'—'}</td><td style="font-size:11px;color:var(--text2)">${l.length>40?l.slice(0,40)+'...':l}</td><td><button class="btn btn-danger btn-sm" onclick="eliminarGrupo('${encodeURIComponent(l)}')">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('gruposContent').innerHTML=h;
+}
+function toggleGruposCheckAll(el){document.querySelectorAll('.grupoCheck').forEach(c=>c.checked=el.checked)}
+async function eliminarTodosGruposPanel(){
+  if(!requireMembresia())return;
+  if(!confirm('Eliminar TODOS los grupos ('+_gruposData.length+')? Esta accion no se puede deshacer.'))return;
+  const r=await api('/api/grupos/delall',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  toast(r.ok?'Todos los grupos eliminados':'Error',r.ok?'success':'error');loadGrupos();
+}
+async function showAsignarSeccion(){
+  const ids=[...document.querySelectorAll('.grupoCheck:checked')].map(c=>parseInt(c.value));
+  if(!ids.length){toast('Selecciona al menos un grupo','error');return}
+  const seccion=prompt('Nombre de la seccion (dejar vacio para quitar seccion):');
+  if(seccion===null)return;
+  const r=await api('/api/grupos/seccion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,ids,seccion})});
+  toast(r.ok?ids.length+' grupo(s) actualizados':'Error',r.ok?'success':'error');loadGrupos();
 }
 async function eliminarGrupo(l){if(!requireMembresia())return;const r=await api('/api/grupos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:decodeURIComponent(l)})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadGrupos()}
 async function detectarGrupos(){
@@ -2100,7 +2176,7 @@ async function agregarSeleccionadosWSP(){
   let n=0;
   for(const i of indices){
     const x=g[i];if(x&&x.jid){
-      await api('/api/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:x.jid,nombre:x.subject||''})});n++;
+      await api('/api/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:x.jid,nombre:x.subject||'',size:x.size||0})});n++;
     }
   }
   toast(n+' grupos agregados','success');loadGrupos();
@@ -2207,13 +2283,23 @@ async function showEditWspCamp(id){
     html+=`<label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer"><input type="checkbox" class="wspCampSes" value="${esc(s.nombre)}" ${checked}> ${esc(s.nombre)} (${esc(s.telefono||'?')})</label>`;
   });
   html+='</div></div>';
-  // Group selection
-  html+='<div class="form-group"><label>Grupos a spamear <button type="button" class="btn btn-outline btn-sm" style="margin-left:8px;font-size:11px" onclick="document.querySelectorAll(\'.wspCampGrp\').forEach(c=>c.checked=true)">Todos</button> <button type="button" class="btn btn-outline btn-sm" style="font-size:11px" onclick="document.querySelectorAll(\'.wspCampGrp\').forEach(c=>c.checked=false)">Ninguno</button></label>';
-  html+='<div style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:5px">';
+  // Group selection with section filter
+  const secciones=[...new Set(allGrupos.map(g=>g.seccion||'').filter(Boolean))];
+  html+='<div class="form-group"><label>Grupos a spamear</label>';
+  html+='<div style="display:flex;gap:8px;margin:5px 0;flex-wrap:wrap">';
+  if(secciones.length){
+    html+='<select id="wspCampSecFiltro" onchange="filtrarGruposCamp()" style="padding:4px 8px;font-size:12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text)"><option value="">Todas las secciones</option>';
+    secciones.forEach(s=>{html+='<option value="'+esc(s)+'">'+esc(s)+'</option>'});
+    html+='</select>';
+  }
+  html+='<button type="button" class="btn btn-outline btn-sm" style="font-size:11px" onclick="document.querySelectorAll(\'.wspCampGrp\').forEach(c=>{if(c.closest(\'label\').style.display!==\'none\')c.checked=true})">Todos</button>';
+  html+='<button type="button" class="btn btn-outline btn-sm" style="font-size:11px" onclick="document.querySelectorAll(\'.wspCampGrp\').forEach(c=>c.checked=false)">Ninguno</button>';
+  html+='</div>';
+  html+='<div id="wspCampGruposList" style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:5px">';
   allGrupos.forEach((g,i)=>{
     const checked=campGrupos.includes(g.link)?'checked':'';
     const name=g.nombre||g.link;
-    html+=`<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:2px 0"><input type="checkbox" class="wspCampGrp" value="${esc(g.link)}" ${checked}> ${i+1}. ${esc(name.length>40?name.slice(0,40)+'...':name)}</label>`;
+    html+=`<label data-seccion="${esc(g.seccion||'')}" style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:2px 0"><input type="checkbox" class="wspCampGrp" value="${esc(g.link)}" ${checked}> ${i+1}. ${esc(name.length>40?name.slice(0,40)+'...':name)}${g.seccion?' <span style="color:var(--accent);font-size:10px">['+esc(g.seccion)+']</span>':''}</label>`;
   });
   html+='</div></div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:15px">';
@@ -2224,6 +2310,13 @@ async function showEditWspCamp(id){
   html+='<p style="font-size:11px;color:var(--text2);margin-bottom:10px">Envia a cada grupo dejando entre <b>intervalo min</b> y <b>max</b> segundos. Al terminar todos los grupos, pausa <b>X minutos</b> y repite.</p>';
   html+='<div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="editWspCampPanel('+id+')">Guardar</button></div>';
   showModal(html);
+}
+function filtrarGruposCamp(){
+  const sec=document.getElementById('wspCampSecFiltro')?.value||'';
+  document.querySelectorAll('#wspCampGruposList label').forEach(l=>{
+    if(!sec||l.dataset.seccion===sec)l.style.display='';
+    else l.style.display='none';
+  });
 }
 async function editWspCampPanel(id){
   const msg=$('wspCampEditMsg').value.trim();
@@ -2951,6 +3044,58 @@ async function limpiarKeywordsPromo(){
   if(!confirm('Eliminar todas las palabras clave extra?'))return;
   const r=await api('/api/promo/keywords/limpiar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
   if(r.ok){toast('Keywords limpiadas','success');loadKeywords()}
+}
+
+// --- PROMO PLANTILLAS ---
+async function loadPromoPlantillas(){
+  const r=await api('/api/promo/plantillas?u='+userId);
+  const sel=$('promoPlantillaSelect');
+  if(!sel)return;
+  sel.innerHTML='<option value="">-- Seleccionar plantilla --</option>';
+  if(r.ok&&r.plantillas){
+    r.plantillas.forEach(p=>{sel.innerHTML+='<option value="'+p.id+'">'+esc(p.nombre)+'</option>'});
+  }
+}
+async function guardarPlantillaPromo(){
+  const nombre=prompt('Nombre para esta plantilla:');
+  if(!nombre)return;
+  const payload={
+    u:userId,nombre,
+    palabra_aceptar:$('promoAceptar')?.value||'si',
+    palabra_rechazar:$('promoRechazar')?.value||'no',
+    respuesta_aceptar:$('promoRespAceptar')?.value||'',
+    respuesta_rechazar:$('promoRespRechazar')?.value||'',
+    timeout_horas:parseInt($('promoTimeout')?.value)||24,
+    recordatorio:$('promoRecordatorio')?.checked?1:0,
+    msg_recordatorio:$('promoMsgRecordatorio')?.value||''
+  };
+  const r=await api('/api/promo/plantillas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r.ok){toast('Plantilla "'+nombre+'" guardada','success');loadPromoPlantillas();}
+  else{toast('Error: '+(r.error||''),'error')}
+}
+async function cargarPlantillaPromo(){
+  const id=$('promoPlantillaSelect')?.value;
+  if(!id)return;
+  const r=await api('/api/promo/plantillas?u='+userId);
+  if(!r.ok||!r.plantillas)return;
+  const p=r.plantillas.find(x=>x.id==id);
+  if(!p)return;
+  if($('promoAceptar'))$('promoAceptar').value=p.palabra_aceptar||'si';
+  if($('promoRechazar'))$('promoRechazar').value=p.palabra_rechazar||'no';
+  if($('promoRespAceptar'))$('promoRespAceptar').value=p.respuesta_aceptar||'';
+  if($('promoRespRechazar'))$('promoRespRechazar').value=p.respuesta_rechazar||'';
+  if($('promoTimeout'))$('promoTimeout').value=p.timeout_horas||24;
+  if($('promoRecordatorio'))$('promoRecordatorio').checked=!!p.recordatorio;
+  if($('promoMsgRecordatorio'))$('promoMsgRecordatorio').value=p.msg_recordatorio||'';
+  toast('Plantilla "'+p.nombre+'" cargada','success');
+}
+async function eliminarPlantillaPromo(){
+  const id=$('promoPlantillaSelect')?.value;
+  if(!id){toast('Selecciona una plantilla','error');return}
+  if(!confirm('Eliminar esta plantilla?'))return;
+  const r=await api('/api/promo/plantillas/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:parseInt(id)})});
+  if(r.ok){toast('Plantilla eliminada','success');loadPromoPlantillas();}
+  else{toast('Error','error')}
 }
 
 // Load accounts for promo dropdown

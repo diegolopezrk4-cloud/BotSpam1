@@ -269,7 +269,7 @@ poll();
             if (url.pathname === "/api/grupos/add" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.u || !body.link) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o link" })); }
-                db.agregarGrupo(body.u, body.link, body.nombre || null);
+                db.agregarGrupo(body.u, body.link, body.nombre || null, body.size || 0);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
@@ -296,6 +296,23 @@ poll();
                 db.eliminarTodosGrupos(body.u);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/grupos/seccion — Asignar seccion a grupos { u, ids: [int], seccion: string }
+            if (url.pathname === "/api/grupos/seccion" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.ids) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o ids" })); }
+                db.setGrupoSeccionBulk(body.u, body.ids, body.seccion || '');
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/grupos/secciones?u=USER_ID — Lista de secciones
+            if (url.pathname === "/api/grupos/secciones" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, secciones: db.getSecciones(userId) }));
             }
 
             // GET /api/sesiones?u=USER_ID — Cuentas WSP vinculadas
@@ -1846,6 +1863,35 @@ poll();
                 const body = await readBody();
                 if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 db.limpiarPromoKeywords(body.u);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── PROMO PLANTILLAS ───
+            if (url.pathname === "/api/promo/plantillas" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, plantillas: db.getPromoPlantillas(userId) }));
+            }
+            if (url.pathname === "/api/promo/plantillas/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                const id = db.crearPromoPlantilla(body.u, body.nombre, body);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id }));
+            }
+            if (url.pathname === "/api/promo/plantillas/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id o nombre" })); }
+                db.editarPromoPlantilla(body.id, body.nombre, body);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/promo/plantillas/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.eliminarPromoPlantilla(body.id);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }

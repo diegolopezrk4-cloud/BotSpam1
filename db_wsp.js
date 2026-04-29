@@ -250,6 +250,19 @@ function init() {
         db.exec("CREATE TABLE IF NOT EXISTS recovery_codes (telegram_id TEXT NOT NULL, code TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))");
         console.log("   Tabla 'recovery_codes' recreada (sin columna 'used')");
     } catch (e) {}
+    // Migración: seccion y size en grupos
+    try {
+        db.prepare("SELECT seccion FROM grupos LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE grupos ADD COLUMN seccion TEXT DEFAULT ''");
+        console.log("   Columna 'seccion' agregada a grupos");
+    }
+    try {
+        db.prepare("SELECT size FROM grupos LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE grupos ADD COLUMN size INTEGER DEFAULT 0");
+        console.log("   Columna 'size' agregada a grupos");
+    }
     // Migración: grupo_nombre en historial_envios
     try {
         db.prepare("SELECT grupo_nombre FROM historial_envios LIMIT 1").get();
@@ -373,6 +386,25 @@ function init() {
             numero TEXT,
             nombre TEXT DEFAULT '',
             tipo TEXT DEFAULT 'aceptado',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+    `);
+    // Table for promo templates (plantillas de promocion)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS promo_plantillas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            nombre TEXT,
+            palabra_aceptar TEXT DEFAULT 'si',
+            palabra_rechazar TEXT DEFAULT 'no',
+            respuesta_aceptar TEXT DEFAULT '',
+            respuesta_rechazar TEXT DEFAULT '',
+            respuesta_aceptar_img TEXT DEFAULT '',
+            respuesta_rechazar_img TEXT DEFAULT '',
+            timeout_horas INTEGER DEFAULT 24,
+            recordatorio INTEGER DEFAULT 0,
+            msg_recordatorio TEXT DEFAULT '',
             fecha TEXT DEFAULT (datetime('now')),
             FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
         );
@@ -676,13 +708,18 @@ function getGrupos(userId) {
     return db.prepare("SELECT * FROM grupos WHERE user_id = ?").all(userId);
 }
 
-function agregarGrupo(userId, link, nombre = null) {
+function agregarGrupo(userId, link, nombre = null, size = 0) {
     const existente = db.prepare("SELECT id, nombre FROM grupos WHERE user_id = ? AND link = ?").get(userId, link);
     if (!existente) {
-        db.prepare("INSERT INTO grupos (user_id, link, nombre) VALUES (?, ?, ?)").run(userId, link, nombre);
+        db.prepare("INSERT INTO grupos (user_id, link, nombre, size) VALUES (?, ?, ?, ?)").run(userId, link, nombre, size || 0);
         return true;
-    } else if (nombre && !existente.nombre) {
-        db.prepare("UPDATE grupos SET nombre = ? WHERE id = ?").run(nombre, existente.id);
+    } else {
+        if (nombre && !existente.nombre) {
+            db.prepare("UPDATE grupos SET nombre = ? WHERE id = ?").run(nombre, existente.id);
+        }
+        if (size) {
+            db.prepare("UPDATE grupos SET size = ? WHERE id = ?").run(size, existente.id);
+        }
     }
     return false;
 }
@@ -699,6 +736,21 @@ function eliminarGrupo(userId, grupoId) {
 function eliminarGrupoPorLink(userId, link) {
     db.prepare("DELETE FROM campana_grupos WHERE grupo_link = ?").run(link);
     db.prepare("DELETE FROM grupos WHERE user_id = ? AND link = ?").run(userId, link);
+}
+
+function setGrupoSeccion(userId, grupoId, seccion) {
+    db.prepare("UPDATE grupos SET seccion = ? WHERE id = ? AND user_id = ?").run(seccion || '', grupoId, userId);
+}
+
+function setGrupoSeccionBulk(userId, grupoIds, seccion) {
+    const stmt = db.prepare("UPDATE grupos SET seccion = ? WHERE id = ? AND user_id = ?");
+    for (const id of grupoIds) {
+        stmt.run(seccion || '', id, userId);
+    }
+}
+
+function getSecciones(userId) {
+    return db.prepare("SELECT DISTINCT seccion FROM grupos WHERE user_id = ? AND seccion != ''").all(userId).map(r => r.seccion);
 }
 
 function eliminarTodosGrupos(userId) {
@@ -1533,6 +1585,37 @@ function limpiarPromoRespuestas(userId) {
     db.prepare("DELETE FROM promo_respuestas WHERE user_id = ?").run(userId);
 }
 
+// --- PROMO PLANTILLAS ---
+function getPromoPlantillas(userId) {
+    return db.prepare("SELECT * FROM promo_plantillas WHERE user_id = ? ORDER BY fecha DESC").all(userId);
+}
+function getPromoPlantilla(id) {
+    return db.prepare("SELECT * FROM promo_plantillas WHERE id = ?").get(id);
+}
+function crearPromoPlantilla(userId, nombre, config) {
+    return db.prepare("INSERT INTO promo_plantillas (user_id, nombre, palabra_aceptar, palabra_rechazar, respuesta_aceptar, respuesta_rechazar, respuesta_aceptar_img, respuesta_rechazar_img, timeout_horas, recordatorio, msg_recordatorio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+        userId, nombre,
+        config.palabra_aceptar || 'si', config.palabra_rechazar || 'no',
+        config.respuesta_aceptar || '', config.respuesta_rechazar || '',
+        config.respuesta_aceptar_img || '', config.respuesta_rechazar_img || '',
+        config.timeout_horas || 24, config.recordatorio ? 1 : 0,
+        config.msg_recordatorio || ''
+    ).lastInsertRowid;
+}
+function editarPromoPlantilla(id, nombre, config) {
+    db.prepare("UPDATE promo_plantillas SET nombre = ?, palabra_aceptar = ?, palabra_rechazar = ?, respuesta_aceptar = ?, respuesta_rechazar = ?, respuesta_aceptar_img = ?, respuesta_rechazar_img = ?, timeout_horas = ?, recordatorio = ?, msg_recordatorio = ? WHERE id = ?").run(
+        nombre,
+        config.palabra_aceptar || 'si', config.palabra_rechazar || 'no',
+        config.respuesta_aceptar || '', config.respuesta_rechazar || '',
+        config.respuesta_aceptar_img || '', config.respuesta_rechazar_img || '',
+        config.timeout_horas || 24, config.recordatorio ? 1 : 0,
+        config.msg_recordatorio || '', id
+    );
+}
+function eliminarPromoPlantilla(id) {
+    db.prepare("DELETE FROM promo_plantillas WHERE id = ?").run(id);
+}
+
 // --- RETRY QUEUE (Mejora 4) ---
 function agregarRetryQueue(userId, jid, mensaje, imagenPath) {
     db.prepare("INSERT INTO retry_queue (user_id, jid, mensaje, imagen_path) VALUES (?, ?, ?, ?)").run(userId, jid, mensaje, imagenPath || null);
@@ -1689,4 +1772,8 @@ module.exports = {
     cacheGruposSesion, getGruposCacheSesion, limpiarGruposCacheSesion, limpiarTodosGruposCacheUsuario,
     // Bot logs (Mejora 6)
     agregarLog, getLogs, limpiarLogs,
+    // Grupo secciones
+    setGrupoSeccion, setGrupoSeccionBulk, getSecciones,
+    // Promo plantillas
+    getPromoPlantillas, getPromoPlantilla, crearPromoPlantilla, editarPromoPlantilla, eliminarPromoPlantilla,
 };
