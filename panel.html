@@ -3217,19 +3217,19 @@ async function agregarBlacklistNumero(){
   const num=$('inputBlacklistNumero')?.value?.trim();
   const razon=$('inputBlacklistNumeroRazon')?.value?.trim();
   if(!num){toast('Escribe un numero','error');return}
-  await api('/api/blacklist_numeros',{u:userId,accion:'agregar',numero:num,razon});
+  await api('/api/blacklist_numeros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'agregar',numero:num,razon})});
   $('inputBlacklistNumero').value='';
   $('inputBlacklistNumeroRazon').value='';
   toast('Numero bloqueado');
   loadListaNegraNumeros();
 }
 async function elimBlNum(id){
-  await api('/api/blacklist_numeros',{u:userId,accion:'eliminar',id});
+  await api('/api/blacklist_numeros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'eliminar',id})});
   toast('Numero desbloqueado');
   loadListaNegraNumeros();
 }
 async function confLimpBLNum(){
-  await api('/api/blacklist_numeros',{u:userId,accion:'limpiar'});
+  await api('/api/blacklist_numeros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'limpiar'})});
   toast('Lista negra limpiada');
   loadListaNegraNumeros();
 }
@@ -3239,7 +3239,7 @@ async function verificarNumeroWsp(){
   $('verificarResult').style.display='block';
   $('verificarResult').innerHTML='<span class="spinner" style="display:inline-block"></span> Verificando...';
   try{
-    const r=await api('/api/verificar_whatsapp',{u:userId,numero:num});
+    const r=await api('/api/verificar_whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,numero:num})});
     if(r.ok){
       $('verificarResult').innerHTML=r.existe?
         '<span style="color:var(--success)">✅ El numero <b>'+esc(num)+'</b> TIENE WhatsApp (JID: '+esc(r.jid||'')+')</span>':
@@ -3323,7 +3323,7 @@ async function crearProgramadoMiembros(){
   const bs=parseInt($('emBatchSize')?.value)||0;
   const dm=parseInt($('emDelayMinutes')?.value)||5;
   const grupoNombre=$('emGrupo')?.selectedOptions[0]?.text||grupo;
-  await api('/api/programados_miembros',{u:userId,accion:'crear',grupo,grupo_nombre:grupoNombre,mensaje:msg,cuenta,hora_envio:hora,dias_semana:diasSel,country_code:cc,admin_filter:af,batch_size:bs,delay_minutes:dm});
+  await api('/api/programados_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'crear',grupo,grupo_nombre:grupoNombre,mensaje:msg,cuenta,hora_envio:hora,dias_semana:diasSel,country_code:cc,admin_filter:af,batch_size:bs,delay_minutes:dm})});
   toast('Envio programado creado');
   loadProgramadosMiembros();
 }
@@ -3345,8 +3345,8 @@ async function loadProgramadosMiembros(){
   h+='</tbody></table></div>';
   $('programadosMiembrosContent').innerHTML=h;
 }
-async function toggleProgMiembros(id){await api('/api/programados_miembros',{u:userId,accion:'toggle',id});loadProgramadosMiembros();}
-async function elimProgMiembros(id){await api('/api/programados_miembros',{u:userId,accion:'eliminar',id});toast('Eliminado');loadProgramadosMiembros();}
+async function toggleProgMiembros(id){await api('/api/programados_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'toggle',id})});loadProgramadosMiembros();}
+async function elimProgMiembros(id){await api('/api/programados_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'eliminar',id})});toast('Eliminado');loadProgramadosMiembros();}
 
 // --- ACTIVIDAD ---
 async function loadActividad(){
