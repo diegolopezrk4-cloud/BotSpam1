@@ -269,7 +269,7 @@ poll();
             if (url.pathname === "/api/grupos/add" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.u || !body.link) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o link" })); }
-                db.agregarGrupo(body.u, body.link, body.nombre || null);
+                db.agregarGrupo(body.u, body.link, body.nombre || null, body.size || 0);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
@@ -296,6 +296,23 @@ poll();
                 db.eliminarTodosGrupos(body.u);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/grupos/seccion — Asignar seccion a grupos { u, ids: [int], seccion: string }
+            if (url.pathname === "/api/grupos/seccion" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.ids) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o ids" })); }
+                db.setGrupoSeccionBulk(body.u, body.ids, body.seccion || '');
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/grupos/secciones?u=USER_ID — Lista de secciones
+            if (url.pathname === "/api/grupos/secciones" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, secciones: db.getSecciones(userId) }));
             }
 
             // GET /api/sesiones?u=USER_ID — Cuentas WSP vinculadas
@@ -609,7 +626,7 @@ poll();
                 if (!sock) sock = botSock;
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 try {
-                    const started = await motor.enviarAPersonales(userId, mensaje, imagenPath, sock);
+                    const started = await motor.enviarAPersonales(userId, mensaje, imagenPath, sock, body.cuenta);
                     if (started) db.agregarLog(userId, 'envio', 'Envio personal iniciado');
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
@@ -660,6 +677,46 @@ poll();
                 const body = await readBody();
                 if (!body.telegram_id || !body.old_password || !body.new_password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id, old_password o new_password" })); }
                 const r = db.panelCambiarPassword(body.telegram_id, body.old_password, body.new_password);
+                res.writeHead(200);
+                return res.end(JSON.stringify(r));
+            }
+            if (url.pathname === "/api/panel_recuperar_solicitar" && req.method === "POST") {
+                const body = await readBody();
+                const tid = String(body.telegram_id || "").trim();
+                if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Ingresa tu ID de Telegram" })); }
+                const panelUser = db.getPanelUser(tid);
+                if (!panelUser) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "No existe una cuenta con ese ID. Registrate primero." })); }
+                const code = db.crearRecoveryCode(tid);
+                // Send code via TG bot (port 3002)
+                try {
+                    const http = require("http");
+                    const payload = JSON.stringify({ telegram_id: tid, code });
+                    const tgReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/send_recovery", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } }, (tgRes) => {
+                        let d = "";
+                        tgRes.on("data", c => d += c);
+                        tgRes.on("end", () => {
+                            try {
+                                const r = JSON.parse(d);
+                                if (r.ok) { res.writeHead(200); res.end(JSON.stringify({ ok: true, msg: "Codigo enviado a tu Telegram" })); }
+                                else { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: r.error || "No se pudo enviar el codigo. Inicia el bot primero." })); }
+                            } catch(_) { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Error al enviar codigo" })); }
+                        });
+                    });
+                    tgReq.on("error", () => { if (!res.writableEnded) { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Bot de Telegram no disponible" })); } });
+                    tgReq.setTimeout(10000, () => { tgReq.destroy(); if (!res.writableEnded) { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Bot de Telegram no responde" })); } });
+                    tgReq.write(payload);
+                    tgReq.end();
+                } catch(e) { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Error interno: " + e.message })); }
+                return;
+            }
+            if (url.pathname === "/api/panel_recuperar_reset" && req.method === "POST") {
+                const body = await readBody();
+                const tid = String(body.telegram_id || "").trim();
+                const code = String(body.code || "").trim();
+                const newPass = body.new_password || "";
+                if (!tid || !code || !newPass) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan datos" })); }
+                if (newPass.length < 4) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "La contrasena debe tener minimo 4 caracteres" })); }
+                const r = db.panelResetPassword(tid, code, newPass);
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
             }
@@ -1158,7 +1215,8 @@ poll();
             // ─── AGREGAR MIEMBROS A GRUPO ───
             if (url.pathname === "/api/agregar_miembros" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.u || !body.origen || !body.destino) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, origen o destino" })); }
+                if (!body.u || !body.destino) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o destino" })); }
+                if (!body.origen && !body.numeros) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta origen o numeros" })); }
                 try {
                     let sock;
                     if (body.cuenta) {
@@ -1168,21 +1226,32 @@ poll();
                     } else {
                         res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
                     }
-                    const meta = await sock.groupMetadata(body.origen);
-                    // Use p.jid (phone JID) — p.id may be @lid which groupParticipantsUpdate can't handle
-                    const jids = (meta.participants || []).map(p => {
-                        let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
-                        if (jid && jid.includes(":") && jid.endsWith("@s.whatsapp.net")) {
-                            jid = jid.split(":")[0] + "@s.whatsapp.net";
-                        }
-                        return jid;
-                    }).filter(jid => jid && jid.endsWith("@s.whatsapp.net"));
+                    let jids;
+                    if (body.numeros && Array.isArray(body.numeros)) {
+                        // From uploaded list of numbers
+                        jids = body.numeros.map(n => {
+                            const num = String(n).replace(/[^0-9]/g, "");
+                            return num ? num + "@s.whatsapp.net" : null;
+                        }).filter(Boolean);
+                    } else {
+                        // From source group
+                        const meta = await sock.groupMetadata(body.origen);
+                        // Use p.jid (phone JID) — p.id may be @lid which groupParticipantsUpdate can't handle
+                        jids = (meta.participants || []).map(p => {
+                            let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
+                            if (jid && jid.includes(":") && jid.endsWith("@s.whatsapp.net")) {
+                                jid = jid.split(":")[0] + "@s.whatsapp.net";
+                            }
+                            return jid;
+                        }).filter(jid => jid && jid.endsWith("@s.whatsapp.net"));
+                    }
+                    if (!jids.length) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "No se encontraron numeros validos" })); }
                     res.writeHead(200);
                     res.end(JSON.stringify({ ok: true, total: jids.length, message: "Agregando miembros en segundo plano..." }));
                     // Run in background — add with moderate delays to avoid WhatsApp disconnection
                     let agregados = 0, fallidos = 0;
-                    const BATCH_SIZE = 5; // 5 members per batch
-                    const DELAY_BETWEEN_BATCHES = 45000; // 45s pause between batches
+                    const BATCH_SIZE = parseInt(body.batch_size) || 5;
+                    const DELAY_BETWEEN_BATCHES = body.delay_minutes ? parseInt(body.delay_minutes) * 60 * 1000 : 45000;
                     const DELAY_AFTER_ERROR = 45000; // 45s pause after any error
                     // Initial delay before starting to add (let connection stabilize)
                     console.log(`[agregar_miembros] Iniciando en 3s... (${jids.length} miembros por agregar)`);
@@ -1753,7 +1822,7 @@ poll();
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, message: `promo enviada a ${jids.length} miembros y escucha activada`, total: jids.length, grupo_nombre: grupoNombre }));
                 } else {
-                    const started = await motor.enviarAPersonales(body.u, body.mensaje, imagenPath, sock);
+                    const started = await motor.enviarAPersonales(body.u, body.mensaje, imagenPath, sock, body.cuenta);
                     db.agregarLog(body.u, 'promo', 'Promo enviada + escucha activada');
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: started, message: started ? "promo enviada y escucha activada" : "ya hay un envio activo" }));
@@ -1794,6 +1863,35 @@ poll();
                 const body = await readBody();
                 if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 db.limpiarPromoKeywords(body.u);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── PROMO PLANTILLAS ───
+            if (url.pathname === "/api/promo/plantillas" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, plantillas: db.getPromoPlantillas(userId) }));
+            }
+            if (url.pathname === "/api/promo/plantillas/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                const id = db.crearPromoPlantilla(body.u, body.nombre, body);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id }));
+            }
+            if (url.pathname === "/api/promo/plantillas/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id o nombre" })); }
+                db.editarPromoPlantilla(body.id, body.nombre, body);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/promo/plantillas/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.eliminarPromoPlantilla(body.id);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }

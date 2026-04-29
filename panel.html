@@ -343,6 +343,46 @@ table tr:hover { background: rgba(108,92,231,0.05); }
   </div>
 </div>
 
+<!-- AUTH: RECOVERY -->
+<div class="auth-container" id="authRecovery" style="display:none">
+  <div class="auth-card" style="max-width:500px">
+    <div class="logo">🔐</div>
+    <h1>Recuperar Contrasena</h1>
+    <!-- Step 1: Enter Telegram ID -->
+    <div id="recoverStep1">
+      <p class="subtitle">Ingresa tu ID de Telegram para recibir un codigo de recuperacion</p>
+      <div class="tg-id-help" id="recoverIdHelp">
+        <h4>📌 Como obtener tu ID de Telegram</h4>
+        <ol>
+          <li>Abre Telegram y busca el bot: <a href="https://t.me/BotSpamJM_bot" target="_blank">@BotSpamJM_bot</a></li>
+          <li>Inicia el bot con /start y usa el comando /me para obtener tu <b>ID numerico</b></li>
+        </ol>
+      </div>
+      <input type="text" id="recoverId" placeholder="Tu ID de Telegram (numerico)" autocomplete="off">
+      <button class="btn-main" onclick="doRecoverRequest()" id="btnRecoverRequest">Enviar Codigo</button>
+      <p style="color:var(--text2);font-size:12px;margin-top:10px">Se enviara un codigo unico a tu Telegram via el bot</p>
+    </div>
+    <!-- Step 2: Enter code + new password -->
+    <div id="recoverStep2" style="display:none">
+      <p class="subtitle">Ingresa el codigo que recibiste en Telegram y tu nueva contrasena</p>
+      <p style="color:var(--accent2);font-size:13px;margin-bottom:12px">📨 Codigo enviado al ID: <b id="recoverIdDisplay"></b></p>
+      <input type="text" id="recoverCode" placeholder="Codigo de 6 digitos" autocomplete="off" maxlength="6" style="text-align:center;font-size:20px;letter-spacing:8px">
+      <input type="password" id="recoverNewPass" placeholder="Nueva contrasena">
+      <input type="password" id="recoverNewPass2" placeholder="Confirmar nueva contrasena">
+      <ul class="password-rules">
+        <li>Minimo 4 caracteres</li>
+        <li>El codigo expira en 10 minutos</li>
+      </ul>
+      <button class="btn-main" onclick="doRecoverReset()" id="btnRecoverReset">Cambiar Contrasena</button>
+      <div style="margin-top:8px"><button class="link-btn" onclick="doRecoverRequest()" style="font-size:12px">Reenviar codigo</button></div>
+    </div>
+    <div class="divider"></div>
+    <button class="link-btn" onclick="showLogin()">Volver al Login</button>
+    <div class="auth-error" id="recoverError"></div>
+    <div class="auth-success" id="recoverSuccess"></div>
+  </div>
+</div>
+
 <!-- APP -->
 <div class="app" id="app">
   <div class="hamburger" onclick="toggleSidebar()">☰</div>
@@ -368,7 +408,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="grupos" data-plat="wsp"><span class="icon">🌐</span><span>Grupos</span></a>
       <a href="#" data-section="tggrupos" data-plat="tg"><span class="icon">🌐</span><span>Grupos TG</span></a>
       <div class="nav-group" data-plat="wsp">Mensajeria WSP</div>
-      <a href="#" data-section="mensajes" data-plat="wsp"><span class="icon">✉</span><span>Mensajes</span></a>
+      <a href="#" data-section="mensajes" data-plat="wsp"><span class="icon">✉</span><span>Mensajes y Plantillas</span></a>
       <a href="#" data-section="envios" data-plat="wsp"><span class="icon">📤</span><span>Envio Unico</span></a>
       <a href="#" data-section="enviopersonal" data-plat="wsp"><span class="icon">💬</span><span>Envio Personal</span></a>
       <a href="#" data-section="enviomiembros" data-plat="wsp"><span class="icon">👥</span><span>Envio a Miembros</span></a>
@@ -383,23 +423,20 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="tgdetectar" data-plat="tg"><span class="icon">🔍</span><span>Detectar Grupos TG</span></a>
       <a href="#" data-section="tgstats" data-plat="tg"><span class="icon">📈</span><span>Stats TG</span></a>
       <div class="nav-group">Herramientas</div>
-      <a href="#" data-section="plantillas"><span class="icon">📋</span><span>Plantillas</span></a>
       <a href="#" data-section="historial" data-plat="wsp"><span class="icon">📜</span><span>Historial WSP</span></a>
-      <a href="#" data-section="dmdashboard" data-plat="wsp"><span class="icon">📊</span><span>Dashboard DMs</span></a>
       <div class="nav-group" data-plat="wsp">Monitoreo</div>
       <a href="#" data-section="logs" data-plat="wsp"><span class="icon">📋</span><span>Logs del Bot</span></a>
       <a href="#" data-section="retry" data-plat="wsp"><span class="icon">🔄</span><span>Cola de Reintentos</span></a>
       <div class="nav-group" data-plat="wsp">Config WSP</div>
       <a href="#" data-section="config" data-plat="wsp"><span class="icon">⚙</span><span>Config Envio</span></a>
-      <a href="#" data-section="listanegra" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra Grupos</span></a>
-      <a href="#" data-section="listanegranumeros" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra Numeros</span></a>
+      <a href="#" data-section="listanegra" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra</span></a>
       <a href="#" data-section="autoresp" data-plat="wsp"><span class="icon">🤖</span><span>Auto-Responder</span></a>
       <div class="nav-group" data-plat="tg">Config TG</div>
       <a href="#" data-section="tgautoresp" data-plat="tg"><span class="icon">🤖</span><span>Auto-Responder TG</span></a>
       <a href="#" data-section="tgconfig" data-plat="tg"><span class="icon">⚙</span><span>Config Envio TG</span></a>
       <a href="#" data-section="tglistanegra" data-plat="tg"><span class="icon">🚫</span><span>Lista Negra TG</span></a>
       <div class="nav-group">General</div>
-      <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas</span></a>
+      <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas y DMs</span></a>
       <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
       <div class="nav-group admin-only" style="display:none">Admin</div>
       <a href="#" data-section="admin" class="admin-only" style="display:none"><span class="icon">👑</span><span>Admin Panel</span></a>
@@ -516,15 +553,47 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <button class="btn btn-outline" onclick="loadGrupos()">🔄 Refrescar</button>
         </div>
       </div>
+      <!-- Barra de busqueda, filtros y acciones -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:15px">
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:180px">
+          <label>🔍 Buscar grupo</label>
+          <input type="text" id="gruposBuscar" placeholder="Buscar por nombre..." oninput="filtrarGruposPanel()">
+        </div>
+        <div class="form-group" style="margin-bottom:0;min-width:150px">
+          <label>📂 Seccion</label>
+          <select id="gruposSeccionFiltro" onchange="filtrarGruposPanel()"><option value="">Todas</option></select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;min-width:130px">
+          <label>↕ Ordenar</label>
+          <select id="gruposOrden" onchange="filtrarGruposPanel()">
+            <option value="nombre">Nombre A-Z</option>
+            <option value="nombre_desc">Nombre Z-A</option>
+            <option value="miembros">Mas miembros</option>
+            <option value="miembros_asc">Menos miembros</option>
+          </select>
+        </div>
+        <button class="btn btn-danger" onclick="eliminarTodosGruposPanel()" title="Eliminar todos los grupos">🗑 Eliminar Todos</button>
+        <button class="btn btn-primary" onclick="showAsignarSeccion()" title="Asignar seccion a grupos seleccionados">📂 Asignar Seccion</button>
+      </div>
       <div id="gruposContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
-    <!-- MENSAJES -->
+    <!-- MENSAJES Y PLANTILLAS (consolidado) -->
     <div class="section" id="sec-mensajes">
-      <h2>✉ Mensajes</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Crea y administra tus mensajes. Estos mensajes se usan para enviarlos a grupos con Envio Unico o con Campanas. Puedes incluir texto e imagenes.</p>
-      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearMensaje()">➕ Crear Mensaje</button></div>
-      <div id="mensajesContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      <h2>✉ Mensajes y Plantillas</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Crea y administra tus mensajes para envios y campanas. Guarda plantillas reutilizables para agilizar tu trabajo.</p>
+      <div style="display:flex;gap:5px;margin-bottom:15px">
+        <button class="btn btn-primary" id="tabMensajes" onclick="switchMsgTab('mensajes')" style="opacity:1">✉ Mensajes</button>
+        <button class="btn" id="tabPlantillas" onclick="switchMsgTab('plantillas')" style="opacity:0.6">📋 Plantillas</button>
+      </div>
+      <div id="msgTabMensajes">
+        <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearMensaje()">➕ Crear Mensaje</button></div>
+        <div id="mensajesContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
+      <div id="msgTabPlantillas" style="display:none">
+        <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearPlantilla()">➕ Nueva Plantilla</button></div>
+        <div id="plantillasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
     </div>
 
     <!-- ENVIOS -->
@@ -561,16 +630,39 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div id="configContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
-    <!-- LISTA NEGRA -->
+    <!-- LISTA NEGRA (consolidado: grupos + numeros) -->
     <div class="section" id="sec-listanegra">
-      <h2>🚫 Lista Negra de Grupos</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Agrega grupos a la lista negra para que el bot no envie mensajes a ellos. Util cuando quieres excluir ciertos grupos de tus envios masivos o campanas.</p>
-      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
-        <input type="text" id="inputBlacklist" placeholder="Numero (ej: 51999888777)" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;flex:1;min-width:200px">
-        <button class="btn btn-danger" onclick="agregarBlacklist()">🚫 Bloquear</button>
-        <button class="btn btn-outline" onclick="limpiarBlacklist()">🗑 Limpiar</button>
+      <h2>🚫 Lista Negra</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Excluye grupos y numeros de tus envios masivos, campanas y DMs.</p>
+      <div style="display:flex;gap:5px;margin-bottom:15px">
+        <button class="btn btn-primary" id="tabBLGrupos" onclick="switchBlacklistTab('grupos')" style="opacity:1">👥 Grupos</button>
+        <button class="btn" id="tabBLNumeros" onclick="switchBlacklistTab('numeros')" style="opacity:0.6">📱 Numeros</button>
       </div>
-      <div id="listaNegraContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      <div id="blTabGrupos">
+        <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+          <input type="text" id="inputBlacklist" placeholder="Numero (ej: 51999888777)" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;flex:1;min-width:200px">
+          <button class="btn btn-danger" onclick="agregarBlacklist()">🚫 Bloquear</button>
+          <button class="btn btn-outline" onclick="limpiarBlacklist()">🗑 Limpiar</button>
+        </div>
+        <div id="listaNegraContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
+      <div id="blTabNumeros" style="display:none">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:15px">
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+            <label>Numero (ej: 51987654321)</label>
+            <input type="text" id="inputBlacklistNumero" placeholder="Numero sin + ni espacios">
+          </div>
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
+            <label>Razon (opcional)</label>
+            <input type="text" id="inputBlacklistNumeroRazon" placeholder="Razon">
+          </div>
+          <button class="btn btn-danger" onclick="agregarBlacklistNumero()">🚫 Bloquear</button>
+          <button class="btn btn-primary" onclick="verificarNumeroWsp()">🔍 Verificar WSP</button>
+        </div>
+        <div id="verificarResult" style="display:none;padding:10px;background:var(--bg3);border-radius:8px;margin-bottom:15px;font-size:13px"></div>
+        <div style="margin-bottom:10px"><button class="btn btn-danger" onclick="limpiarBlacklistNumeros()">🗑 Limpiar Todo</button></div>
+        <div id="blacklistNumerosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
     </div>
 
     <!-- AUTO RESPONDER -->
@@ -655,6 +747,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         </div>
         <span id="emPaisCount" style="color:var(--text2);font-size:13px"></span>
         <button class="btn btn-success" onclick="exportarMiembrosCSV()">📥 Exportar CSV</button>
+        <button class="btn btn-primary" onclick="exportarMiembrosTXT()">📄 Exportar TXT</button>
       </div>
       <div class="form-group">
         <label>Mensaje DM (dejar vacio si solo quieres agregar miembros)</label>
@@ -682,6 +775,27 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-success" onclick="enviarAMiembros()">📤 Enviar DM a Miembros</button>
         <button class="btn btn-primary" onclick="agregarMiembrosAGrupo()">➕ Agregar Miembros al Grupo Destino</button>
         <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Detener Envio</button>
+      </div>
+      <!-- Agregar miembros desde archivo TXT -->
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
+        <h4 style="margin:0 0 10px 0">📋 Agregar Miembros desde Lista</h4>
+        <p style="color:var(--text2);font-size:12px;margin-bottom:10px">Sube un archivo .txt con numeros (uno por linea) para agregarlos a un grupo donde eres admin.</p>
+        <div class="form-group" style="margin-bottom:10px">
+          <label>Archivo .txt con numeros</label>
+          <input type="file" id="emTxtFile" accept=".txt,.csv">
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div class="form-group" style="margin:0">
+            <label>Personas por lote</label>
+            <input type="number" id="emAddBatchSize" placeholder="30" min="1" value="30">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Minutos entre lotes</label>
+            <input type="number" id="emAddDelayMinutes" placeholder="5" min="1" value="5">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="agregarMiembrosDesdeArchivo()">➕ Agregar al Grupo Destino desde Archivo</button>
+        <div id="emAddFileInfo" style="color:var(--text2);font-size:12px;margin-top:8px"></div>
       </div>
       <div id="resumeBar" style="display:none;background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent2);align-items:center;gap:10px;flex-wrap:wrap">
         <span style="color:var(--accent2);font-weight:bold">🔄 Envio pendiente:</span>
@@ -740,6 +854,22 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="section" id="sec-enviointeractivo">
       <h2>📨 Envio Interactivo (Promo)</h2>
       <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia una promocion y el bot espera la respuesta de los clientes. Puedes enviar la promo directamente desde aqui (todo en uno) o activar solo la escucha y usar otros metodos de envio. Te notifica cuando aceptan o rechazan.</p>
+
+      <!-- Plantillas de Promocion -->
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent2)">
+        <h3 style="margin-bottom:10px;color:var(--accent2)">📋 Plantillas de Promocion</h3>
+        <p style="color:var(--text2);font-size:12px;margin-bottom:10px">Guarda configuraciones de escucha para diferentes promociones y cargalas rapidamente.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+            <select id="promoPlantillaSelect" onchange="cargarPlantillaPromo()">
+              <option value="">-- Seleccionar plantilla --</option>
+            </select>
+          </div>
+          <button class="btn btn-success" onclick="guardarPlantillaPromo()">💾 Guardar Actual</button>
+          <button class="btn btn-danger btn-sm" onclick="eliminarPlantillaPromo()">🗑</button>
+        </div>
+        <div id="promoPlantillasLista" style="margin-top:10px"></div>
+      </div>
 
       <!-- Estadisticas en tiempo real (Mejora 2) -->
       <div id="promoStatsBar" style="display:flex;gap:15px;flex-wrap:wrap;margin-bottom:15px">
@@ -945,10 +1075,19 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 
     <!-- STATS -->
     <div class="section" id="sec-stats">
-      <h2>📈 Estadisticas por Grupo</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Ve las estadisticas detalladas de envios por cada grupo: cuantos mensajes se enviaron, cuantos fallaron y la tasa de exito. Exporta los datos a CSV.</p>
-      <div style="margin-bottom:15px"><button class="btn btn-success" onclick="exportarStatsCSV()">📥 Exportar CSV</button></div>
-      <div id="statsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      <h2>📈 Estadisticas y DMs</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Estadisticas detalladas de envios a grupos y DMs a miembros.</p>
+      <div style="display:flex;gap:5px;margin-bottom:15px">
+        <button class="btn btn-primary" id="tabStatsGrupos" onclick="switchStatsTab('grupos')" style="opacity:1">👥 Estadisticas Grupos</button>
+        <button class="btn" id="tabStatsDMs" onclick="switchStatsTab('dms')" style="opacity:0.6">💬 Dashboard DMs</button>
+      </div>
+      <div id="statsTabGrupos">
+        <div style="margin-bottom:15px"><button class="btn btn-success" onclick="exportarStatsCSV()">📥 Exportar CSV</button></div>
+        <div id="statsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
+      <div id="statsTabDMs" style="display:none">
+        <div id="dmDashboardContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
     </div>
 
     <!-- ADMIN -->
@@ -1151,13 +1290,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div class="grid" id="tgStatsCards"></div>
     </div>
 
-    <!-- PLANTILLAS -->
-    <div class="section" id="sec-plantillas">
-      <h2>📋 Plantillas de Mensajes</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Guarda mensajes frecuentes para reutilizarlos rapido.</p>
-      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearPlantilla()">➕ Nueva Plantilla</button></div>
-      <div id="plantillasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
-    </div>
+    <!-- PLANTILLAS (ahora integrado en sec-mensajes) -->
 
     <!-- HISTORIAL -->
     <div class="section" id="sec-historial">
@@ -1194,33 +1327,9 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div id="historialContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
-    <!-- DM DASHBOARD -->
-    <div class="section" id="sec-dmdashboard">
-      <h2>📊 Dashboard de DMs</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Estadisticas de envios a miembros (DMs directos).</p>
-      <div id="dmDashboardContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
-    </div>
+    <!-- DM DASHBOARD (ahora integrado en sec-stats) -->
 
-    <!-- BLACKLIST NUMEROS -->
-    <div class="section" id="sec-listanegranumeros">
-      <h2>🚫 Lista Negra de Numeros</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Bloquea numeros individuales para que no reciban DMs.</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:15px">
-        <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
-          <label>Numero (ej: 51987654321)</label>
-          <input type="text" id="inputBlacklistNumero" placeholder="Numero sin + ni espacios">
-        </div>
-        <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
-          <label>Razon (opcional)</label>
-          <input type="text" id="inputBlacklistNumeroRazon" placeholder="Razon">
-        </div>
-        <button class="btn btn-danger" onclick="agregarBlacklistNumero()">🚫 Bloquear</button>
-        <button class="btn btn-primary" onclick="verificarNumeroWsp()">🔍 Verificar WSP</button>
-      </div>
-      <div id="verificarResult" style="display:none;padding:10px;background:var(--bg3);border-radius:8px;margin-bottom:15px;font-size:13px"></div>
-      <div style="margin-bottom:10px"><button class="btn btn-danger" onclick="limpiarBlacklistNumeros()">🗑 Limpiar Todo</button></div>
-      <div id="blacklistNumerosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
-    </div>
+    <!-- BLACKLIST NUMEROS (ahora integrado en sec-listanegra) -->
 
     <!-- ACTIVIDAD -->
     <div class="section" id="sec-actividad">
@@ -1300,7 +1409,7 @@ function selectPlatform(p){
   $('authLogin').style.display='flex';
 }
 function showPlatformSelector(){
-  $('authLogin').style.display='none';$('authRegister').style.display='none';
+  $('authLogin').style.display='none';$('authRegister').style.display='none';$('authRecovery').style.display='none';
   $('platformSelector').style.display='flex';
 }
 
@@ -1339,19 +1448,70 @@ function initPlatformSwitch(){
   });
 }
 
+// --- TAB SWITCHING (consolidated sections) ---
+function switchMsgTab(tab){
+  $('msgTabMensajes').style.display=tab==='mensajes'?'':'none';
+  $('msgTabPlantillas').style.display=tab==='plantillas'?'':'none';
+  $('tabMensajes').style.opacity=tab==='mensajes'?'1':'0.6';
+  $('tabMensajes').className=tab==='mensajes'?'btn btn-primary':'btn';
+  $('tabPlantillas').style.opacity=tab==='plantillas'?'1':'0.6';
+  $('tabPlantillas').className=tab==='plantillas'?'btn btn-primary':'btn';
+}
+function switchBlacklistTab(tab){
+  $('blTabGrupos').style.display=tab==='grupos'?'':'none';
+  $('blTabNumeros').style.display=tab==='numeros'?'':'none';
+  $('tabBLGrupos').style.opacity=tab==='grupos'?'1':'0.6';
+  $('tabBLGrupos').className=tab==='grupos'?'btn btn-primary':'btn';
+  $('tabBLNumeros').style.opacity=tab==='numeros'?'1':'0.6';
+  $('tabBLNumeros').className=tab==='numeros'?'btn btn-primary':'btn';
+}
+function switchStatsTab(tab){
+  $('statsTabGrupos').style.display=tab==='grupos'?'':'none';
+  $('statsTabDMs').style.display=tab==='dms'?'':'none';
+  $('tabStatsGrupos').style.opacity=tab==='grupos'?'1':'0.6';
+  $('tabStatsGrupos').className=tab==='grupos'?'btn btn-primary':'btn';
+  $('tabStatsDMs').style.opacity=tab==='dms'?'1':'0.6';
+  $('tabStatsDMs').className=tab==='dms'?'btn btn-primary':'btn';
+}
+
 // --- AUTH ---
-function showLogin(){$('authLogin').style.display='flex';$('authRegister').style.display='none';$('platformSelector').style.display='none'}
-function showRegister(){$('authLogin').style.display='none';$('authRegister').style.display='flex';$('platformSelector').style.display='none'}
+function showLogin(){$('authLogin').style.display='flex';$('authRegister').style.display='none';$('platformSelector').style.display='none';$('authRecovery').style.display='none'}
+function showRegister(){$('authLogin').style.display='none';$('authRegister').style.display='flex';$('platformSelector').style.display='none';$('authRecovery').style.display='none'}
+let _recoverId='';
 function showForgot(){
-  showModal(`<h3>🔑 Recuperar Contrasena</h3>
-    <p style="color:var(--text2);font-size:14px;line-height:1.6;margin-bottom:15px">
-      Para recuperar tu contrasena, ve al <b>bot de Telegram</b> y escribe:<br><br>
-      <code style="background:var(--bg);padding:6px 12px;border-radius:6px;font-size:15px;color:var(--accent2)">/recuperpass</code><br><br>
-      El bot te dara un <b>codigo unico de un solo uso</b>.<br>
-      Luego escribe: <code style="background:var(--bg);padding:4px 8px;border-radius:4px;font-size:13px">/recuperpass CODIGO</code><br>
-      y podras poner tu nueva contrasena.
-    </p>
-    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Entendido</button></div>`);
+  $('authLogin').style.display='none';$('authRegister').style.display='none';$('platformSelector').style.display='none';
+  $('authRecovery').style.display='flex';
+  $('recoverStep1').style.display='block';$('recoverStep2').style.display='none';
+  hideMsg('recoverError');hideMsg('recoverSuccess');
+  if($('loginId').value.trim())$('recoverId').value=$('loginId').value.trim();
+}
+async function doRecoverRequest(){
+  const id=($('recoverId').value||'').trim();
+  hideMsg('recoverError');hideMsg('recoverSuccess');
+  if(!id){showErr('recoverError','Ingresa tu ID de Telegram');return}
+  _recoverId=id;
+  $('btnRecoverRequest').disabled=true;$('btnRecoverRequest').textContent='Enviando...';
+  const r=await api('/api/panel_recuperar_solicitar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id})});
+  $('btnRecoverRequest').disabled=false;$('btnRecoverRequest').textContent='Enviar Codigo';
+  if(!r.ok){showErr('recoverError',r.error||'Error al enviar codigo');return}
+  $('recoverStep1').style.display='none';$('recoverStep2').style.display='block';
+  $('recoverIdDisplay').textContent=id;
+  toast('Codigo enviado a tu Telegram!','success');
+}
+async function doRecoverReset(){
+  const code=($('recoverCode').value||'').trim();
+  const p1=$('recoverNewPass').value,p2=$('recoverNewPass2').value;
+  hideMsg('recoverError');hideMsg('recoverSuccess');
+  if(!code){showErr('recoverError','Ingresa el codigo');return}
+  if(!p1){showErr('recoverError','Ingresa tu nueva contrasena');return}
+  if(p1.length<4){showErr('recoverError','La contrasena debe tener minimo 4 caracteres');return}
+  if(p1!==p2){showErr('recoverError','Las contrasenas no coinciden');return}
+  $('btnRecoverReset').disabled=true;$('btnRecoverReset').textContent='Cambiando...';
+  const r=await api('/api/panel_recuperar_reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:_recoverId,code,new_password:p1})});
+  $('btnRecoverReset').disabled=false;$('btnRecoverReset').textContent='Cambiar Contrasena';
+  if(!r.ok){showErr('recoverError',r.error||'Error');return}
+  showMsg('recoverSuccess','Contrasena cambiada! Ahora inicia sesion.');
+  setTimeout(()=>{showLogin();$('loginId').value=_recoverId},2500);
 }
 
 let esAdmin=false;
@@ -1398,7 +1558,7 @@ function showMsg(id,msg){const el=$(id);el.style.display='block';el.textContent=
 function hideMsg(id){$(id).style.display='none'}
 
 async function showApp(){
-  $('authLogin').style.display='none';$('authRegister').style.display='none';$('platformSelector').style.display='none';
+  $('authLogin').style.display='none';$('authRegister').style.display='none';$('platformSelector').style.display='none';$('authRecovery').style.display='none';
   $('app').style.display='block';
   $('sideUserId').textContent=userId;
   if($('tgIdDisplay'))$('tgIdDisplay').textContent=userId;
@@ -1463,7 +1623,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,listanegranumeros:loadListaNegraNumeros,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,dmdashboard:loadDmDashboard,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -1945,6 +2105,7 @@ async function loadTgStats(){
 }
 
 // --- GRUPOS ---
+let _gruposData=[];
 async function loadGrupos(){
   // Populate WSP account selector
   const sel=$('wspDetectCuenta');
@@ -1955,13 +2116,50 @@ async function loadGrupos(){
       sr.sesiones.forEach(s=>{sel.innerHTML+='<option value="'+esc(s.nombre)+'">'+esc(s.nombre)+' ('+esc(s.telefono||'?')+')</option>'});
     }
   }
-  const r=await api('/api/grupos?u='+userId);
+  const [r,secR]=await Promise.all([api('/api/grupos?u='+userId),api('/api/grupos/secciones?u='+userId)]);
   if(!r.ok){$('gruposContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
-  const g=r.grupos||[];
-  if(!g.length){$('gruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos.<br>Usa "Detectar" para buscar.</p></div>';return}
-  let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Link/JID</th><th>Acciones</th></tr></thead><tbody>';
-  g.forEach((x,i)=>{const l=x.link||x.jid||'?';const name=x.nombre||x.subject||'';h+=`<tr><td>${i+1}</td><td><b>${name?esc(name):'<span style="color:var(--text2)">—</span>'}</b></td><td style="font-size:11px;color:var(--text2)">${l.length>50?l.slice(0,50)+'...':l}</td><td><button class="btn btn-danger btn-sm" onclick="eliminarGrupo('${encodeURIComponent(l)}')">🗑</button></td></tr>`});
+  _gruposData=r.grupos||[];
+  // Populate seccion filter
+  const secFiltro=$('gruposSeccionFiltro');
+  if(secFiltro){
+    secFiltro.innerHTML='<option value="">Todas</option>';
+    if(secR.ok&&secR.secciones){secR.secciones.forEach(s=>{secFiltro.innerHTML+='<option value="'+esc(s)+'">'+esc(s)+'</option>'});}
+  }
+  filtrarGruposPanel();
+}
+function filtrarGruposPanel(){
+  const buscar=($('gruposBuscar')?.value||'').toLowerCase();
+  const seccion=$('gruposSeccionFiltro')?.value||'';
+  const orden=$('gruposOrden')?.value||'nombre';
+  let g=[..._gruposData];
+  if(buscar)g=g.filter(x=>(x.nombre||x.subject||x.link||'').toLowerCase().includes(buscar));
+  if(seccion)g=g.filter(x=>(x.seccion||'')==seccion);
+  g.sort((a,b)=>{
+    if(orden==='miembros')return(b.size||0)-(a.size||0);
+    if(orden==='miembros_asc')return(a.size||0)-(b.size||0);
+    if(orden==='nombre_desc')return(b.nombre||b.subject||'').localeCompare(a.nombre||a.subject||'');
+    return(a.nombre||a.subject||'').localeCompare(b.nombre||b.subject||'');
+  });
+  if(!g.length&&!_gruposData.length){$('gruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos.<br>Usa "Detectar" para buscar.</p></div>';return}
+  if(!g.length){$('gruposContent').innerHTML='<div class="empty-state"><p>No hay grupos que coincidan con el filtro.</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+' de '+_gruposData.length+')</h3></div><table><thead><tr><th><input type="checkbox" id="gruposCheckAll" onchange="toggleGruposCheckAll(this)"></th><th>#</th><th>Nombre</th><th>Seccion</th><th>Miembros</th><th>Link/JID</th><th>Acciones</th></tr></thead><tbody>';
+  g.forEach((x,i)=>{const l=x.link||x.jid||'?';const name=x.nombre||x.subject||'';h+=`<tr><td><input type="checkbox" class="grupoCheck" value="${x.id}"></td><td>${i+1}</td><td><b>${name?esc(name):'<span style="color:var(--text2)">—</span>'}</b></td><td style="font-size:11px">${x.seccion?'<span style="background:var(--accent);color:#fff;padding:2px 6px;border-radius:4px;font-size:10px">'+esc(x.seccion)+'</span>':'—'}</td><td style="text-align:center">${x.size||'—'}</td><td style="font-size:11px;color:var(--text2)">${l.length>40?l.slice(0,40)+'...':l}</td><td><button class="btn btn-danger btn-sm" onclick="eliminarGrupo('${encodeURIComponent(l)}')">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('gruposContent').innerHTML=h;
+}
+function toggleGruposCheckAll(el){document.querySelectorAll('.grupoCheck').forEach(c=>c.checked=el.checked)}
+async function eliminarTodosGruposPanel(){
+  if(!requireMembresia())return;
+  if(!confirm('Eliminar TODOS los grupos ('+_gruposData.length+')? Esta accion no se puede deshacer.'))return;
+  const r=await api('/api/grupos/delall',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  toast(r.ok?'Todos los grupos eliminados':'Error',r.ok?'success':'error');loadGrupos();
+}
+async function showAsignarSeccion(){
+  const ids=[...document.querySelectorAll('.grupoCheck:checked')].map(c=>parseInt(c.value));
+  if(!ids.length){toast('Selecciona al menos un grupo','error');return}
+  const seccion=prompt('Nombre de la seccion (dejar vacio para quitar seccion):');
+  if(seccion===null)return;
+  const r=await api('/api/grupos/seccion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,ids,seccion})});
+  toast(r.ok?ids.length+' grupo(s) actualizados':'Error',r.ok?'success':'error');loadGrupos();
 }
 async function eliminarGrupo(l){if(!requireMembresia())return;const r=await api('/api/grupos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:decodeURIComponent(l)})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadGrupos()}
 async function detectarGrupos(){
@@ -2013,7 +2211,7 @@ async function agregarSeleccionadosWSP(){
   let n=0;
   for(const i of indices){
     const x=g[i];if(x&&x.jid){
-      await api('/api/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:x.jid,nombre:x.subject||''})});n++;
+      await api('/api/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:x.jid,nombre:x.subject||'',size:x.size||0})});n++;
     }
   }
   toast(n+' grupos agregados','success');loadGrupos();
@@ -2120,13 +2318,23 @@ async function showEditWspCamp(id){
     html+=`<label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer"><input type="checkbox" class="wspCampSes" value="${esc(s.nombre)}" ${checked}> ${esc(s.nombre)} (${esc(s.telefono||'?')})</label>`;
   });
   html+='</div></div>';
-  // Group selection
-  html+='<div class="form-group"><label>Grupos a spamear <button type="button" class="btn btn-outline btn-sm" style="margin-left:8px;font-size:11px" onclick="document.querySelectorAll(\'.wspCampGrp\').forEach(c=>c.checked=true)">Todos</button> <button type="button" class="btn btn-outline btn-sm" style="font-size:11px" onclick="document.querySelectorAll(\'.wspCampGrp\').forEach(c=>c.checked=false)">Ninguno</button></label>';
-  html+='<div style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:5px">';
+  // Group selection with section filter
+  const secciones=[...new Set(allGrupos.map(g=>g.seccion||'').filter(Boolean))];
+  html+='<div class="form-group"><label>Grupos a spamear</label>';
+  html+='<div style="display:flex;gap:8px;margin:5px 0;flex-wrap:wrap">';
+  if(secciones.length){
+    html+='<select id="wspCampSecFiltro" onchange="filtrarGruposCamp()" style="padding:4px 8px;font-size:12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text)"><option value="">Todas las secciones</option>';
+    secciones.forEach(s=>{html+='<option value="'+esc(s)+'">'+esc(s)+'</option>'});
+    html+='</select>';
+  }
+  html+='<button type="button" class="btn btn-outline btn-sm" style="font-size:11px" onclick="document.querySelectorAll(\'.wspCampGrp\').forEach(c=>{if(c.closest(\'label\').style.display!==\'none\')c.checked=true})">Todos</button>';
+  html+='<button type="button" class="btn btn-outline btn-sm" style="font-size:11px" onclick="document.querySelectorAll(\'.wspCampGrp\').forEach(c=>c.checked=false)">Ninguno</button>';
+  html+='</div>';
+  html+='<div id="wspCampGruposList" style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:5px">';
   allGrupos.forEach((g,i)=>{
     const checked=campGrupos.includes(g.link)?'checked':'';
     const name=g.nombre||g.link;
-    html+=`<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:2px 0"><input type="checkbox" class="wspCampGrp" value="${esc(g.link)}" ${checked}> ${i+1}. ${esc(name.length>40?name.slice(0,40)+'...':name)}</label>`;
+    html+=`<label data-seccion="${esc(g.seccion||'')}" style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:2px 0"><input type="checkbox" class="wspCampGrp" value="${esc(g.link)}" ${checked}> ${i+1}. ${esc(name.length>40?name.slice(0,40)+'...':name)}${g.seccion?' <span style="color:var(--accent);font-size:10px">['+esc(g.seccion)+']</span>':''}</label>`;
   });
   html+='</div></div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:15px">';
@@ -2137,6 +2345,13 @@ async function showEditWspCamp(id){
   html+='<p style="font-size:11px;color:var(--text2);margin-bottom:10px">Envia a cada grupo dejando entre <b>intervalo min</b> y <b>max</b> segundos. Al terminar todos los grupos, pausa <b>X minutos</b> y repite.</p>';
   html+='<div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="editWspCampPanel('+id+')">Guardar</button></div>';
   showModal(html);
+}
+function filtrarGruposCamp(){
+  const sec=document.getElementById('wspCampSecFiltro')?.value||'';
+  document.querySelectorAll('#wspCampGruposList label').forEach(l=>{
+    if(!sec||l.dataset.seccion===sec)l.style.display='';
+    else l.style.display='none';
+  });
 }
 async function editWspCampPanel(id){
   const msg=$('wspCampEditMsg').value.trim();
@@ -2866,6 +3081,58 @@ async function limpiarKeywordsPromo(){
   if(r.ok){toast('Keywords limpiadas','success');loadKeywords()}
 }
 
+// --- PROMO PLANTILLAS ---
+async function loadPromoPlantillas(){
+  const r=await api('/api/promo/plantillas?u='+userId);
+  const sel=$('promoPlantillaSelect');
+  if(!sel)return;
+  sel.innerHTML='<option value="">-- Seleccionar plantilla --</option>';
+  if(r.ok&&r.plantillas){
+    r.plantillas.forEach(p=>{sel.innerHTML+='<option value="'+p.id+'">'+esc(p.nombre)+'</option>'});
+  }
+}
+async function guardarPlantillaPromo(){
+  const nombre=prompt('Nombre para esta plantilla:');
+  if(!nombre)return;
+  const payload={
+    u:userId,nombre,
+    palabra_aceptar:$('promoAceptar')?.value||'si',
+    palabra_rechazar:$('promoRechazar')?.value||'no',
+    respuesta_aceptar:$('promoRespAceptar')?.value||'',
+    respuesta_rechazar:$('promoRespRechazar')?.value||'',
+    timeout_horas:parseInt($('promoTimeout')?.value)||24,
+    recordatorio:$('promoRecordatorio')?.checked?1:0,
+    msg_recordatorio:$('promoMsgRecordatorio')?.value||''
+  };
+  const r=await api('/api/promo/plantillas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r.ok){toast('Plantilla "'+nombre+'" guardada','success');loadPromoPlantillas();}
+  else{toast('Error: '+(r.error||''),'error')}
+}
+async function cargarPlantillaPromo(){
+  const id=$('promoPlantillaSelect')?.value;
+  if(!id)return;
+  const r=await api('/api/promo/plantillas?u='+userId);
+  if(!r.ok||!r.plantillas)return;
+  const p=r.plantillas.find(x=>x.id==id);
+  if(!p)return;
+  if($('promoAceptar'))$('promoAceptar').value=p.palabra_aceptar||'si';
+  if($('promoRechazar'))$('promoRechazar').value=p.palabra_rechazar||'no';
+  if($('promoRespAceptar'))$('promoRespAceptar').value=p.respuesta_aceptar||'';
+  if($('promoRespRechazar'))$('promoRespRechazar').value=p.respuesta_rechazar||'';
+  if($('promoTimeout'))$('promoTimeout').value=p.timeout_horas||24;
+  if($('promoRecordatorio'))$('promoRecordatorio').checked=!!p.recordatorio;
+  if($('promoMsgRecordatorio'))$('promoMsgRecordatorio').value=p.msg_recordatorio||'';
+  toast('Plantilla "'+p.nombre+'" cargada','success');
+}
+async function eliminarPlantillaPromo(){
+  const id=$('promoPlantillaSelect')?.value;
+  if(!id){toast('Selecciona una plantilla','error');return}
+  if(!confirm('Eliminar esta plantilla?'))return;
+  const r=await api('/api/promo/plantillas/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:parseInt(id)})});
+  if(r.ok){toast('Plantilla eliminada','success');loadPromoPlantillas();}
+  else{toast('Error','error')}
+}
+
 // Load accounts for promo dropdown
 async function loadPromoCuentas(){
   const r=await api('/api/sesiones?u='+userId);
@@ -3394,6 +3661,44 @@ function exportarMiembrosCSV(){
   const url='/api/exportar_miembros?u='+userId+'&grupo='+encodeURIComponent(grupo)+(cuenta?'&cuenta='+encodeURIComponent(cuenta):'');
   const a=document.createElement('a');a.href=url;a.download='miembros.csv';document.body.appendChild(a);a.click();a.remove();
   toast('Descargando CSV...');
+}
+
+// --- EXPORT MIEMBROS TXT ---
+async function exportarMiembrosTXT(){
+  const grupo=$('emGrupo')?.value;
+  const cuenta=$('emCuenta')?.value;
+  if(!grupo){toast('Selecciona un grupo primero','error');return}
+  const r=await api('/api/miembros_grupo?u='+userId+'&grupo='+encodeURIComponent(grupo)+(cuenta?'&cuenta='+encodeURIComponent(cuenta):''));
+  if(!r.ok||!r.miembros){toast('Error al obtener miembros','error');return}
+  const nums=r.miembros.map(m=>m.numero).filter(n=>n&&n.length>3);
+  if(!nums.length){toast('No se encontraron numeros','error');return}
+  const blob=new Blob([nums.join('\n')],{type:'text/plain'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='miembros_numeros.txt';document.body.appendChild(a);a.click();a.remove();
+  toast(nums.length+' numeros exportados a TXT');
+}
+
+// --- AGREGAR MIEMBROS DESDE ARCHIVO ---
+async function agregarMiembrosDesdeArchivo(){
+  if(!requireMembresia())return;
+  const destino=$('emDestino')?.value;
+  const cuenta=$('emCuenta')?.value;
+  const fileInput=$('emTxtFile');
+  if(!destino){toast('Selecciona un grupo destino primero','error');return}
+  if(!fileInput||!fileInput.files||!fileInput.files[0]){toast('Sube un archivo .txt con numeros','error');return}
+  const file=fileInput.files[0];
+  const text=await file.text();
+  const numeros=text.split(/[\n\r,;]+/).map(n=>n.replace(/[^0-9]/g,'')).filter(n=>n.length>=7);
+  if(!numeros.length){toast('No se encontraron numeros validos en el archivo','error');return}
+  const batchSize=parseInt($('emAddBatchSize')?.value)||30;
+  const delayMin=parseInt($('emAddDelayMinutes')?.value)||5;
+  if(!confirm('Agregar '+numeros.length+' numeros al grupo destino?\n\nLotes de '+batchSize+' personas, pausa de '+delayMin+' min entre lotes.'))return;
+  toast('Agregando '+numeros.length+' miembros...','success');
+  const payload={u:userId,destino,numeros,batch_size:batchSize,delay_minutes:delayMin};
+  if(cuenta)payload.cuenta=cuenta;
+  const r=await api('/api/agregar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r.ok){toast('Agregando '+r.total+' miembros en segundo plano (lotes de '+batchSize+', '+delayMin+' min entre lotes)','success');$('emAddFileInfo').textContent='Agregando '+r.total+' miembros...';}
+  else{toast('Error: '+(r.error||''),'error');}
+  fileInput.value='';
 }
 
 // --- PROGRAMADOS MIEMBROS ---

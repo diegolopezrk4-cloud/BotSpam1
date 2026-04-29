@@ -102,6 +102,9 @@ class PagoState(StatesGroup):
     esperando_codigo_verificacion = State()
 
 
+class RecuperarState(StatesGroup):
+    esperando_nueva_password = State()
+
 class GrupoDetectState(StatesGroup):
     esperando_seleccion_grupos = State()
     esperando_seleccion_grupos_carpeta = State()
@@ -4104,6 +4107,80 @@ async def cmd_grupo_admin(msg: types.Message, command: CommandObject):
         return await msg.answer("❌ Limite entre 1 y 500.")
     await db.set_max_grupos(target_id, limite)
     await msg.answer(f"✅ Limite actualizado:\n👤 {target_id}\n🌐 Max grupos: {limite}")
+
+# ╔══════════════════════════════════════╗
+# ║    RECUPERAR CONTRASENA             ║
+# ╚══════════════════════════════════════╝
+@dp.message(Command("recuperpass"))
+async def cmd_recuperpass(msg: types.Message, state: FSMContext):
+    tid = str(msg.from_user.id)
+    try:
+        async with aiohttp.ClientSession() as session:
+            r = await session.post(
+                "http://127.0.0.1:3000/api/panel_recuperar_solicitar",
+                json={"telegram_id": tid},
+                timeout=aiohttp.ClientTimeout(total=10)
+            )
+            data = await r.json()
+    except Exception:
+        return await msg.answer("❌ No se pudo conectar al servidor. Intenta de nuevo.")
+    if not data.get("ok"):
+        error = data.get("error", "Error desconocido")
+        return await msg.answer(f"❌ {error}")
+    await msg.answer(
+        "🔐 <b>Recuperar Contrasena</b>\n\n"
+        "Se ha enviado un codigo a este chat.\n"
+        "Tienes <b>2 opciones</b>:\n\n"
+        "1️⃣ <b>Via Web:</b> Ingresa el codigo en la pagina web de recuperacion.\n\n"
+        "2️⃣ <b>Via Bot:</b> Escribe tu nueva contrasena aqui y se cambiara directamente.\n\n"
+        "Escribe tu <b>nueva contrasena</b> ahora o usa el codigo en la web:",
+        parse_mode="HTML"
+    )
+    await state.set_state(RecuperarState.esperando_nueva_password)
+    await state.update_data(telegram_id=tid)
+
+@dp.message(RecuperarState.esperando_nueva_password)
+async def recibir_nueva_password(msg: types.Message, state: FSMContext):
+    if not msg.text:
+        return await msg.answer("❌ Por favor envia tu nueva contrasena como texto.")
+    new_pass = msg.text.strip()
+    if len(new_pass) < 4:
+        return await msg.answer("❌ La contrasena debe tener minimo 4 caracteres. Intenta de nuevo:")
+    data = await state.get_data()
+    tid = data.get("telegram_id", str(msg.from_user.id))
+    try:
+        import aiosqlite as _aiosqlite
+        async with _aiosqlite.connect("wsp_titan.db", timeout=10) as wdb:
+            wdb.row_factory = _aiosqlite.Row
+            async with wdb.execute(
+                "SELECT code FROM recovery_codes WHERE telegram_id = ? ORDER BY created_at DESC LIMIT 1",
+                (tid,)
+            ) as cur:
+                row = await cur.fetchone()
+            if not row:
+                await state.clear()
+                return await msg.answer("❌ No hay codigo de recuperacion activo. Usa /recuperpass de nuevo.")
+            code = row["code"]
+        async with aiohttp.ClientSession() as session:
+            r = await session.post(
+                "http://127.0.0.1:3000/api/panel_recuperar_reset",
+                json={"telegram_id": tid, "code": code, "new_password": new_pass},
+                timeout=aiohttp.ClientTimeout(total=10)
+            )
+            result = await r.json()
+    except Exception as e:
+        await state.clear()
+        return await msg.answer(f"❌ Error al cambiar contrasena: {e}")
+    await state.clear()
+    if result.get("ok"):
+        await msg.answer(
+            "✅ <b>Contrasena cambiada exitosamente!</b>\n\n"
+            "Ya puedes iniciar sesion en el panel web con tu nueva contrasena.",
+            parse_mode="HTML",
+            reply_markup=kb_menu_principal(msg.from_user.id)
+        )
+    else:
+        await msg.answer(f"❌ {result.get('error', 'Error al cambiar contrasena')}")
 
 # ╔══════════════════════════════════════╗
 # ║    MAIN                             ║

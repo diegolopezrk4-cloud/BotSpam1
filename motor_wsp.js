@@ -1018,7 +1018,7 @@ async function listarChatsPersonales(botSock) {
     return chats;
 }
 
-async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
+async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta) {
     if (envioPersonalActivo[userId]) return false;
 
     let cancelled = false;
@@ -1032,6 +1032,20 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
         try {
             // Obtener la lista de chats personales
             const chats = await listarChatsPersonales(botSock);
+            // Incluir numeros manuales subidos por el usuario
+            if (cuenta) {
+                try {
+                    const manuales = db.getNumerosManuales(userId, cuenta);
+                    const existingJids = new Set(chats.map(c => c.jid));
+                    for (const m of manuales) {
+                        if (!existingJids.has(m.jid)) {
+                            chats.push({ jid: m.jid, nombre: m.nombre || m.numero, numero: m.numero, manual: true });
+                        }
+                    }
+                } catch (e) {
+                    console.error(`Error cargando numeros manuales: ${e.message}`);
+                }
+            }
             if (!chats.length) {
                 try {
                     await botSock.sendMessage(userId, {

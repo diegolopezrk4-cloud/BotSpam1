@@ -173,6 +173,11 @@ function init() {
             password TEXT,
             fecha_registro TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS recovery_codes (
+            telegram_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
         CREATE TABLE IF NOT EXISTS user_envio_config (
             user_id TEXT PRIMARY KEY,
             delay_seg INTEGER DEFAULT 10,
@@ -237,6 +242,26 @@ function init() {
     } catch (e) {
         db.exec("ALTER TABLE usuarios ADD COLUMN username TEXT DEFAULT ''");
         console.log("   Columna 'username' agregada a usuarios");
+    }
+    // Migración: recrear recovery_codes sin columna 'used'
+    try {
+        db.prepare("SELECT used FROM recovery_codes LIMIT 1").get();
+        db.exec("DROP TABLE recovery_codes");
+        db.exec("CREATE TABLE IF NOT EXISTS recovery_codes (telegram_id TEXT NOT NULL, code TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))");
+        console.log("   Tabla 'recovery_codes' recreada (sin columna 'used')");
+    } catch (e) {}
+    // Migración: seccion y size en grupos
+    try {
+        db.prepare("SELECT seccion FROM grupos LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE grupos ADD COLUMN seccion TEXT DEFAULT ''");
+        console.log("   Columna 'seccion' agregada a grupos");
+    }
+    try {
+        db.prepare("SELECT size FROM grupos LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE grupos ADD COLUMN size INTEGER DEFAULT 0");
+        console.log("   Columna 'size' agregada a grupos");
     }
     // Migración: grupo_nombre en historial_envios
     try {
@@ -361,6 +386,25 @@ function init() {
             numero TEXT,
             nombre TEXT DEFAULT '',
             tipo TEXT DEFAULT 'aceptado',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+    `);
+    // Table for promo templates (plantillas de promocion)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS promo_plantillas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            nombre TEXT,
+            palabra_aceptar TEXT DEFAULT 'si',
+            palabra_rechazar TEXT DEFAULT 'no',
+            respuesta_aceptar TEXT DEFAULT '',
+            respuesta_rechazar TEXT DEFAULT '',
+            respuesta_aceptar_img TEXT DEFAULT '',
+            respuesta_rechazar_img TEXT DEFAULT '',
+            timeout_horas INTEGER DEFAULT 24,
+            recordatorio INTEGER DEFAULT 0,
+            msg_recordatorio TEXT DEFAULT '',
             fecha TEXT DEFAULT (datetime('now')),
             FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
         );
@@ -664,13 +708,18 @@ function getGrupos(userId) {
     return db.prepare("SELECT * FROM grupos WHERE user_id = ?").all(userId);
 }
 
-function agregarGrupo(userId, link, nombre = null) {
+function agregarGrupo(userId, link, nombre = null, size = 0) {
     const existente = db.prepare("SELECT id, nombre FROM grupos WHERE user_id = ? AND link = ?").get(userId, link);
     if (!existente) {
-        db.prepare("INSERT INTO grupos (user_id, link, nombre) VALUES (?, ?, ?)").run(userId, link, nombre);
+        db.prepare("INSERT INTO grupos (user_id, link, nombre, size) VALUES (?, ?, ?, ?)").run(userId, link, nombre, size || 0);
         return true;
-    } else if (nombre && !existente.nombre) {
-        db.prepare("UPDATE grupos SET nombre = ? WHERE id = ?").run(nombre, existente.id);
+    } else {
+        if (nombre && !existente.nombre) {
+            db.prepare("UPDATE grupos SET nombre = ? WHERE id = ?").run(nombre, existente.id);
+        }
+        if (size) {
+            db.prepare("UPDATE grupos SET size = ? WHERE id = ?").run(size, existente.id);
+        }
     }
     return false;
 }
@@ -687,6 +736,21 @@ function eliminarGrupo(userId, grupoId) {
 function eliminarGrupoPorLink(userId, link) {
     db.prepare("DELETE FROM campana_grupos WHERE grupo_link = ?").run(link);
     db.prepare("DELETE FROM grupos WHERE user_id = ? AND link = ?").run(userId, link);
+}
+
+function setGrupoSeccion(userId, grupoId, seccion) {
+    db.prepare("UPDATE grupos SET seccion = ? WHERE id = ? AND user_id = ?").run(seccion || '', grupoId, userId);
+}
+
+function setGrupoSeccionBulk(userId, grupoIds, seccion) {
+    const stmt = db.prepare("UPDATE grupos SET seccion = ? WHERE id = ? AND user_id = ?");
+    for (const id of grupoIds) {
+        stmt.run(seccion || '', id, userId);
+    }
+}
+
+function getSecciones(userId) {
+    return db.prepare("SELECT DISTINCT seccion FROM grupos WHERE user_id = ? AND seccion != ''").all(userId).map(r => r.seccion);
 }
 
 function eliminarTodosGrupos(userId) {
@@ -1202,6 +1266,43 @@ function panelCambiarPassword(telegramId, oldPass, newPass) {
     return { ok: true };
 }
 
+function getPanelUser(telegramId) {
+    return db.prepare("SELECT * FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+}
+
+function crearRecoveryCode(telegramId) {
+    const crypto = require("crypto");
+    db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(String(telegramId));
+    const code = crypto.randomInt(100000, 1000000).toString();
+    db.prepare("INSERT INTO recovery_codes (telegram_id, code) VALUES (?, ?)").run(String(telegramId), code);
+    return code;
+}
+
+function verificarRecoveryCode(telegramId, code) {
+    const row = db.prepare(
+        "SELECT * FROM recovery_codes WHERE telegram_id = ? AND code = ?"
+    ).get(String(telegramId), String(code));
+    if (!row) return { ok: false, error: "Codigo invalido o expirado" };
+    const created = new Date(row.created_at + "Z");
+    if (Date.now() - created.getTime() > 10 * 60 * 1000) {
+        db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ? AND code = ?").run(String(telegramId), String(code));
+        return { ok: false, error: "Codigo expirado (max 10 min)" };
+    }
+    return { ok: true };
+}
+
+function panelResetPassword(telegramId, code, newPass) {
+    const bcrypt = require("bcryptjs");
+    const v = verificarRecoveryCode(telegramId, code);
+    if (!v.ok) return v;
+    const user = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+    if (!user) return { ok: false, error: "Usuario no registrado" };
+    const hashed = bcrypt.hashSync(newPass, 10);
+    db.prepare("UPDATE panel_users SET password = ? WHERE telegram_id = ?").run(hashed, String(telegramId));
+    db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(String(telegramId));
+    return { ok: true };
+}
+
 function checkMembresia(userId) {
     const user = getUsuario(userId);
     const usu = user;
@@ -1484,6 +1585,37 @@ function limpiarPromoRespuestas(userId) {
     db.prepare("DELETE FROM promo_respuestas WHERE user_id = ?").run(userId);
 }
 
+// --- PROMO PLANTILLAS ---
+function getPromoPlantillas(userId) {
+    return db.prepare("SELECT * FROM promo_plantillas WHERE user_id = ? ORDER BY fecha DESC").all(userId);
+}
+function getPromoPlantilla(id) {
+    return db.prepare("SELECT * FROM promo_plantillas WHERE id = ?").get(id);
+}
+function crearPromoPlantilla(userId, nombre, config) {
+    return db.prepare("INSERT INTO promo_plantillas (user_id, nombre, palabra_aceptar, palabra_rechazar, respuesta_aceptar, respuesta_rechazar, respuesta_aceptar_img, respuesta_rechazar_img, timeout_horas, recordatorio, msg_recordatorio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+        userId, nombre,
+        config.palabra_aceptar || 'si', config.palabra_rechazar || 'no',
+        config.respuesta_aceptar || '', config.respuesta_rechazar || '',
+        config.respuesta_aceptar_img || '', config.respuesta_rechazar_img || '',
+        config.timeout_horas || 24, config.recordatorio ? 1 : 0,
+        config.msg_recordatorio || ''
+    ).lastInsertRowid;
+}
+function editarPromoPlantilla(id, nombre, config) {
+    db.prepare("UPDATE promo_plantillas SET nombre = ?, palabra_aceptar = ?, palabra_rechazar = ?, respuesta_aceptar = ?, respuesta_rechazar = ?, respuesta_aceptar_img = ?, respuesta_rechazar_img = ?, timeout_horas = ?, recordatorio = ?, msg_recordatorio = ? WHERE id = ?").run(
+        nombre,
+        config.palabra_aceptar || 'si', config.palabra_rechazar || 'no',
+        config.respuesta_aceptar || '', config.respuesta_rechazar || '',
+        config.respuesta_aceptar_img || '', config.respuesta_rechazar_img || '',
+        config.timeout_horas || 24, config.recordatorio ? 1 : 0,
+        config.msg_recordatorio || '', id
+    );
+}
+function eliminarPromoPlantilla(id) {
+    db.prepare("DELETE FROM promo_plantillas WHERE id = ?").run(id);
+}
+
 // --- RETRY QUEUE (Mejora 4) ---
 function agregarRetryQueue(userId, jid, mensaje, imagenPath) {
     db.prepare("INSERT INTO retry_queue (user_id, jid, mensaje, imagen_path) VALUES (?, ?, ?, ?)").run(userId, jid, mensaje, imagenPath || null);
@@ -1611,6 +1743,7 @@ module.exports = {
     getReporteDiario,
     exportarGrupos, importarGrupos, exportarCampanas,
     panelLogin, panelRegistro, panelCambiarPassword, checkMembresia,
+    getPanelUser, crearRecoveryCode, verificarRecoveryCode, panelResetPassword,
     editarTemplate, duplicarTemplate,
     getUserEnvioConfig, setUserEnvioConfig,
     getProgramados, crearProgramado, toggleProgramado, eliminarProgramado,
@@ -1639,4 +1772,8 @@ module.exports = {
     cacheGruposSesion, getGruposCacheSesion, limpiarGruposCacheSesion, limpiarTodosGruposCacheUsuario,
     // Bot logs (Mejora 6)
     agregarLog, getLogs, limpiarLogs,
+    // Grupo secciones
+    setGrupoSeccion, setGrupoSeccionBulk, getSecciones,
+    // Promo plantillas
+    getPromoPlantillas, getPromoPlantilla, crearPromoPlantilla, editarPromoPlantilla, eliminarPromoPlantilla,
 };
