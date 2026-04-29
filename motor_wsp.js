@@ -1073,6 +1073,8 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
                     errores++;
                     console.error(`Error enviando a ${chat.numero}: ${e.message}`);
                     db.registrarEnvio(userId, 0, chat.jid, "error_personal");
+                    // Add to retry queue (Mejora 4)
+                    try { db.agregarRetryQueue(userId, chat.jid, mensaje, imagenPath); } catch (re) {}
                 }
 
                 // Progreso cada 10 envios
@@ -1257,6 +1259,8 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                     console.log(`[EnvioMiembros]   ERROR → ${e.message}`);
                     errores++;
                     db.registrarEnvio(userId, 0, jid, "error_personal", grupoNombre, "personal");
+                    // Add to retry queue (Mejora 4)
+                    try { db.agregarRetryQueue(userId, jid, mensaje, imagenPath); } catch (re) {}
                 }
 
                 // Save progress periodically (every 5 sends)
@@ -1393,16 +1397,25 @@ function iniciarSchedulerMiembros(botSock) {
 }
 
 // --- PROMO ESCUCHA (Envio Interactivo) ---
-const _promoListeners = {}; // { userId: { handlers: [], cancel: fn } }
+const _promoListeners = {}; // { userId: { handlers: [], cancel: fn, respondedJids, startTime } }
 
-function iniciarPromoEscucha(userId, sock, palabraAceptar, palabraRechazar, respAceptar, respRechazar) {
-    // Add listener to this sock for promo responses
+function iniciarPromoEscucha(userId, sock, palabraAceptar, palabraRechazar, respAceptar, respRechazar, respAceptarImagen, respRechazarImagen) {
     if (!_promoListeners[userId]) {
-        _promoListeners[userId] = { handlers: [], cancelled: false };
+        _promoListeners[userId] = { handlers: [], cancelled: false, respondedJids: new Set(), startTime: Date.now() };
+        try {
+            const existing = db.getPromoRespuestas(userId);
+            for (const r of existing) {
+                if (r.jid) _promoListeners[userId].respondedJids.add(r.jid);
+            }
+        } catch (e) {}
     }
     const state = _promoListeners[userId];
     const acLower = (palabraAceptar || 'si').toLowerCase().trim();
     const reLower = (palabraRechazar || 'no').toLowerCase().trim();
+
+    // Load multi-keywords if configured (Mejora 7)
+    let extraKeywords = [];
+    try { extraKeywords = db.getPromoKeywords(userId); } catch (e) {}
 
     const handler = async ({ messages }) => {
         if (state.cancelled) return;
@@ -1410,21 +1423,51 @@ function iniciarPromoEscucha(userId, sock, palabraAceptar, palabraRechazar, resp
             if (!msg.message || msg.key.fromMe) continue;
             const jid = msg.key.remoteJid;
             if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") continue;
+            if (state.respondedJids.has(jid)) continue;
 
             const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase().trim();
             const pushName = msg.pushName || "";
             const numero = jid.replace(/@s\.whatsapp\.net$/, "");
 
+            // Check extra keywords first (Mejora 7)
+            let matched = false;
+            for (const kw of extraKeywords) {
+                if (text.includes(kw.palabra.toLowerCase().trim())) {
+                    state.respondedJids.add(jid);
+                    db.registrarPromoRespuesta(userId, jid, numero, pushName, kw.tipo || 'aceptado');
+                    db.agregarLog(userId, 'promo', `${numero} (${pushName}) respondio "${text}" -> keyword "${kw.palabra}"`);
+                    console.log(`[Promo] ${numero} (${pushName}) keyword "${kw.palabra}" con "${text}" (respuesta unica)`);
+                    if (kw.respuesta_imagen && fs.existsSync(kw.respuesta_imagen)) {
+                        try { await sock.sendMessage(jid, { image: fs.readFileSync(kw.respuesta_imagen), caption: kw.respuesta_texto || '' }); } catch (e) {}
+                    } else if (kw.respuesta_texto) {
+                        try { await sock.sendMessage(jid, { text: kw.respuesta_texto }); } catch (e) {}
+                    }
+                    matched = true;
+                    break;
+                }
+            }
+            if (matched) continue;
+
+            // Default accept/reject keywords
             if (text.includes(acLower)) {
+                state.respondedJids.add(jid);
                 db.registrarPromoRespuesta(userId, jid, numero, pushName, 'aceptado');
-                console.log(`[Promo] ${numero} (${pushName}) ACEPTO con "${text}"`);
-                if (respAceptar) {
+                db.agregarLog(userId, 'promo', `${numero} (${pushName}) ACEPTO con "${text}"`);
+                console.log(`[Promo] ${numero} (${pushName}) ACEPTO con "${text}" (respuesta unica)`);
+                // Mejora 8: respond with image if configured
+                if (respAceptarImagen && fs.existsSync(respAceptarImagen)) {
+                    try { await sock.sendMessage(jid, { image: fs.readFileSync(respAceptarImagen), caption: respAceptar || '' }); } catch (e) {}
+                } else if (respAceptar) {
                     try { await sock.sendMessage(jid, { text: respAceptar }); } catch (e) {}
                 }
             } else if (text.includes(reLower)) {
+                state.respondedJids.add(jid);
                 db.registrarPromoRespuesta(userId, jid, numero, pushName, 'rechazado');
-                console.log(`[Promo] ${numero} (${pushName}) RECHAZO con "${text}"`);
-                if (respRechazar) {
+                db.agregarLog(userId, 'promo', `${numero} (${pushName}) RECHAZO con "${text}"`);
+                console.log(`[Promo] ${numero} (${pushName}) RECHAZO con "${text}" (respuesta unica)`);
+                if (respRechazarImagen && fs.existsSync(respRechazarImagen)) {
+                    try { await sock.sendMessage(jid, { image: fs.readFileSync(respRechazarImagen), caption: respRechazar || '' }); } catch (e) {}
+                } else if (respRechazar) {
                     try { await sock.sendMessage(jid, { text: respRechazar }); } catch (e) {}
                 }
             }
@@ -1443,6 +1486,83 @@ function detenerPromoEscuchaFn(userId) {
         }
         delete _promoListeners[userId];
     }
+}
+
+// --- RETRY QUEUE PROCESSOR (Mejora 4) ---
+let _retryInterval = null;
+function iniciarRetryProcessor() {
+    if (_retryInterval) return;
+    _retryInterval = setInterval(async () => {
+        try {
+            const pendientes = db.getRetryPendientesGlobal();
+            for (const item of pendientes) {
+                try {
+                    const sesiones = db.getSesiones(item.user_id);
+                    if (!sesiones.length) continue;
+                    const sock = await getOrConnectClient(item.user_id, sesiones[0].nombre);
+                    if (!sock) continue;
+
+                    if (item.imagen_path && fs.existsSync(item.imagen_path)) {
+                        await sock.sendMessage(item.jid, { image: fs.readFileSync(item.imagen_path), caption: item.mensaje || '' });
+                    } else {
+                        await sock.sendMessage(item.jid, { text: item.mensaje });
+                    }
+                    db.actualizarRetry(item.id, item.intentos + 1, 'enviado', '');
+                    db.agregarLog(item.user_id, 'retry', `Retry exitoso para ${item.jid} (intento ${item.intentos + 1})`);
+                    console.log(`[Retry] Enviado a ${item.jid} (intento ${item.intentos + 1})`);
+                    await delay(2000);
+                } catch (e) {
+                    const newIntentos = item.intentos + 1;
+                    const estado = newIntentos >= item.max_intentos ? 'fallido' : 'pendiente';
+                    db.actualizarRetry(item.id, newIntentos, estado, e.message);
+                    db.agregarLog(item.user_id, 'retry_error', `Retry fallido para ${item.jid}: ${e.message} (intento ${newIntentos})`);
+                    console.log(`[Retry] Error ${item.jid}: ${e.message} (intento ${newIntentos}/${item.max_intentos})`);
+                }
+            }
+        } catch (e) {
+            console.error(`[Retry] Error general: ${e.message}`);
+        }
+    }, 60000); // Check every minute
+}
+
+// --- PROMO TIMEOUT CHECKER (Mejora 3) ---
+let _timeoutInterval = null;
+function iniciarPromoTimeoutChecker() {
+    if (_timeoutInterval) return;
+    _timeoutInterval = setInterval(async () => {
+        try {
+            // Check all active promo listeners for timeouts
+            for (const userId of Object.keys(_promoListeners)) {
+                const state = _promoListeners[userId];
+                if (!state || state.cancelled) continue;
+
+                const timeoutConfig = db.getPromoTimeout(userId);
+                if (!timeoutConfig) continue;
+
+                const timeoutMs = (timeoutConfig.timeout_horas || 24) * 3600 * 1000;
+                const elapsed = Date.now() - state.startTime;
+
+                if (elapsed >= timeoutMs) {
+                    // Mark unresponded contacts and optionally send reminders
+                    const escucha = db.getPromoEscucha(userId);
+                    if (timeoutConfig.recordatorio_activo && timeoutConfig.mensaje_recordatorio && state.handlers.length > 0) {
+                        const sock = state.handlers[0].sock;
+                        // Get all contacts that received the promo but didn't respond
+                        // We don't have a list of who received it, so we just log the timeout
+                        db.agregarLog(userId, 'promo_timeout', `Promo timeout alcanzado (${timeoutConfig.timeout_horas}h). Respondieron: ${state.respondedJids.size}`);
+                    }
+
+                    // Auto-stop after timeout
+                    db.agregarLog(userId, 'promo_timeout', `Escucha promo detenida automaticamente por timeout (${timeoutConfig.timeout_horas}h)`);
+                    console.log(`[Promo] Timeout para ${userId} (${timeoutConfig.timeout_horas}h). Deteniendo escucha.`);
+                    db.detenerPromoEscucha(userId);
+                    detenerPromoEscuchaFn(userId);
+                }
+            }
+        } catch (e) {
+            console.error(`[PromoTimeout] Error: ${e.message}`);
+        }
+    }, 60000); // Check every minute
 }
 
 module.exports = {
@@ -1481,4 +1601,6 @@ module.exports = {
     iniciarSchedulerMiembros,
     iniciarPromoEscucha,
     detenerPromoEscucha: detenerPromoEscuchaFn,
+    iniciarRetryProcessor,
+    iniciarPromoTimeoutChecker,
 };

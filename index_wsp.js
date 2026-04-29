@@ -610,9 +610,11 @@ poll();
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 try {
                     const started = await motor.enviarAPersonales(userId, mensaje, imagenPath, sock);
+                    if (started) db.agregarLog(userId, 'envio', 'Envio personal iniciado');
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
                 } catch (e) {
+                    db.agregarLog(userId, 'error', `Error envio personal: ${e.message}`);
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
                 }
@@ -1163,24 +1165,27 @@ poll();
                     }).filter(jid => jid && jid.endsWith("@s.whatsapp.net"));
                     res.writeHead(200);
                     res.end(JSON.stringify({ ok: true, total: jids.length, message: "Agregando miembros en segundo plano..." }));
-                    // Run in background — add in batches of 10 to avoid WhatsApp disconnection
+                    // Run in background — add with moderate delays to avoid WhatsApp disconnection
                     let agregados = 0, fallidos = 0;
-                    const BATCH_SIZE = 10;
-                    const DELAY_BETWEEN_MEMBERS = 3000; // 3s between individual adds
-                    const DELAY_BETWEEN_BATCHES = 60000; // 60s pause between batches of 10
+                    const BATCH_SIZE = 5; // 5 members per batch
+                    const DELAY_BETWEEN_BATCHES = 45000; // 45s pause between batches
+                    const DELAY_AFTER_ERROR = 45000; // 45s pause after any error
+                    // Initial delay before starting to add (let connection stabilize)
+                    console.log(`[agregar_miembros] Iniciando en 3s... (${jids.length} miembros por agregar)`);
+                    await new Promise(r => setTimeout(r, 3000));
                     for (let i = 0; i < jids.length; i++) {
                         try {
                             // Re-check connection before each add
                             if (body.cuenta) {
                                 try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (reconErr) {
-                                    console.log(`[agregar_miembros] Reconexion fallida, esperando 30s...`);
-                                    await new Promise(r => setTimeout(r, 30000));
+                                    console.log(`[agregar_miembros] Reconexion fallida, esperando 60s...`);
+                                    await new Promise(r => setTimeout(r, 60000));
                                     try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) { break; }
                                 }
                             }
-                            if (!sock || !sock.ws || sock.ws.readyState !== 1) {
-                                console.log(`[agregar_miembros] Socket cerrado, esperando 15s y reconectando...`);
-                                await new Promise(r => setTimeout(r, 15000));
+                            if (!sock || !sock.ws || (sock.ws.readyState !== undefined && sock.ws.readyState !== sock.ws.OPEN && sock.ws.readyState !== 1)) {
+                                console.log(`[agregar_miembros] Socket no disponible, esperando 30s y reconectando...`);
+                                await new Promise(r => setTimeout(r, 30000));
                                 if (body.cuenta) {
                                     try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) { break; }
                                 } else { break; }
@@ -1188,26 +1193,40 @@ poll();
                             await sock.groupParticipantsUpdate(body.destino, [jids[i]], "add");
                             agregados++;
                             console.log(`[agregar_miembros] ${i+1}/${jids.length} agregado: ${jids[i]}`);
+                            db.agregarLog(body.u, 'info', `Miembro agregado ${i+1}/${jids.length}: ${jids[i].split('@')[0]}`);
                         } catch (e) {
-                            console.log(`[agregar_miembros] Error ${jids[i]}: ${e.message}`);
+                            const errMsg = e.message || '';
+                            console.log(`[agregar_miembros] Error ${jids[i]}: ${errMsg}`);
                             fallidos++;
-                            if (e.message && (e.message.includes("closed") || e.message.includes("disconnect") || e.message.includes("timed out") || e.message.includes("Connection"))) {
-                                console.log(`[agregar_miembros] Conexion perdida, pausa 30s antes de reintentar...`);
-                                await new Promise(r => setTimeout(r, 30000));
+                            if (errMsg.includes("closed") || errMsg.includes("disconnect") || errMsg.includes("timed out") || errMsg.includes("Connection") || errMsg.includes("Boom") || errMsg.includes("lost")) {
+                                console.log(`[agregar_miembros] Conexion perdida despues de ${agregados} agregados, pausa larga de 60s...`);
+                                db.agregarLog(body.u, 'error', `Conexion perdida al agregar miembro ${i+1}/${jids.length}, pausando 60s`);
+                                await new Promise(r => setTimeout(r, DELAY_AFTER_ERROR));
                                 if (body.cuenta) {
-                                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) { break; }
+                                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) {
+                                        console.log(`[agregar_miembros] No se pudo reconectar, abortando.`);
+                                        db.agregarLog(body.u, 'error', `No se pudo reconectar, ${agregados} agregados de ${jids.length}`);
+                                        break;
+                                    }
+                                    // Extra wait after reconnection to let it stabilize
+                                    await new Promise(r => setTimeout(r, 10000));
                                 } else { break; }
                             }
+                            // Non-connection errors (e.g. "not authorized", "forbidden") — skip member and continue
                         }
-                        // Delay between individual adds
-                        await new Promise(r => setTimeout(r, DELAY_BETWEEN_MEMBERS));
+                        // Random delay between individual adds (5-8 seconds)
+                        const memberDelay = 5000 + Math.floor(Math.random() * 3000);
+                        await new Promise(r => setTimeout(r, memberDelay));
                         // Longer pause every BATCH_SIZE members
                         if ((i + 1) % BATCH_SIZE === 0 && i + 1 < jids.length) {
-                            console.log(`[agregar_miembros] Lote de ${BATCH_SIZE} completado (${i + 1}/${jids.length}), pausa ${DELAY_BETWEEN_BATCHES/1000}s...`);
-                            await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES));
+                            const batchPause = DELAY_BETWEEN_BATCHES + Math.floor(Math.random() * 15000); // 45-60s
+                            console.log(`[agregar_miembros] Lote de ${BATCH_SIZE} completado (${i + 1}/${jids.length}), pausa ${Math.round(batchPause/1000)}s...`);
+                            db.agregarLog(body.u, 'info', `Lote ${Math.ceil((i+1)/BATCH_SIZE)} completado: ${agregados} ok, ${fallidos} error. Pausa ${Math.round(batchPause/1000)}s`);
+                            await new Promise(r => setTimeout(r, batchPause));
                         }
                     }
                     console.log(`[agregar_miembros] Completado: ${agregados} ok, ${fallidos} error de ${jids.length}`);
+                    db.agregarLog(body.u, 'info', `Agregar miembros completado: ${agregados} ok, ${fallidos} error de ${jids.length}`);
                 } catch (e) {
                     if (!res.writableEnded) {
                         res.writeHead(500);
@@ -1592,18 +1611,35 @@ poll();
                 if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 db.registrarPromoEscucha(body.u, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '');
                 db.limpiarPromoRespuestas(body.u);
-                // Stop any existing listeners before re-registering
+                // Save timeout config if provided (Mejora 3)
+                if (body.timeout_horas !== undefined) {
+                    db.setPromoTimeout(body.u, body.timeout_horas, body.recordatorio_activo, body.mensaje_recordatorio);
+                }
+                // Handle response images (Mejora 8)
+                let respAceptarImagen = null, respRechazarImagen = null;
+                if (body.resp_aceptar_imagen_b64) {
+                    const fotosDir = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir)) fs.mkdirSync(fotosDir, { recursive: true });
+                    respAceptarImagen = path.join(fotosDir, `promo_aceptar_${Date.now()}.jpg`);
+                    fs.writeFileSync(respAceptarImagen, Buffer.from(body.resp_aceptar_imagen_b64, "base64"));
+                }
+                if (body.resp_rechazar_imagen_b64) {
+                    const fotosDir = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir)) fs.mkdirSync(fotosDir, { recursive: true });
+                    respRechazarImagen = path.join(fotosDir, `promo_rechazar_${Date.now()}.jpg`);
+                    fs.writeFileSync(respRechazarImagen, Buffer.from(body.resp_rechazar_imagen_b64, "base64"));
+                }
                 motor.detenerPromoEscucha(body.u);
-                // Start listening on all connected accounts
                 try {
                     const sesiones = db.getSesiones(body.u);
                     for (const s of sesiones) {
                         try {
                             const sock = await motor.getOrConnectClient(body.u, s.nombre);
-                            motor.iniciarPromoEscucha(body.u, sock, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '');
+                            motor.iniciarPromoEscucha(body.u, sock, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '', respAceptarImagen, respRechazarImagen);
                         } catch (e) {}
                     }
                 } catch (e) {}
+                db.agregarLog(body.u, 'promo', 'Escucha promo activada');
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
@@ -1615,6 +1651,7 @@ poll();
                 const respuestas = db.getPromoRespuestas(body.u);
                 const aceptados = respuestas.filter(r => r.tipo === 'aceptado');
                 const rechazados = respuestas.filter(r => r.tipo === 'rechazado');
+                db.agregarLog(body.u, 'promo', `Escucha detenida. Aceptados: ${aceptados.length}, Rechazados: ${rechazados.length}`);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, aceptados, rechazados }));
             }
@@ -1625,8 +1662,135 @@ poll();
                 const respuestas = db.getPromoRespuestas(userId);
                 const aceptados = respuestas.filter(r => r.tipo === 'aceptado');
                 const rechazados = respuestas.filter(r => r.tipo === 'rechazado');
+                const total = respuestas.length;
+                const sinRespuesta = 0; // We don't track total sent yet
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, activo: !!escucha, aceptados, rechazados }));
+                return res.end(JSON.stringify({ ok: true, activo: !!escucha, aceptados, rechazados, total }));
+            }
+            // Mejora 1: Enviar promo + activar escucha en un solo paso
+            if (url.pathname === "/api/promo/enviar_y_escuchar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje" })); }
+                // Save image if provided
+                let imagenPath = null;
+                if (body.imagen_b64 && body.imagen_nombre) {
+                    const fotosDir = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir)) fs.mkdirSync(fotosDir, { recursive: true });
+                    const safeName = path.basename(body.imagen_nombre).replace(/[^a-zA-Z0-9._-]/g, '_');
+                    imagenPath = path.join(fotosDir, `promo_${Date.now()}_${safeName}`);
+                    fs.writeFileSync(imagenPath, Buffer.from(body.imagen_b64, "base64"));
+                }
+                // Handle response images (same as /api/promo/registrar)
+                let respAceptarImagen = null, respRechazarImagen = null;
+                if (body.resp_aceptar_imagen_b64) {
+                    const fotosDir2 = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir2)) fs.mkdirSync(fotosDir2, { recursive: true });
+                    respAceptarImagen = path.join(fotosDir2, `promo_aceptar_${Date.now()}.jpg`);
+                    fs.writeFileSync(respAceptarImagen, Buffer.from(body.resp_aceptar_imagen_b64, "base64"));
+                }
+                if (body.resp_rechazar_imagen_b64) {
+                    const fotosDir2 = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir2)) fs.mkdirSync(fotosDir2, { recursive: true });
+                    respRechazarImagen = path.join(fotosDir2, `promo_rechazar_${Date.now()}.jpg`);
+                    fs.writeFileSync(respRechazarImagen, Buffer.from(body.resp_rechazar_imagen_b64, "base64"));
+                }
+                // Register promo listening
+                db.registrarPromoEscucha(body.u, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '');
+                db.limpiarPromoRespuestas(body.u);
+                if (body.timeout_horas !== undefined) {
+                    db.setPromoTimeout(body.u, body.timeout_horas, body.recordatorio_activo, body.mensaje_recordatorio);
+                }
+                motor.detenerPromoEscucha(body.u);
+                // Start listening and send promo
+                let sock;
+                const sesiones = db.getSesiones(body.u);
+                for (const s of sesiones) {
+                    try {
+                        sock = await motor.getOrConnectClient(body.u, s.nombre);
+                        motor.iniciarPromoEscucha(body.u, sock, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '', respAceptarImagen, respRechazarImagen);
+                    } catch (e) {}
+                }
+                if (body.cuenta) {
+                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (e) {}
+                }
+                if (!sock) sock = botSock;
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                // Send the promo message
+                const started = await motor.enviarAPersonales(body.u, body.mensaje, imagenPath, sock);
+                db.agregarLog(body.u, 'promo', 'Promo enviada + escucha activada');
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: started, message: started ? "promo enviada y escucha activada" : "ya hay un envio activo" }));
+            }
+
+            // ─── PROMO KEYWORDS (Mejora 7) ───
+            if (url.pathname === "/api/promo/keywords" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const keywords = db.getPromoKeywords(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, keywords }));
+            }
+            if (url.pathname === "/api/promo/keywords/agregar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.palabra) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o palabra" })); }
+                // Handle keyword image upload
+                let imgPath = null;
+                if (body.imagen_b64) {
+                    const fotosDir = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir)) fs.mkdirSync(fotosDir, { recursive: true });
+                    imgPath = path.join(fotosDir, `keyword_${Date.now()}.jpg`);
+                    fs.writeFileSync(imgPath, Buffer.from(body.imagen_b64, "base64"));
+                }
+                db.agregarPromoKeyword(body.u, body.palabra, body.respuesta_texto || '', imgPath, body.tipo || 'aceptar');
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/promo/keywords/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.eliminarPromoKeyword(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/promo/keywords/limpiar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.limpiarPromoKeywords(body.u);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── RETRY QUEUE (Mejora 4) ───
+            if (url.pathname === "/api/retry/stats" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const stats = db.getRetryStats(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...stats }));
+            }
+            if (url.pathname === "/api/retry/limpiar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.limpiarRetryCompletados(body.u);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── BOT LOGS (Mejora 6) ───
+            if (url.pathname === "/api/logs" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const limite = parseInt(url.searchParams.get("limite")) || 100;
+                const logs = db.getLogs(userId, limite);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs }));
+            }
+            if (url.pathname === "/api/logs/limpiar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.limpiarLogs(body.u);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
             }
 
             // ─── GRUPOS/DEL con soporte link ───
@@ -1778,6 +1942,8 @@ async function startBot() {
 
             motor.setBotSocket(botSock);
             motor.iniciarSchedulerMiembros(botSock);
+            motor.iniciarRetryProcessor();
+            motor.iniciarPromoTimeoutChecker();
             console.log(`\u{1F4F1} Bot disponible como cuenta de spam: '${motor.BOT_NOMBRE}'`);
             console.log("\u{1F4F1} Listo para recibir mensajes.\n");
 
