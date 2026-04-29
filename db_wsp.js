@@ -939,7 +939,7 @@ function checkMembresia(userId) {
     const usu = user;
     const esAdmin = usu ? (usu.es_admin === 1) : false;
     if (!user) return { ok: true, activa: false, es_admin: esAdmin, membresia: null };
-    const activo = user.plan === 'permanente' || (user.fecha_expira && new Date(user.fecha_expira) > new Date());
+    const activo = user.activo && (user.plan === 'permanente' || (user.fecha_expira && new Date(user.fecha_expira) > new Date()));
     return {
         ok: true,
         activa: activo || esAdmin,
