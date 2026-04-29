@@ -1663,6 +1663,20 @@ poll();
                     imagenPath = path.join(fotosDir, `promo_${Date.now()}_${safeName}`);
                     fs.writeFileSync(imagenPath, Buffer.from(body.imagen_b64, "base64"));
                 }
+                // Handle response images (same as /api/promo/registrar)
+                let respAceptarImagen = null, respRechazarImagen = null;
+                if (body.resp_aceptar_imagen_b64) {
+                    const fotosDir2 = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir2)) fs.mkdirSync(fotosDir2, { recursive: true });
+                    respAceptarImagen = path.join(fotosDir2, `promo_aceptar_${Date.now()}.jpg`);
+                    fs.writeFileSync(respAceptarImagen, Buffer.from(body.resp_aceptar_imagen_b64, "base64"));
+                }
+                if (body.resp_rechazar_imagen_b64) {
+                    const fotosDir2 = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir2)) fs.mkdirSync(fotosDir2, { recursive: true });
+                    respRechazarImagen = path.join(fotosDir2, `promo_rechazar_${Date.now()}.jpg`);
+                    fs.writeFileSync(respRechazarImagen, Buffer.from(body.resp_rechazar_imagen_b64, "base64"));
+                }
                 // Register promo listening
                 db.registrarPromoEscucha(body.u, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '');
                 db.limpiarPromoRespuestas(body.u);
@@ -1676,7 +1690,7 @@ poll();
                 for (const s of sesiones) {
                     try {
                         sock = await motor.getOrConnectClient(body.u, s.nombre);
-                        motor.iniciarPromoEscucha(body.u, sock, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '');
+                        motor.iniciarPromoEscucha(body.u, sock, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '', respAceptarImagen, respRechazarImagen);
                     } catch (e) {}
                 }
                 if (body.cuenta) {
@@ -1748,6 +1762,7 @@ poll();
             // ─── BOT LOGS (Mejora 6) ───
             if (url.pathname === "/api/logs" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const limite = parseInt(url.searchParams.get("limite")) || 100;
                 const logs = db.getLogs(userId, limite);
                 res.writeHead(200);
@@ -1755,6 +1770,7 @@ poll();
             }
             if (url.pathname === "/api/logs/limpiar" && req.method === "POST") {
                 const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 db.limpiarLogs(body.u);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
