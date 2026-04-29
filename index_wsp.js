@@ -1234,7 +1234,7 @@ poll();
                     // Run in background — add with moderate delays to avoid WhatsApp disconnection
                     let agregados = 0, fallidos = 0;
                     const BATCH_SIZE = parseInt(body.batch_size) || 5;
-                    const DELAY_BETWEEN_BATCHES = (parseInt(body.delay_minutes) || 1) * 60 * 1000;
+                    const DELAY_BETWEEN_BATCHES = body.delay_minutes ? parseInt(body.delay_minutes) * 60 * 1000 : 45000;
                     const DELAY_AFTER_ERROR = 45000; // 45s pause after any error
                     // Initial delay before starting to add (let connection stabilize)
                     console.log(`[agregar_miembros] Iniciando en 3s... (${jids.length} miembros por agregar)`);
@@ -1805,7 +1805,7 @@ poll();
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, message: `promo enviada a ${jids.length} miembros y escucha activada`, total: jids.length, grupo_nombre: grupoNombre }));
                 } else {
-                    const started = await motor.enviarAPersonales(body.u, body.mensaje, imagenPath, sock);
+                    const started = await motor.enviarAPersonales(body.u, body.mensaje, imagenPath, sock, body.cuenta);
                     db.agregarLog(body.u, 'promo', 'Promo enviada + escucha activada');
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: started, message: started ? "promo enviada y escucha activada" : "ya hay un envio activo" }));
