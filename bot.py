@@ -152,10 +152,10 @@ async def safe_edit(message: types.Message, text: str, reply_markup=None):
         await message.answer(text, reply_markup=reply_markup)
 
 async def safe_answer(call: types.CallbackQuery, text: str = None, show_alert: bool = False):
-    """Responde un callback query de forma segura. Ignora si ya expiro."""
+    """Responde un callback query de forma segura. Ignora si ya expiro o falla."""
     try:
         await call.answer(text, show_alert=show_alert)
-    except TelegramBadRequest:
+    except Exception:
         pass
 
 # ─────────────────────────────────────────
