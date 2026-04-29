@@ -268,6 +268,103 @@ function init() {
             PRIMARY KEY(campana_id, grupo_jid)
         );
     `);
+    // Blacklist for individual numbers (not just groups)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS blacklist_numeros (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            numero TEXT,
+            razon TEXT DEFAULT '',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            UNIQUE(user_id, numero)
+        );
+    `);
+    // Scheduled member sends
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS programado_miembros (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            grupo_jid TEXT,
+            grupo_nombre TEXT,
+            mensaje TEXT,
+            imagen_path TEXT DEFAULT NULL,
+            cuenta TEXT,
+            country_code TEXT DEFAULT NULL,
+            admin_filter TEXT DEFAULT NULL,
+            batch_size INTEGER DEFAULT 0,
+            delay_minutes INTEGER DEFAULT 5,
+            hora_envio TEXT,
+            dias_semana TEXT DEFAULT '0,1,2,3,4,5,6',
+            activo INTEGER DEFAULT 1,
+            ultimo_envio TEXT DEFAULT NULL,
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+    `);
+    // Migration: tipo_envio column in historial_envios
+    try {
+        db.prepare("SELECT tipo_envio FROM historial_envios LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE historial_envios ADD COLUMN tipo_envio TEXT DEFAULT 'grupo'");
+        db.exec("UPDATE historial_envios SET tipo_envio = 'personal' WHERE resultado IN ('enviado_personal', 'error_personal')");
+        console.log("   Columna 'tipo_envio' agregada a historial_envios");
+    }
+    // Migration: estado_entrega column for delivery tracking
+    try {
+        db.prepare("SELECT estado_entrega FROM historial_envios LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE historial_envios ADD COLUMN estado_entrega TEXT DEFAULT NULL");
+        console.log("   Columna 'estado_entrega' agregada a historial_envios");
+    }
+    // Migration: mensaje_preview column
+    try {
+        db.prepare("SELECT mensaje_preview FROM historial_envios LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE historial_envios ADD COLUMN mensaje_preview TEXT DEFAULT NULL");
+        console.log("   Columna 'mensaje_preview' agregada a historial_envios");
+    }
+    // Table for manually added personal numbers
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS numeros_manuales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            cuenta TEXT,
+            numero TEXT,
+            jid TEXT,
+            nombre TEXT DEFAULT '',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            UNIQUE(user_id, cuenta, numero)
+        );
+    `);
+    // Table for promo/interactive listening
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS promo_escucha (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            palabra_aceptar TEXT DEFAULT 'si',
+            palabra_rechazar TEXT DEFAULT 'no',
+            respuesta_aceptar TEXT DEFAULT '',
+            respuesta_rechazar TEXT DEFAULT '',
+            activo INTEGER DEFAULT 1,
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id),
+            UNIQUE(user_id)
+        );
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS promo_respuestas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            jid TEXT,
+            numero TEXT,
+            nombre TEXT DEFAULT '',
+            tipo TEXT DEFAULT 'aceptado',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+    `);
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -684,16 +781,60 @@ function limpiarKeywords(userId) {
 }
 
 // --- HISTORIAL ---
-function registrarEnvio(userId, campanaId, grupoLink, resultado = "enviado", grupoNombre = null) {
-    db.prepare("INSERT INTO historial_envios (user_id, campana_id, grupo_link, resultado, grupo_nombre) VALUES (?, ?, ?, ?, ?)").run(userId, campanaId, grupoLink, resultado, grupoNombre);
+function registrarEnvio(userId, campanaId, grupoLink, resultado = "enviado", grupoNombre = null, tipoEnvio = null, estadoEntrega = null, mensajePreview = null) {
+    const tipo = tipoEnvio || (resultado.includes('personal') ? 'personal' : 'grupo');
+    db.prepare("INSERT INTO historial_envios (user_id, campana_id, grupo_link, resultado, grupo_nombre, tipo_envio, estado_entrega, mensaje_preview) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(userId, campanaId, grupoLink, resultado, grupoNombre, tipo, estadoEntrega, mensajePreview);
 }
 
 function registrarRespuesta(userId, grupoLink, keyword) {
     db.prepare("INSERT INTO historial_respuestas (user_id, grupo_link, keyword) VALUES (?, ?, ?)").run(userId, grupoLink, keyword);
 }
 
-function getHistorialEnvios(userId, limite = 50) {
-    return db.prepare("SELECT grupo_link, resultado, fecha, grupo_nombre FROM historial_envios WHERE user_id = ? ORDER BY fecha DESC LIMIT ?").all(userId, limite);
+function getHistorialEnvios(userId, limite = 50, tipoFiltro = null, resultadoFiltro = null, desde = null, hasta = null) {
+    let sql = "SELECT grupo_link, resultado, fecha, grupo_nombre, tipo_envio, estado_entrega, mensaje_preview FROM historial_envios WHERE user_id = ?";
+    const params = [userId];
+    if (tipoFiltro) {
+        if (tipoFiltro === 'personal' || tipoFiltro === 'miembros') {
+            sql += " AND tipo_envio = 'personal'";
+        } else if (tipoFiltro === 'grupo' || tipoFiltro === 'campana') {
+            sql += " AND tipo_envio = 'grupo'";
+        }
+    }
+    if (resultadoFiltro) {
+        if (resultadoFiltro === 'exitoso' || resultadoFiltro === 'enviado') {
+            sql += " AND resultado IN ('enviado','enviado_pending','enviado_personal')";
+        } else if (resultadoFiltro === 'fallido') {
+            sql += " AND resultado NOT IN ('enviado','enviado_pending','enviado_personal')";
+        }
+    }
+    if (desde) { sql += " AND fecha >= ?"; params.push(desde); }
+    if (hasta) { sql += " AND fecha <= ? || ' 23:59:59'"; params.push(hasta); }
+    sql += " ORDER BY fecha DESC LIMIT ?";
+    params.push(limite);
+    return db.prepare(sql).all(...params);
+}
+
+function getHistorialStats(userId) {
+    const total = db.prepare("SELECT COUNT(*) as c FROM historial_envios WHERE user_id = ?").get(userId);
+    const grupos = db.prepare("SELECT COUNT(*) as c FROM historial_envios WHERE user_id = ? AND tipo_envio = 'grupo'").get(userId);
+    const personales = db.prepare("SELECT COUNT(*) as c FROM historial_envios WHERE user_id = ? AND tipo_envio = 'personal'").get(userId);
+    const exitosos = db.prepare("SELECT COUNT(*) as c FROM historial_envios WHERE user_id = ? AND resultado IN ('enviado','enviado_pending','enviado_personal')").get(userId);
+    const fallidos = db.prepare("SELECT COUNT(*) as c FROM historial_envios WHERE user_id = ? AND resultado NOT IN ('enviado','enviado_pending','enviado_personal')").get(userId);
+    const entregados = db.prepare("SELECT COUNT(*) as c FROM historial_envios WHERE user_id = ? AND estado_entrega = 'entregado'").get(userId);
+    const leidos = db.prepare("SELECT COUNT(*) as c FROM historial_envios WHERE user_id = ? AND estado_entrega = 'leido'").get(userId);
+    return {
+        total: total?.c || 0,
+        grupos: grupos?.c || 0,
+        personales: personales?.c || 0,
+        exitosos: exitosos?.c || 0,
+        fallidos: fallidos?.c || 0,
+        entregados: entregados?.c || 0,
+        leidos: leidos?.c || 0,
+    };
+}
+
+function actualizarEstadoEntrega(userId, grupoLink, estado) {
+    db.prepare("UPDATE historial_envios SET estado_entrega = ? WHERE user_id = ? AND grupo_link = ? AND id = (SELECT MAX(id) FROM historial_envios WHERE user_id = ? AND grupo_link = ?)").run(estado, userId, grupoLink, userId, grupoLink);
 }
 
 function getStatsPorGrupo(userId) {
@@ -1128,6 +1269,133 @@ function eliminarProgresoEnvio(userId, grupoJid) {
     db.prepare("DELETE FROM envio_progreso WHERE user_id = ? AND grupo_jid = ?").run(userId, grupoJid);
 }
 
+// --- BLACKLIST NUMEROS (individual numbers) ---
+function getBlacklistNumeros(userId) {
+    return db.prepare("SELECT * FROM blacklist_numeros WHERE user_id = ? ORDER BY fecha DESC").all(userId);
+}
+
+function agregarBlacklistNumero(userId, numero, razon = "") {
+    const num = numero.replace(/[^0-9]/g, "");
+    db.prepare("INSERT OR IGNORE INTO blacklist_numeros (user_id, numero, razon) VALUES (?, ?, ?)").run(userId, num, razon);
+}
+
+function eliminarBlacklistNumero(userId, numero) {
+    db.prepare("DELETE FROM blacklist_numeros WHERE user_id = ? AND numero = ?").run(userId, numero);
+}
+
+function eliminarBlacklistNumeroById(blId) {
+    db.prepare("DELETE FROM blacklist_numeros WHERE id = ?").run(blId);
+}
+
+function estaEnBlacklistNumero(userId, numero) {
+    const num = numero.replace(/[^0-9]/g, "");
+    return !!db.prepare("SELECT 1 FROM blacklist_numeros WHERE user_id = ? AND numero = ?").get(userId, num);
+}
+
+function limpiarBlacklistNumeros(userId) {
+    db.prepare("DELETE FROM blacklist_numeros WHERE user_id = ?").run(userId);
+}
+
+// --- PROGRAMADO MIEMBROS ---
+function getProgramadosMiembros(userId) {
+    return db.prepare("SELECT * FROM programado_miembros WHERE user_id = ? ORDER BY fecha DESC").all(userId);
+}
+
+function crearProgramadoMiembros(userId, grupoJid, grupoNombre, mensaje, cuenta, horaEnvio, diasSemana, countryCode, adminFilter, batchSize, delayMinutes) {
+    return db.prepare(`INSERT INTO programado_miembros (user_id, grupo_jid, grupo_nombre, mensaje, cuenta, hora_envio, dias_semana, country_code, admin_filter, batch_size, delay_minutes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(userId, grupoJid, grupoNombre, mensaje, cuenta, horaEnvio, diasSemana || "0,1,2,3,4,5,6", countryCode, adminFilter, batchSize || 0, delayMinutes || 5);
+}
+
+function toggleProgramadoMiembros(id) {
+    const row = db.prepare("SELECT activo FROM programado_miembros WHERE id = ?").get(id);
+    if (!row) return;
+    db.prepare("UPDATE programado_miembros SET activo = ? WHERE id = ?").run(row.activo ? 0 : 1, id);
+}
+
+function eliminarProgramadoMiembros(id) {
+    db.prepare("DELETE FROM programado_miembros WHERE id = ?").run(id);
+}
+
+function actualizarUltimoEnvioProgramado(id) {
+    db.prepare("UPDATE programado_miembros SET ultimo_envio = datetime('now') WHERE id = ?").run(id);
+}
+
+// --- DM DASHBOARD STATS ---
+function getDmStats(userId) {
+    const total = db.prepare("SELECT COUNT(*) as c FROM historial_envios WHERE user_id = ? AND tipo_envio = 'personal'").get(userId);
+    const exitosos = db.prepare("SELECT COUNT(*) as c FROM historial_envios WHERE user_id = ? AND tipo_envio = 'personal' AND resultado IN ('enviado_personal','enviado')").get(userId);
+    const fallidos = db.prepare("SELECT COUNT(*) as c FROM historial_envios WHERE user_id = ? AND tipo_envio = 'personal' AND resultado NOT IN ('enviado_personal','enviado')").get(userId);
+    const entregados = db.prepare("SELECT COUNT(*) as c FROM historial_envios WHERE user_id = ? AND tipo_envio = 'personal' AND estado_entrega = 'entregado'").get(userId);
+    const leidos = db.prepare("SELECT COUNT(*) as c FROM historial_envios WHERE user_id = ? AND tipo_envio = 'personal' AND estado_entrega = 'leido'").get(userId);
+    const porGrupo = db.prepare(`SELECT grupo_nombre, COUNT(*) as total,
+        SUM(CASE WHEN resultado IN ('enviado_personal','enviado') THEN 1 ELSE 0 END) as ok,
+        SUM(CASE WHEN resultado NOT IN ('enviado_personal','enviado') THEN 1 ELSE 0 END) as err
+        FROM historial_envios WHERE user_id = ? AND tipo_envio = 'personal' AND grupo_nombre IS NOT NULL
+        GROUP BY grupo_nombre ORDER BY total DESC LIMIT 20`).all(userId);
+    const ultimosDias = db.prepare(`SELECT DATE(fecha) as dia, COUNT(*) as total,
+        SUM(CASE WHEN resultado IN ('enviado_personal','enviado') THEN 1 ELSE 0 END) as ok
+        FROM historial_envios WHERE user_id = ? AND tipo_envio = 'personal' AND fecha >= datetime('now', '-7 days')
+        GROUP BY DATE(fecha) ORDER BY dia`).all(userId);
+    return {
+        total: total?.c || 0,
+        exitosos: exitosos?.c || 0,
+        fallidos: fallidos?.c || 0,
+        entregados: entregados?.c || 0,
+        leidos: leidos?.c || 0,
+        porGrupo,
+        ultimosDias,
+    };
+}
+
+// --- NUMEROS MANUALES (Envio Personal) ---
+function getNumerosManuales(userId, cuenta) {
+    return db.prepare("SELECT * FROM numeros_manuales WHERE user_id = ? AND cuenta = ? ORDER BY fecha DESC").all(userId, cuenta);
+}
+function agregarNumeroManual(userId, cuenta, numero) {
+    const jid = numero.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+    try {
+        db.prepare("INSERT OR IGNORE INTO numeros_manuales (user_id, cuenta, numero, jid) VALUES (?, ?, ?, ?)").run(userId, cuenta, numero.replace(/[^0-9]/g, ""), jid);
+    } catch (e) {}
+}
+function agregarNumerosManualesBulk(userId, cuenta, numeros) {
+    const stmt = db.prepare("INSERT OR IGNORE INTO numeros_manuales (user_id, cuenta, numero, jid) VALUES (?, ?, ?, ?)");
+    const tx = db.transaction((nums) => {
+        for (const n of nums) {
+            const clean = n.replace(/[^0-9]/g, "");
+            if (clean.length >= 7) {
+                stmt.run(userId, cuenta, clean, clean + "@s.whatsapp.net");
+            }
+        }
+    });
+    tx(numeros);
+}
+function eliminarNumeroManual(userId, cuenta, numero) {
+    db.prepare("DELETE FROM numeros_manuales WHERE user_id = ? AND cuenta = ? AND numero = ?").run(userId, cuenta, numero.replace(/[^0-9]/g, ""));
+}
+function limpiarNumerosManuales(userId, cuenta) {
+    db.prepare("DELETE FROM numeros_manuales WHERE user_id = ? AND cuenta = ?").run(userId, cuenta);
+}
+
+// --- PROMO ESCUCHA (Envio Interactivo) ---
+function getPromoEscucha(userId) {
+    return db.prepare("SELECT * FROM promo_escucha WHERE user_id = ? AND activo = 1").get(userId);
+}
+function registrarPromoEscucha(userId, palabraAceptar, palabraRechazar, respAceptar, respRechazar) {
+    db.prepare("INSERT OR REPLACE INTO promo_escucha (user_id, palabra_aceptar, palabra_rechazar, respuesta_aceptar, respuesta_rechazar, activo, fecha) VALUES (?, ?, ?, ?, ?, 1, datetime('now'))").run(userId, palabraAceptar || 'si', palabraRechazar || 'no', respAceptar || '', respRechazar || '');
+}
+function detenerPromoEscucha(userId) {
+    db.prepare("UPDATE promo_escucha SET activo = 0 WHERE user_id = ?").run(userId);
+}
+function registrarPromoRespuesta(userId, jid, numero, nombre, tipo) {
+    db.prepare("INSERT INTO promo_respuestas (user_id, jid, numero, nombre, tipo) VALUES (?, ?, ?, ?, ?)").run(userId, jid, numero, nombre || '', tipo);
+}
+function getPromoRespuestas(userId) {
+    return db.prepare("SELECT * FROM promo_respuestas WHERE user_id = ? ORDER BY fecha DESC").all(userId);
+}
+function limpiarPromoRespuestas(userId) {
+    db.prepare("DELETE FROM promo_respuestas WHERE user_id = ?").run(userId);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -1142,12 +1410,13 @@ module.exports = {
     getCampanaConfig, setCampanaConfig,
     getMaxGrupos, setMaxGrupos,
     getResponderConfig, setResponderConfig, toggleResponder, getKeywords, agregarKeywords, limpiarKeywords,
-    registrarEnvio, registrarRespuesta, getHistorialEnvios,
+    registrarEnvio, registrarRespuesta, getHistorialEnvios, getHistorialStats, actualizarEstadoEntrega,
     getStatsPorGrupo, getStatsRespuestas, getStatsRespuestasPorGrupo,
     limpiarHistorial, getDashboard,
-    // Nuevas funciones
     getTemplates, agregarTemplate, getTemplateById, eliminarTemplate,
     getBlacklist, agregarBlacklist, eliminarBlacklist, eliminarBlacklistById, estaEnBlacklist, limpiarBlacklist,
+    // Blacklist numeros individuales
+    getBlacklistNumeros, agregarBlacklistNumero, eliminarBlacklistNumero, eliminarBlacklistNumeroById, estaEnBlacklistNumero, limpiarBlacklistNumeros,
     actualizarGrupoStats, getGrupoStats, getGrupoStatsTop, getGrupoStatsWorst,
     getCampanaHorario, setCampanaHorario,
     getEnviosDiarios, incrementarEnvioDiario, getEnviosDiariosTotal,
@@ -1155,22 +1424,21 @@ module.exports = {
     getSinonimos, agregarSinonimo, eliminarSinonimo, limpiarSinonimos,
     getReporteDiario,
     exportarGrupos, importarGrupos, exportarCampanas,
-    // Panel auth
     panelLogin, panelRegistro, panelCambiarPassword, checkMembresia,
-    // Template extras
     editarTemplate, duplicarTemplate,
-    // User envio config
     getUserEnvioConfig, setUserEnvioConfig,
-    // Programados WSP
     getProgramados, crearProgramado, toggleProgramado, eliminarProgramado,
-    // Auto respuestas WSP
     getAutoRespuestas, agregarAutoRespuesta, eliminarAutoRespuesta, limpiarAutoRespuestas,
-    // Tasa entrega
     getTasaEntrega,
-    // Admin
     setAdmin, setTipoMembresia, getTodosUsuariosAdmin, normalizeId,
-    // Progreso envio (resume)
     guardarProgresoEnvio, getProgresoEnvio, getProgresoEnvioPendiente, eliminarProgresoEnvio,
-    // Anti-duplicate campana
     registrarEnvioCampanaDB, getUltimoEnvioCampana,
+    // Programados miembros
+    getProgramadosMiembros, crearProgramadoMiembros, toggleProgramadoMiembros, eliminarProgramadoMiembros, actualizarUltimoEnvioProgramado,
+    // DM Stats
+    getDmStats,
+    // Numeros manuales
+    getNumerosManuales, agregarNumeroManual, agregarNumerosManualesBulk, eliminarNumeroManual, limpiarNumerosManuales,
+    // Promo escucha
+    getPromoEscucha, registrarPromoEscucha, detenerPromoEscucha, registrarPromoRespuesta, getPromoRespuestas, limpiarPromoRespuestas,
 };

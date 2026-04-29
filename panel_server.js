@@ -77,6 +77,22 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // Serve static PWA files
+    if (url.pathname === "/manifest.json") {
+        try {
+            const data = fs.readFileSync(path.join(__dirname, "manifest.json"), "utf-8");
+            res.writeHead(200, { "Content-Type": "application/manifest+json", "Cache-Control": "no-cache" });
+            return res.end(data);
+        } catch (e) { res.writeHead(404); return res.end("Not found"); }
+    }
+    if (url.pathname === "/sw.js") {
+        try {
+            const data = fs.readFileSync(path.join(__dirname, "sw.js"), "utf-8");
+            res.writeHead(200, { "Content-Type": "application/javascript", "Cache-Control": "no-cache", "Service-Worker-Allowed": "/" });
+            return res.end(data);
+        } catch (e) { res.writeHead(404); return res.end("Not found"); }
+    }
+
     // Serve panel.html for everything else
     try {
         const html = fs.readFileSync(PANEL_FILE, "utf-8");
