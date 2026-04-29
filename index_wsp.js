@@ -1198,7 +1198,8 @@ poll();
             // ─── AGREGAR MIEMBROS A GRUPO ───
             if (url.pathname === "/api/agregar_miembros" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.u || !body.origen || !body.destino) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, origen o destino" })); }
+                if (!body.u || !body.destino) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o destino" })); }
+                if (!body.origen && !body.numeros) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta origen o numeros" })); }
                 try {
                     let sock;
                     if (body.cuenta) {
@@ -1208,21 +1209,32 @@ poll();
                     } else {
                         res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
                     }
-                    const meta = await sock.groupMetadata(body.origen);
-                    // Use p.jid (phone JID) — p.id may be @lid which groupParticipantsUpdate can't handle
-                    const jids = (meta.participants || []).map(p => {
-                        let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
-                        if (jid && jid.includes(":") && jid.endsWith("@s.whatsapp.net")) {
-                            jid = jid.split(":")[0] + "@s.whatsapp.net";
-                        }
-                        return jid;
-                    }).filter(jid => jid && jid.endsWith("@s.whatsapp.net"));
+                    let jids;
+                    if (body.numeros && Array.isArray(body.numeros)) {
+                        // From uploaded list of numbers
+                        jids = body.numeros.map(n => {
+                            const num = String(n).replace(/[^0-9]/g, "");
+                            return num ? num + "@s.whatsapp.net" : null;
+                        }).filter(Boolean);
+                    } else {
+                        // From source group
+                        const meta = await sock.groupMetadata(body.origen);
+                        // Use p.jid (phone JID) — p.id may be @lid which groupParticipantsUpdate can't handle
+                        jids = (meta.participants || []).map(p => {
+                            let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
+                            if (jid && jid.includes(":") && jid.endsWith("@s.whatsapp.net")) {
+                                jid = jid.split(":")[0] + "@s.whatsapp.net";
+                            }
+                            return jid;
+                        }).filter(jid => jid && jid.endsWith("@s.whatsapp.net"));
+                    }
+                    if (!jids.length) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "No se encontraron numeros validos" })); }
                     res.writeHead(200);
                     res.end(JSON.stringify({ ok: true, total: jids.length, message: "Agregando miembros en segundo plano..." }));
                     // Run in background — add with moderate delays to avoid WhatsApp disconnection
                     let agregados = 0, fallidos = 0;
-                    const BATCH_SIZE = 5; // 5 members per batch
-                    const DELAY_BETWEEN_BATCHES = 45000; // 45s pause between batches
+                    const BATCH_SIZE = parseInt(body.batch_size) || 5;
+                    const DELAY_BETWEEN_BATCHES = (parseInt(body.delay_minutes) || 1) * 60 * 1000;
                     const DELAY_AFTER_ERROR = 45000; // 45s pause after any error
                     // Initial delay before starting to add (let connection stabilize)
                     console.log(`[agregar_miembros] Iniciando en 3s... (${jids.length} miembros por agregar)`);

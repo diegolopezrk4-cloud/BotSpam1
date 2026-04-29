@@ -695,6 +695,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         </div>
         <span id="emPaisCount" style="color:var(--text2);font-size:13px"></span>
         <button class="btn btn-success" onclick="exportarMiembrosCSV()">📥 Exportar CSV</button>
+        <button class="btn btn-primary" onclick="exportarMiembrosTXT()">📄 Exportar TXT</button>
       </div>
       <div class="form-group">
         <label>Mensaje DM (dejar vacio si solo quieres agregar miembros)</label>
@@ -722,6 +723,27 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-success" onclick="enviarAMiembros()">📤 Enviar DM a Miembros</button>
         <button class="btn btn-primary" onclick="agregarMiembrosAGrupo()">➕ Agregar Miembros al Grupo Destino</button>
         <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Detener Envio</button>
+      </div>
+      <!-- Agregar miembros desde archivo TXT -->
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
+        <h4 style="margin:0 0 10px 0">📋 Agregar Miembros desde Lista</h4>
+        <p style="color:var(--text2);font-size:12px;margin-bottom:10px">Sube un archivo .txt con numeros (uno por linea) para agregarlos a un grupo donde eres admin.</p>
+        <div class="form-group" style="margin-bottom:10px">
+          <label>Archivo .txt con numeros</label>
+          <input type="file" id="emTxtFile" accept=".txt,.csv">
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div class="form-group" style="margin:0">
+            <label>Personas por lote</label>
+            <input type="number" id="emAddBatchSize" placeholder="30" min="1" value="30">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Minutos entre lotes</label>
+            <input type="number" id="emAddDelayMinutes" placeholder="5" min="1" value="5">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="agregarMiembrosDesdeArchivo()">➕ Agregar al Grupo Destino desde Archivo</button>
+        <div id="emAddFileInfo" style="color:var(--text2);font-size:12px;margin-top:8px"></div>
       </div>
       <div id="resumeBar" style="display:none;background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent2);align-items:center;gap:10px;flex-wrap:wrap">
         <span style="color:var(--accent2);font-weight:bold">🔄 Envio pendiente:</span>
@@ -3459,6 +3481,44 @@ function exportarMiembrosCSV(){
   const url='/api/exportar_miembros?u='+userId+'&grupo='+encodeURIComponent(grupo)+(cuenta?'&cuenta='+encodeURIComponent(cuenta):'');
   const a=document.createElement('a');a.href=url;a.download='miembros.csv';document.body.appendChild(a);a.click();a.remove();
   toast('Descargando CSV...');
+}
+
+// --- EXPORT MIEMBROS TXT ---
+async function exportarMiembrosTXT(){
+  const grupo=$('emGrupo')?.value;
+  const cuenta=$('emCuenta')?.value;
+  if(!grupo){toast('Selecciona un grupo primero','error');return}
+  const r=await api('/api/miembros_grupo?u='+userId+'&grupo='+encodeURIComponent(grupo)+(cuenta?'&cuenta='+encodeURIComponent(cuenta):''));
+  if(!r.ok||!r.miembros){toast('Error al obtener miembros','error');return}
+  const nums=r.miembros.map(m=>m.numero).filter(n=>n&&n.length>3);
+  if(!nums.length){toast('No se encontraron numeros','error');return}
+  const blob=new Blob([nums.join('\n')],{type:'text/plain'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='miembros_numeros.txt';document.body.appendChild(a);a.click();a.remove();
+  toast(nums.length+' numeros exportados a TXT');
+}
+
+// --- AGREGAR MIEMBROS DESDE ARCHIVO ---
+async function agregarMiembrosDesdeArchivo(){
+  if(!requireMembresia())return;
+  const destino=$('emDestino')?.value;
+  const cuenta=$('emCuenta')?.value;
+  const fileInput=$('emTxtFile');
+  if(!destino){toast('Selecciona un grupo destino primero','error');return}
+  if(!fileInput||!fileInput.files||!fileInput.files[0]){toast('Sube un archivo .txt con numeros','error');return}
+  const file=fileInput.files[0];
+  const text=await file.text();
+  const numeros=text.split(/[\n\r,;]+/).map(n=>n.replace(/[^0-9]/g,'')).filter(n=>n.length>=7);
+  if(!numeros.length){toast('No se encontraron numeros validos en el archivo','error');return}
+  const batchSize=parseInt($('emAddBatchSize')?.value)||30;
+  const delayMin=parseInt($('emAddDelayMinutes')?.value)||5;
+  if(!confirm('Agregar '+numeros.length+' numeros al grupo destino?\n\nLotes de '+batchSize+' personas, pausa de '+delayMin+' min entre lotes.'))return;
+  toast('Agregando '+numeros.length+' miembros...','success');
+  const payload={u:userId,destino,numeros,batch_size:batchSize,delay_minutes:delayMin};
+  if(cuenta)payload.cuenta=cuenta;
+  const r=await api('/api/agregar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r.ok){toast('Agregando '+r.total+' miembros en segundo plano (lotes de '+batchSize+', '+delayMin+' min entre lotes)','success');$('emAddFileInfo').textContent='Agregando '+r.total+' miembros...';}
+  else{toast('Error: '+(r.error||''),'error');}
+  fileInput.value='';
 }
 
 // --- PROGRAMADOS MIEMBROS ---
