@@ -4141,6 +4141,8 @@ async def cmd_recuperpass(msg: types.Message, state: FSMContext):
 
 @dp.message(RecuperarState.esperando_nueva_password)
 async def recibir_nueva_password(msg: types.Message, state: FSMContext):
+    if not msg.text:
+        return await msg.answer("❌ Por favor envia tu nueva contrasena como texto.")
     new_pass = msg.text.strip()
     if len(new_pass) < 4:
         return await msg.answer("❌ La contrasena debe tener minimo 4 caracteres. Intenta de nuevo:")
