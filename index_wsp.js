@@ -652,6 +652,22 @@ poll();
                 const body = await readBody();
                 if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
                 const r = db.panelLogin(body.telegram_id, body.password);
+                if (r.ok) {
+                    const tfa = db.get2FA(body.telegram_id);
+                    if (tfa && tfa.enabled && !body.totp_code) {
+                        res.writeHead(200);
+                        return res.end(JSON.stringify({ ok: false, requires_2fa: true, error: "Ingresa tu codigo 2FA" }));
+                    }
+                    if (tfa && tfa.enabled && body.totp_code) {
+                        const valid = db.verify2FACode(tfa.secret, body.totp_code);
+                        if (!valid) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, requires_2fa: true, error: "Codigo 2FA invalido" })); }
+                    }
+                    const token = require("crypto").randomBytes(32).toString("hex");
+                    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+                    const ua = req.headers["user-agent"] || "";
+                    db.createSession(body.telegram_id, token, ip, ua);
+                    r.token = token;
+                }
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
             }
@@ -1961,6 +1977,84 @@ poll();
                     });
                     req.pipe(proxyReq);
                 });
+            }
+
+            // ─── 2FA ENDPOINTS ───
+            if (url.pathname === "/api/2fa/setup" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                const secret = db.setup2FA(body.telegram_id);
+                const otpauth = `otpauth://totp/J%26D%20Bot:${body.telegram_id}?secret=${secret}&issuer=J%26D%20Bot`;
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true, secret, otpauth }));
+            }
+            if (url.pathname === "/api/2fa/verify" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id || !body.code) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o code" })); }
+                const tfa = db.get2FA(body.telegram_id);
+                if (!tfa) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "2FA no configurado" })); }
+                const valid = db.verify2FACode(tfa.secret, body.code);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: valid, error: valid ? null : "Codigo invalido" }));
+            }
+            if (url.pathname === "/api/2fa/enable" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id || !body.code) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o code" })); }
+                const tfa = db.get2FA(body.telegram_id);
+                if (!tfa) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "Primero configura 2FA" })); }
+                const valid = db.verify2FACode(tfa.secret, body.code);
+                if (!valid) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "Codigo invalido" })); }
+                db.enable2FA(body.telegram_id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/2fa/disable" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                const loginCheck = db.panelLogin(body.telegram_id, body.password);
+                if (!loginCheck.ok) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "Contrasena incorrecta" })); }
+                db.disable2FA(body.telegram_id);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/2fa/status" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const tfa = db.get2FA(uid);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true, enabled: !!(tfa && tfa.enabled), configured: !!tfa }));
+            }
+
+            // ─── ACTIVE SESSIONS ENDPOINTS ───
+            if (url.pathname === "/api/panel_sessions" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const sessions = db.getSessions(uid);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true, sessions }));
+            }
+            if (url.pathname === "/api/panel_sessions/close" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                if (body.session_id) db.deleteSession(body.telegram_id, body.session_id);
+                else db.deleteAllSessions(body.telegram_id, body.current_token);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── EXPORT/IMPORT CONFIG ───
+            if (url.pathname === "/api/config/exportar" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const data = db.exportFullConfig(uid);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true, data, timestamp: new Date().toISOString() }));
+            }
+            if (url.pathname === "/api/config/importar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.data) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o data" })); }
+                const result = db.importFullConfig(body.u, body.data);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true, imported: result }));
+            }
+
+            // ─── DASHBOARD EXTENDED ───
+            if (url.pathname === "/api/dashboard/extended" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const data = db.getDashboardExtended(uid);
+                res.writeHead(200); return res.end(JSON.stringify({ ok: true, ...data }));
             }
 
             // Endpoint no encontrado

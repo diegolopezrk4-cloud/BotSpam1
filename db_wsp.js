@@ -474,6 +474,38 @@ function init() {
             PRIMARY KEY(user_id, sesion_nombre, grupo_jid)
         );
     `);
+    // --- 2FA ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS user_2fa (
+            telegram_id TEXT PRIMARY KEY,
+            secret TEXT NOT NULL,
+            enabled INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+    `);
+    // --- ACTIVE SESSIONS ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS active_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id TEXT NOT NULL,
+            token TEXT NOT NULL,
+            ip TEXT,
+            user_agent TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            last_active TEXT DEFAULT (datetime('now'))
+        );
+    `);
+    // --- ENVIOS SEMANALES (weekly stats cache) ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS envios_semanales (
+            user_id TEXT,
+            semana TEXT,
+            total INTEGER DEFAULT 0,
+            exitosos INTEGER DEFAULT 0,
+            fallidos INTEGER DEFAULT 0,
+            PRIMARY KEY(user_id, semana)
+        );
+    `);
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -1714,6 +1746,120 @@ function getPromoSentJids(userId) {
     ).all(userId).map(r => r.grupo_link);
 }
 
+// --- 2FA FUNCTIONS ---
+function setup2FA(telegramId) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    let secret = '';
+    for (let i = 0; i < 16; i++) secret += chars[Math.floor(Math.random() * chars.length)];
+    db.prepare("INSERT OR REPLACE INTO user_2fa (telegram_id, secret, enabled) VALUES (?, ?, 0)").run(telegramId, secret);
+    return secret;
+}
+function get2FA(telegramId) {
+    return db.prepare("SELECT * FROM user_2fa WHERE telegram_id = ?").get(telegramId);
+}
+function enable2FA(telegramId) {
+    db.prepare("UPDATE user_2fa SET enabled = 1 WHERE telegram_id = ?").run(telegramId);
+}
+function disable2FA(telegramId) {
+    db.prepare("DELETE FROM user_2fa WHERE telegram_id = ?").run(telegramId);
+}
+function verify2FACode(secret, code) {
+    const crypto = require("crypto");
+    const time = Math.floor(Date.now() / 1000 / 30);
+    for (let offset = -1; offset <= 1; offset++) {
+        const t = time + offset;
+        const buf = Buffer.alloc(8);
+        buf.writeUInt32BE(0, 0);
+        buf.writeUInt32BE(t, 4);
+        const base32decode = (s) => {
+            const a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+            let bits = '', bytes = [];
+            for (const c of s.toUpperCase()) { const v = a.indexOf(c); if (v >= 0) bits += v.toString(2).padStart(5, '0'); }
+            for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
+            return Buffer.from(bytes);
+        };
+        const key = base32decode(secret);
+        const hmac = crypto.createHmac("sha1", key).update(buf).digest();
+        const off2 = hmac[hmac.length - 1] & 0xf;
+        const otp = ((hmac[off2] & 0x7f) << 24 | hmac[off2 + 1] << 16 | hmac[off2 + 2] << 8 | hmac[off2 + 3]) % 1000000;
+        if (String(otp).padStart(6, '0') === String(code).padStart(6, '0')) return true;
+    }
+    return false;
+}
+
+// --- ACTIVE SESSIONS FUNCTIONS ---
+function createSession(telegramId, token, ip, userAgent) {
+    db.prepare("INSERT INTO active_sessions (telegram_id, token, ip, user_agent) VALUES (?, ?, ?, ?)").run(telegramId, token, ip || '', userAgent || '');
+}
+function getSessions(telegramId) {
+    return db.prepare("SELECT id, ip, user_agent, created_at, last_active FROM active_sessions WHERE telegram_id = ? ORDER BY last_active DESC").all(telegramId);
+}
+function deleteSession(telegramId, sessionId) {
+    db.prepare("DELETE FROM active_sessions WHERE telegram_id = ? AND id = ?").run(telegramId, sessionId);
+}
+function deleteAllSessions(telegramId, exceptToken) {
+    if (exceptToken) {
+        db.prepare("DELETE FROM active_sessions WHERE telegram_id = ? AND token != ?").run(telegramId, exceptToken);
+    } else {
+        db.prepare("DELETE FROM active_sessions WHERE telegram_id = ?").run(telegramId);
+    }
+}
+function touchSession(token) {
+    db.prepare("UPDATE active_sessions SET last_active = datetime('now') WHERE token = ?").run(token);
+}
+
+// --- EXPORT/IMPORT CONFIG ---
+function exportFullConfig(userId) {
+    const grupos = db.prepare("SELECT * FROM grupos WHERE user_id = ?").all(userId);
+    const campanas = db.prepare("SELECT * FROM campanas WHERE user_id = ?").all(userId);
+    const templates = db.prepare("SELECT * FROM templates WHERE user_id = ?").all(userId);
+    const blacklist = db.prepare("SELECT * FROM blacklist WHERE user_id = ?").all(userId);
+    const blacklistNum = db.prepare("SELECT * FROM blacklist_numeros WHERE user_id = ?").all(userId);
+    const autoResp = db.prepare("SELECT * FROM auto_respuestas WHERE user_id = ?").all(userId);
+    const config = db.prepare("SELECT * FROM user_envio_config WHERE user_id = ?").get(userId);
+    const promo = db.prepare("SELECT * FROM promo_plantillas WHERE user_id = ?").all(userId);
+    return { grupos, campanas, templates, blacklist, blacklist_numeros: blacklistNum, auto_respuestas: autoResp, config, promo_plantillas: promo };
+}
+function importFullConfig(userId, data) {
+    let imported = { grupos: 0, campanas: 0, templates: 0, blacklist: 0, auto_respuestas: 0 };
+    if (data.grupos && Array.isArray(data.grupos)) {
+        data.grupos.forEach(g => {
+            try { db.prepare("INSERT OR IGNORE INTO grupos (user_id, grupo_jid, nombre, link, seccion, size) VALUES (?, ?, ?, ?, ?, ?)").run(userId, g.grupo_jid, g.nombre, g.link, g.seccion || null, g.size || 0); imported.grupos++; } catch(_) {}
+        });
+    }
+    if (data.templates && Array.isArray(data.templates)) {
+        data.templates.forEach(t => {
+            try { db.prepare("INSERT INTO templates (user_id, nombre, mensaje, imagen_b64) VALUES (?, ?, ?, ?)").run(userId, t.nombre, t.mensaje, t.imagen_b64 || null); imported.templates++; } catch(_) {}
+        });
+    }
+    if (data.blacklist && Array.isArray(data.blacklist)) {
+        data.blacklist.forEach(b => {
+            try { db.prepare("INSERT OR IGNORE INTO blacklist (user_id, grupo_jid, nombre) VALUES (?, ?, ?)").run(userId, b.grupo_jid, b.nombre || ''); imported.blacklist++; } catch(_) {}
+        });
+    }
+    if (data.auto_respuestas && Array.isArray(data.auto_respuestas)) {
+        data.auto_respuestas.forEach(a => {
+            try { db.prepare("INSERT INTO auto_respuestas (user_id, keyword, respuesta) VALUES (?, ?, ?)").run(userId, a.keyword, a.respuesta); imported.auto_respuestas++; } catch(_) {}
+        });
+    }
+    if (data.config) {
+        try { db.prepare("INSERT OR REPLACE INTO user_envio_config (user_id, intervalo_min, intervalo_max, espera_ciclo, envio_imagen, caption_mode) VALUES (?, ?, ?, ?, ?, ?)").run(userId, data.config.intervalo_min || 8, data.config.intervalo_max || 15, data.config.espera_ciclo || 3600, data.config.envio_imagen || 0, data.config.caption_mode || 'caption'); } catch(_) {}
+    }
+    return imported;
+}
+
+// --- DASHBOARD EXTENDED ---
+function getDashboardExtended(userId) {
+    const hoy = new Date().toISOString().slice(0, 10);
+    const hace7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const hace30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const semana = db.prepare("SELECT COUNT(*) as total, SUM(CASE WHEN resultado IN ('enviado','enviado_pending') THEN 1 ELSE 0 END) as ok, SUM(CASE WHEN resultado NOT IN ('enviado','enviado_pending') THEN 1 ELSE 0 END) as err FROM historial_envios WHERE user_id = ? AND fecha >= ?").get(userId, hace7);
+    const mes = db.prepare("SELECT COUNT(*) as total, SUM(CASE WHEN resultado IN ('enviado','enviado_pending') THEN 1 ELSE 0 END) as ok, SUM(CASE WHEN resultado NOT IN ('enviado','enviado_pending') THEN 1 ELSE 0 END) as err FROM historial_envios WHERE user_id = ? AND fecha >= ?").get(userId, hace30);
+    const porHora = db.prepare("SELECT strftime('%H', fecha) as hora, COUNT(*) as total FROM historial_envios WHERE user_id = ? AND fecha >= ? GROUP BY hora ORDER BY hora").all(userId, hace7);
+    const topGrupos = db.prepare("SELECT grupo_nombre, COUNT(*) as total, SUM(CASE WHEN resultado IN ('enviado','enviado_pending') THEN 1 ELSE 0 END) as ok FROM historial_envios WHERE user_id = ? AND fecha >= ? GROUP BY grupo_nombre ORDER BY total DESC LIMIT 10").all(userId, hace30);
+    return { semana: semana || {}, mes: mes || {}, porHora, topGrupos };
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -1776,4 +1922,12 @@ module.exports = {
     setGrupoSeccion, setGrupoSeccionBulk, getSecciones,
     // Promo plantillas
     getPromoPlantillas, getPromoPlantilla, crearPromoPlantilla, editarPromoPlantilla, eliminarPromoPlantilla,
+    // 2FA
+    setup2FA, get2FA, enable2FA, disable2FA, verify2FACode,
+    // Active sessions
+    createSession, getSessions, deleteSession, deleteAllSessions, touchSession,
+    // Export/Import config
+    exportFullConfig, importFullConfig,
+    // Dashboard extended
+    getDashboardExtended,
 };

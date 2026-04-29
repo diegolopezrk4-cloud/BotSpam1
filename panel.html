@@ -435,6 +435,9 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="tgautoresp" data-plat="tg"><span class="icon">🤖</span><span>Auto-Responder TG</span></a>
       <a href="#" data-section="tgconfig" data-plat="tg"><span class="icon">⚙</span><span>Config Envio TG</span></a>
       <a href="#" data-section="tglistanegra" data-plat="tg"><span class="icon">🚫</span><span>Lista Negra TG</span></a>
+      <div class="nav-group">Seguridad</div>
+      <a href="#" data-section="seguridad"><span class="icon">🔐</span><span>2FA y Sesiones</span></a>
+      <a href="#" data-section="backup"><span class="icon">💾</span><span>Backup / Restaurar</span></a>
       <div class="nav-group">General</div>
       <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas y DMs</span></a>
       <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
@@ -478,6 +481,15 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="section active" id="sec-dashboard">
       <h2>📊 Dashboard</h2>
       <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Vista general de tu cuenta. Aqui puedes ver tus envios del dia, tasa de entrega, graficos de actividad y los limites de tu plan actual.</p>
+      <!-- PWA Install Banner -->
+      <div id="pwaInstallBanner" style="display:none;background:linear-gradient(135deg,var(--accent),#5a4bd1);padding:15px 20px;border-radius:12px;margin-bottom:15px;color:#fff;cursor:pointer" onclick="installPWA()">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:28px">📲</span>
+          <div style="flex:1"><b>Instalar como App</b><br><span style="font-size:12px;opacity:0.9">Agrega J&D Bot a tu pantalla principal para acceso rapido</span></div>
+          <button class="btn" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);padding:8px 16px;font-size:13px" onclick="event.stopPropagation();installPWA()">Instalar</button>
+          <span style="cursor:pointer;font-size:18px;opacity:0.7" onclick="event.stopPropagation();$('pwaInstallBanner').style.display='none';localStorage.setItem('pwa_dismissed','1')">x</span>
+        </div>
+      </div>
       <div class="grid" id="dashCards"></div>
       <div class="grid">
         <div class="table-wrap">
@@ -489,17 +501,41 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <div id="dashTasa" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
         </div>
       </div>
-      <div class="table-wrap" style="margin-top:15px">
-        <div class="table-header"><h3>📊 Envios por Dia (ultimos 7 dias)</h3>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-sm btn-outline" onclick="loadChart(7)">7d</button>
-            <button class="btn btn-sm btn-outline" onclick="loadChart(14)">14d</button>
-            <button class="btn btn-sm btn-outline" onclick="loadChart(30)">30d</button>
+      <div class="grid" style="margin-top:15px">
+        <div class="table-wrap" style="flex:2">
+          <div class="table-header"><h3>📊 Envios por Dia</h3>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm btn-outline" onclick="loadChart(7)">7d</button>
+              <button class="btn btn-sm btn-outline" onclick="loadChart(14)">14d</button>
+              <button class="btn btn-sm btn-outline" onclick="loadChart(30)">30d</button>
+            </div>
           </div>
+          <div style="padding:15px;height:250px"><canvas id="enviosChart"></canvas></div>
         </div>
-        <div style="padding:15px;height:250px"><canvas id="enviosChart"></canvas></div>
+        <div class="table-wrap" style="flex:1">
+          <div class="table-header"><h3>🎯 Tasa de Exito</h3></div>
+          <div style="padding:15px;height:250px"><canvas id="tasaChart"></canvas></div>
+        </div>
       </div>
       <div class="grid" style="margin-top:15px">
+        <div class="table-wrap">
+          <div class="table-header"><h3>🕐 Actividad por Hora (semana)</h3></div>
+          <div style="padding:15px;height:200px"><canvas id="horaChart"></canvas></div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-header"><h3>🏆 Top 10 Grupos (mes)</h3></div>
+          <div id="topGruposContent" style="padding:10px;max-height:200px;overflow-y:auto;font-size:13px;color:var(--text2)">Cargando...</div>
+        </div>
+      </div>
+      <div class="grid" style="margin-top:15px">
+        <div class="card">
+          <div class="card-title">📊 Resumen Semanal</div>
+          <div id="resumenSemanal" style="margin-top:10px;font-size:14px;color:var(--text2)">Cargando...</div>
+        </div>
+        <div class="card">
+          <div class="card-title">📊 Resumen Mensual</div>
+          <div id="resumenMensual" style="margin-top:10px;font-size:14px;color:var(--text2)">Cargando...</div>
+        </div>
         <div class="card" id="limitesCard">
           <div class="card-title">📦 Limites de tu Plan</div>
           <div id="limitesInfo" style="margin-top:10px;font-size:14px;color:var(--text2)">Cargando...</div>
@@ -1177,7 +1213,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- GRUPOS TG -->
     <div class="section" id="sec-tggrupos">
       <h2>🌐 Grupos Telegram</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Grupos registrados para envio por Telegram.</p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Grupos registrados para envio por Telegram. Busca, filtra y organiza por secciones.</p>
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
         <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
           <label>Link del grupo (t.me/...)</label>
@@ -1185,6 +1221,16 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         </div>
         <button class="btn btn-primary" onclick="addTgGrupoPanel()">➕ Agregar</button>
         <button class="btn btn-danger btn-sm" onclick="delAllTgGruposPanel()">🗑 Borrar Todos</button>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:15px">
+        <input type="text" id="tgGrupoSearch" placeholder="🔍 Buscar grupo..." oninput="filterTgGrupos()" style="flex:1;min-width:180px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+        <select id="tgGrupoSeccionFilter" onchange="filterTgGrupos()" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+          <option value="">Todas las secciones</option>
+        </select>
+        <select id="tgGrupoSort" onchange="sortTgGrupos()" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+          <option value="name-asc">Nombre A-Z</option>
+          <option value="name-desc">Nombre Z-A</option>
+        </select>
       </div>
       <div id="tgGruposContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
@@ -1348,6 +1394,63 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-success" onclick="exportarAdminLogsCSV()">📥 Exportar CSV</button>
       </div>
       <div id="adminLogsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- SEGURIDAD (2FA + Sesiones Activas) -->
+    <div class="section" id="sec-seguridad">
+      <h2>🔐 Seguridad</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Configura la autenticacion de dos factores (2FA) y gestiona tus sesiones activas.</p>
+      <div class="grid">
+        <div class="table-wrap">
+          <div class="table-header"><h3>🔑 Autenticacion 2FA (TOTP)</h3></div>
+          <div style="padding:15px" id="twoFactorContent">
+            <div id="twoFactorStatus" style="margin-bottom:15px">Cargando...</div>
+            <div id="twoFactorSetup" style="display:none">
+              <p style="color:var(--text2);margin-bottom:10px;font-size:13px">Escanea este codigo con tu app de autenticacion (Google Authenticator, Authy, etc):</p>
+              <div id="twoFactorQR" style="text-align:center;margin:15px 0;padding:15px;background:white;border-radius:12px;display:inline-block"></div>
+              <div style="margin:10px 0;font-size:12px;color:var(--text2)">O ingresa esta clave manualmente: <code id="twoFactorSecret" style="background:var(--bg);padding:4px 8px;border-radius:4px;font-size:14px;letter-spacing:2px"></code></div>
+              <div class="form-group" style="margin-top:15px">
+                <label>Codigo de verificacion (6 digitos)</label>
+                <input type="text" id="twoFactorCode" placeholder="123456" maxlength="6" style="font-size:18px;text-align:center;letter-spacing:8px;max-width:200px">
+              </div>
+              <button class="btn btn-success" onclick="enable2FA()">Activar 2FA</button>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-header"><h3>📱 Sesiones Activas</h3></div>
+          <div style="padding:15px" id="sessionsContent">
+            <div id="sessionsList">Cargando...</div>
+            <div style="margin-top:15px">
+              <button class="btn btn-danger btn-sm" onclick="closeAllSessions()">🚪 Cerrar Todas las Otras Sesiones</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BACKUP / RESTAURAR -->
+    <div class="section" id="sec-backup">
+      <h2>💾 Backup y Restaurar</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Exporta toda tu configuracion (grupos, campanas, plantillas, listas negras, auto-respuestas) como un archivo JSON. Importa un backup anterior para restaurar tu configuracion.</p>
+      <div class="grid">
+        <div class="table-wrap">
+          <div class="table-header"><h3>📤 Exportar Configuracion</h3></div>
+          <div style="padding:20px;text-align:center">
+            <p style="color:var(--text2);margin-bottom:15px;font-size:13px">Descarga toda tu configuracion como un archivo JSON. Incluye grupos, campanas, plantillas, listas negras, auto-respuestas y config de envio.</p>
+            <button class="btn btn-primary" onclick="exportarConfig()" style="font-size:16px;padding:12px 30px">📥 Descargar Backup</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-header"><h3>📥 Importar Configuracion</h3></div>
+          <div style="padding:20px;text-align:center">
+            <p style="color:var(--text2);margin-bottom:15px;font-size:13px">Sube un archivo de backup (.json) para restaurar tu configuracion. Los datos existentes no se borran, solo se agregan los nuevos.</p>
+            <input type="file" id="importConfigFile" accept=".json" style="display:none" onchange="importarConfig()">
+            <button class="btn btn-success" onclick="$('importConfigFile').click()" style="font-size:16px;padding:12px 30px">📤 Subir Backup</button>
+            <div id="importResult" style="margin-top:15px;font-size:13px;color:var(--text2)"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- (membresia banner moved to top of main) -->
@@ -1517,13 +1620,26 @@ async function doRecoverReset(){
 let esAdmin=false;
 let membresiaActiva=true;
 
+let _login2faId='';
 async function doLogin(){
   const id=$('loginId').value.trim(),pass=$('loginPass').value;
   if(!id||!pass){showErr('loginError','Ingresa ID y contrasena');return}
   $('btnLogin').disabled=true;$('btnLogin').textContent='Verificando...';
-  const r=await api('/api/panel_login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id,password:pass})});
+  const totpCode=$('login2faCode')?$('login2faCode').value.trim():'';
+  const payload={telegram_id:id,password:pass};
+  if(totpCode)payload.totp_code=totpCode;
+  const r=await api('/api/panel_login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   $('btnLogin').disabled=false;$('btnLogin').textContent='Iniciar Sesion';
   if(!r.ok){
+    if(r.requires_2fa){
+      _login2faId=id;
+      if(!$('login2faBox')){
+        const box=document.createElement('div');box.id='login2faBox';box.style.cssText='margin-top:12px';
+        box.innerHTML='<div class="form-group"><label>🔐 Codigo 2FA</label><input type="text" id="login2faCode" placeholder="123456" maxlength="6" style="font-size:18px;text-align:center;letter-spacing:8px"></div>';
+        $('btnLogin').parentElement.insertBefore(box,$('btnLogin'));
+      }
+      showErr('loginError',r.error||'Ingresa tu codigo 2FA');return;
+    }
     const msgs={'no_registrado':'No tienes cuenta. Registrate primero.','password_incorrecta':'Contrasena incorrecta.'};
     showErr('loginError',msgs[r.error]||r.error||'Error');return;
   }
@@ -1586,9 +1702,11 @@ async function showApp(){
   }
   initPlatformSwitch();
   loadDashboard();
+  loadDashboardExtended();
   loadLimites();
   loadChart(7);
   startNotifPolling();
+  initPWA();
   if(currentLang!=='es')applyLang();
 }
 
@@ -1623,7 +1741,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
+    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){}};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -3323,8 +3441,9 @@ function toggleTheme(){
 // --- MULTI-LANGUAGE ---
 let currentLang='es';
 const LANG={
-  es:{dashboard:'Dashboard',cuentas:'Cuentas WSP',grupos:'Grupos',mensajes:'Mensajes',envios:'Envio Unico',enviopersonal:'Envio Personal',campanas:'Campanas',config:'Config Envio',stats:'Estadisticas',admin:'Admin Panel',plantillas:'Plantillas',historial:'Historial',actividad:'Actividad',logout:'Cerrar Sesion',login:'Iniciar Sesion',register:'Registrarse',send:'Enviar',cancel:'Cancelar',delete:'Eliminar',save:'Guardar',create:'Crear',loading:'Cargando...',nodata:'Sin datos'},
-  en:{dashboard:'Dashboard',cuentas:'WSP Accounts',grupos:'Groups',mensajes:'Messages',envios:'Single Send',enviopersonal:'Personal Send',campanas:'Campaigns',config:'Send Config',stats:'Statistics',admin:'Admin Panel',plantillas:'Templates',historial:'History',actividad:'Activity',logout:'Logout',login:'Login',register:'Register',send:'Send',cancel:'Cancel',delete:'Delete',save:'Save',create:'Create',loading:'Loading...',nodata:'No data'}
+  es:{dashboard:'Dashboard',cuentas:'Cuentas WSP',grupos:'Grupos',mensajes:'Mensajes',envios:'Envio Unico',enviopersonal:'Envio Personal',campanas:'Campanas',config:'Config Envio',stats:'Estadisticas',admin:'Admin Panel',plantillas:'Plantillas',historial:'Historial',actividad:'Actividad',logout:'Cerrar Sesion',login:'Iniciar Sesion',register:'Registrarse',send:'Enviar',cancel:'Cancelar',delete:'Eliminar',save:'Guardar',create:'Crear',loading:'Cargando...',nodata:'Sin datos',seguridad:'2FA y Sesiones',backup:'Backup / Restaurar',enviomiembros:'Envio a Miembros',enviointeractivo:'Envio Interactivo',programados:'Programados',listanegra:'Lista Negra',autoresp:'Auto-Responder',logs:'Logs del Bot',retry:'Cola de Reintentos',tggrupos:'Grupos TG',tgmensajes:'Mensajes TG',tgcampanas:'Campanas TG',tgprogramados:'Programados TG',tghistorial:'Historial TG',tgdetectar:'Detectar Grupos TG',tgstats:'Stats TG',tgautoresp:'Auto-Responder TG',tgconfig:'Config Envio TG',tglistanegra:'Lista Negra TG',cuentastg:'Cuentas TG'},
+  en:{dashboard:'Dashboard',cuentas:'WSP Accounts',grupos:'Groups',mensajes:'Messages',envios:'Single Send',enviopersonal:'Personal Send',campanas:'Campaigns',config:'Send Config',stats:'Statistics',admin:'Admin Panel',plantillas:'Templates',historial:'History',actividad:'Activity',logout:'Logout',login:'Login',register:'Register',send:'Send',cancel:'Cancel',delete:'Delete',save:'Save',create:'Create',loading:'Loading...',nodata:'No data',seguridad:'2FA & Sessions',backup:'Backup / Restore',enviomiembros:'Member Send',enviointeractivo:'Interactive Send',programados:'Scheduled',listanegra:'Blacklist',autoresp:'Auto-Responder',logs:'Bot Logs',retry:'Retry Queue',tggrupos:'TG Groups',tgmensajes:'TG Messages',tgcampanas:'TG Campaigns',tgprogramados:'TG Scheduled',tghistorial:'TG History',tgdetectar:'Detect TG Groups',tgstats:'TG Stats',tgautoresp:'TG Auto-Responder',tgconfig:'TG Send Config',tglistanegra:'TG Blacklist',cuentastg:'TG Accounts'},
+  pt:{dashboard:'Painel',cuentas:'Contas WSP',grupos:'Grupos',mensajes:'Mensagens',envios:'Envio Unico',enviopersonal:'Envio Pessoal',campanas:'Campanhas',config:'Config Envio',stats:'Estatisticas',admin:'Admin',plantillas:'Modelos',historial:'Historico',actividad:'Atividade',logout:'Sair',login:'Entrar',register:'Registrar',send:'Enviar',cancel:'Cancelar',delete:'Excluir',save:'Salvar',create:'Criar',loading:'Carregando...',nodata:'Sem dados',seguridad:'2FA e Sessoes',backup:'Backup / Restaurar'}
 };
 function toggleLang(){
   currentLang=currentLang==='es'?'en':'es';
@@ -3336,8 +3455,7 @@ function applyLang(){
   const L=LANG[currentLang];
   document.querySelectorAll('.sidebar nav a[data-section]').forEach(a=>{
     const sec=a.dataset.section;
-    const key={dashboard:'dashboard',cuentas:'cuentas',cuentastg:'cuentas',grupos:'grupos',mensajes:'mensajes',envios:'envios',enviopersonal:'enviopersonal',enviomiembros:'enviopersonal',enviointeractivo:'envios',programados:'envios',campanas:'campanas',config:'config',listanegra:'config',autoresp:'config',stats:'stats',admin:'admin',adminlogs:'admin',plantillas:'plantillas',historial:'historial',actividad:'actividad'}[sec];
-    if(key&&L[key]){const sp=a.querySelectorAll('span');if(sp.length>1)sp[1].textContent=L[key]}
+    if(L[sec]){const sp=a.querySelectorAll('span');if(sp.length>1)sp[1].textContent=L[sec]}
   });
 }
 (function(){const l=localStorage.getItem('panel_lang');if(l){currentLang=l;document.getElementById('langToggle').textContent=l.toUpperCase()}})();
@@ -3779,6 +3897,228 @@ function exportarAdminLogsCSV(){
   const data=window._adminLogsData||[];
   if(!data.length){toast('Carga logs primero','error');return}
   downloadCSV('admin_logs.csv',data);
+}
+
+// --- PWA INSTALL ---
+let _deferredPrompt=null;
+function initPWA(){
+  window.addEventListener('beforeinstallprompt',(e)=>{
+    e.preventDefault();_deferredPrompt=e;
+    if(!localStorage.getItem('pwa_dismissed')&&$('pwaInstallBanner'))$('pwaInstallBanner').style.display='block';
+  });
+  window.addEventListener('appinstalled',()=>{
+    if($('pwaInstallBanner'))$('pwaInstallBanner').style.display='none';
+    toast('App instalada correctamente!','success');
+    addNotification('App instalada como PWA','success');
+  });
+}
+function installPWA(){
+  if(_deferredPrompt){_deferredPrompt.prompt();_deferredPrompt.userChoice.then(r=>{if(r.outcome==='accepted')toast('Instalando app...','success');_deferredPrompt=null;if($('pwaInstallBanner'))$('pwaInstallBanner').style.display='none'})}
+  else{toast('Usa el menu del navegador para instalar la app','info')}
+}
+
+// --- DASHBOARD EXTENDED ---
+let _tasaChartInstance=null;
+let _horaChartInstance=null;
+async function loadDashboardExtended(){
+  const r=await api('/api/dashboard/extended?u='+userId);
+  if(!r.ok)return;
+  const isDark=!document.documentElement.getAttribute('data-theme');
+  const textColor=isDark?'#94a3b8':'#555770';
+  // Weekly summary
+  if(r.semana){
+    const s=r.semana;
+    const tasa=s.total?(s.ok/s.total*100).toFixed(1):0;
+    $('resumenSemanal').innerHTML=`<p>📤 Total: <b style="color:var(--accent2)">${s.total||0}</b></p><p style="margin-top:5px">✅ Exitosos: <b style="color:var(--success)">${s.ok||0}</b></p><p style="margin-top:5px">❌ Fallidos: <b style="color:var(--danger)">${s.err||0}</b></p><p style="margin-top:5px">📊 Tasa: <b style="color:var(--accent2)">${tasa}%</b></p>`;
+  }
+  // Monthly summary
+  if(r.mes){
+    const m=r.mes;
+    const tasa=m.total?(m.ok/m.total*100).toFixed(1):0;
+    $('resumenMensual').innerHTML=`<p>📤 Total: <b style="color:var(--accent2)">${m.total||0}</b></p><p style="margin-top:5px">✅ Exitosos: <b style="color:var(--success)">${m.ok||0}</b></p><p style="margin-top:5px">❌ Fallidos: <b style="color:var(--danger)">${m.err||0}</b></p><p style="margin-top:5px">📊 Tasa: <b style="color:var(--accent2)">${tasa}%</b></p>`;
+  }
+  // Success rate donut
+  const tasaCanvas=$('tasaChart');
+  if(tasaCanvas&&r.semana){
+    if(_tasaChartInstance){_tasaChartInstance.destroy();_tasaChartInstance=null}
+    const ok=r.semana.ok||0,err=r.semana.err||0;
+    _tasaChartInstance=new Chart(tasaCanvas,{type:'doughnut',data:{labels:['Exitosos','Fallidos'],datasets:[{data:[ok,err],backgroundColor:['rgba(0,184,148,0.8)','rgba(233,69,96,0.8)'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:textColor}}}}});
+  }
+  // Activity by hour
+  const horaCanvas=$('horaChart');
+  if(horaCanvas&&r.porHora&&r.porHora.length){
+    if(_horaChartInstance){_horaChartInstance.destroy();_horaChartInstance=null}
+    const labels=Array.from({length:24},(_,i)=>String(i).padStart(2,'0')+':00');
+    const data=Array(24).fill(0);
+    r.porHora.forEach(h=>{const idx=parseInt(h.hora);if(idx>=0&&idx<24)data[idx]=h.total});
+    _horaChartInstance=new Chart(horaCanvas,{type:'line',data:{labels,datasets:[{label:'Envios',data,borderColor:'rgba(108,92,231,0.8)',backgroundColor:'rgba(108,92,231,0.1)',fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:textColor}}},scales:{x:{ticks:{color:textColor,maxTicksLimit:12}},y:{ticks:{color:textColor},beginAtZero:true}}}});
+  }
+  // Top groups
+  if(r.topGrupos&&r.topGrupos.length){
+    let h='';r.topGrupos.forEach((g,i)=>{
+      const tasa=g.total?(g.ok/g.total*100).toFixed(0):0;
+      h+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)"><span style="flex:1">${i+1}. ${esc(g.grupo_nombre||'?')}</span><span style="color:var(--accent2);font-weight:bold">${g.total}</span><span style="margin-left:8px;color:${parseInt(tasa)>=70?'var(--success)':'var(--danger)'}">${tasa}%</span></div>`;
+    });
+    $('topGruposContent').innerHTML=h;
+  }else{$('topGruposContent').innerHTML='<div class="empty-state" style="padding:20px"><p>Sin datos</p></div>'}
+}
+
+// --- 2FA FUNCTIONS ---
+async function load2FAStatus(){
+  const r=await api('/api/2fa/status?u='+userId);
+  if(!r.ok)return;
+  if(r.enabled){
+    $('twoFactorStatus').innerHTML=`<div style="display:flex;align-items:center;gap:10px;padding:15px;background:rgba(0,184,148,0.1);border:1px solid var(--success);border-radius:10px"><span style="font-size:24px">🛡</span><div><b style="color:var(--success)">2FA Activado</b><p style="color:var(--text2);font-size:12px;margin-top:4px">Tu cuenta esta protegida con autenticacion de dos factores.</p></div></div><button class="btn btn-danger btn-sm" style="margin-top:12px" onclick="disable2FA()">Desactivar 2FA</button>`;
+    $('twoFactorSetup').style.display='none';
+  }else{
+    $('twoFactorStatus').innerHTML=`<div style="display:flex;align-items:center;gap:10px;padding:15px;background:rgba(233,69,96,0.1);border:1px solid var(--danger);border-radius:10px"><span style="font-size:24px">⚠</span><div><b style="color:var(--danger)">2FA Desactivado</b><p style="color:var(--text2);font-size:12px;margin-top:4px">Activa la autenticacion de dos factores para mayor seguridad.</p></div></div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="setup2FA()">Configurar 2FA</button>`;
+  }
+}
+async function setup2FA(){
+  const r=await api('/api/2fa/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId})});
+  if(!r.ok){toast('Error al configurar 2FA','error');return}
+  $('twoFactorSecret').textContent=r.secret;
+  $('twoFactorQR').innerHTML=`<div style="padding:20px;background:var(--bg);border-radius:8px;font-size:13px"><p>Clave secreta:</p><code style="font-size:16px;letter-spacing:3px;color:var(--accent2)">${r.secret}</code><p style="margin-top:10px;color:var(--text2);font-size:11px">Ingresa esta clave en tu app de autenticacion<br>(Google Authenticator, Authy, Microsoft Authenticator)</p></div>`;
+  $('twoFactorSetup').style.display='block';
+}
+async function enable2FA(){
+  const code=$('twoFactorCode').value.trim();
+  if(!code||code.length!==6){toast('Ingresa un codigo de 6 digitos','error');return}
+  const r=await api('/api/2fa/enable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId,code})});
+  if(r.ok){toast('2FA activado exitosamente!','success');load2FAStatus();addNotification('2FA activado en tu cuenta','success')}
+  else{toast(r.error||'Codigo invalido','error')}
+}
+async function disable2FA(){
+  showModal(`<h3>⚠ Desactivar 2FA</h3><p style="color:var(--text2);margin-bottom:15px">Ingresa tu contrasena para desactivar la autenticacion de dos factores.</p><div class="form-group"><label>Contrasena</label><input type="password" id="disable2faPass"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmDisable2FA()">Desactivar</button></div>`);
+}
+async function confirmDisable2FA(){
+  const pass=$('disable2faPass').value;
+  if(!pass){toast('Ingresa tu contrasena','error');return}
+  closeModal();
+  const r=await api('/api/2fa/disable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId,password:pass})});
+  if(r.ok){toast('2FA desactivado','success');load2FAStatus()}
+  else{toast(r.error||'Error','error')}
+}
+
+// --- ACTIVE SESSIONS ---
+async function loadSessions(){
+  const r=await api('/api/panel_sessions?u='+userId);
+  if(!r.ok){$('sessionsList').innerHTML='<p>Error al cargar sesiones</p>';return}
+  const s=r.sessions||[];
+  if(!s.length){$('sessionsList').innerHTML='<div class="empty-state"><p>Sin sesiones activas</p></div>';return}
+  let h='';s.forEach(sess=>{
+    const ua=sess.user_agent||'Desconocido';
+    const short=ua.length>60?ua.slice(0,60)+'...':ua;
+    const isChrome=ua.includes('Chrome');const isFirefox=ua.includes('Firefox');const isMobile=ua.includes('Mobile');
+    const icon=isMobile?'📱':isChrome?'🖥':isFirefox?'🦊':'💻';
+    h+=`<div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg);border-radius:8px;margin-bottom:8px;border:1px solid var(--border)"><span style="font-size:24px">${icon}</span><div style="flex:1"><div style="font-size:13px;font-weight:600">${esc(short)}</div><div style="font-size:11px;color:var(--text2)">IP: ${esc(sess.ip||'?')} · Desde: ${esc(sess.created_at||'?')}</div><div style="font-size:11px;color:var(--text2)">Ultima actividad: ${esc(sess.last_active||'?')}</div></div><button class="btn btn-danger btn-sm" onclick="closeSession(${sess.id})">Cerrar</button></div>`;
+  });
+  $('sessionsList').innerHTML=h;
+}
+async function closeSession(id){
+  const r=await api('/api/panel_sessions/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId,session_id:id})});
+  if(r.ok){toast('Sesion cerrada','success');loadSessions()}
+  else toast('Error','error');
+}
+async function closeAllSessions(){
+  if(!confirm('Cerrar todas las otras sesiones?'))return;
+  const token=localStorage.getItem('panel_token');
+  const r=await api('/api/panel_sessions/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId,current_token:token})});
+  if(r.ok){toast('Sesiones cerradas','success');loadSessions()}
+  else toast('Error','error');
+}
+
+// --- EXPORT/IMPORT CONFIG ---
+async function exportarConfig(){
+  const r=await api('/api/config/exportar?u='+userId);
+  if(!r.ok){toast('Error al exportar','error');return}
+  const blob=new Blob([JSON.stringify(r,null,2)],{type:'application/json'});
+  const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download='backup_'+userId+'_'+new Date().toISOString().slice(0,10)+'.json';link.click();
+  toast('Backup descargado','success');
+  addNotification('Backup exportado exitosamente','success');
+}
+async function importarConfig(){
+  const file=$('importConfigFile').files[0];
+  if(!file){toast('Selecciona un archivo','error');return}
+  try{
+    const text=await file.text();
+    const json=JSON.parse(text);
+    const data=json.data||json;
+    if(!confirm('Importar configuracion? Los datos existentes no se borran, solo se agregan nuevos.'))return;
+    const r=await api('/api/config/importar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,data})});
+    if(r.ok){
+      const imp=r.imported||{};
+      $('importResult').innerHTML=`<div style="color:var(--success);font-weight:bold">Importacion exitosa!</div><p>Grupos: +${imp.grupos||0} | Templates: +${imp.templates||0} | Blacklist: +${imp.blacklist||0} | Auto-Resp: +${imp.auto_respuestas||0}</p>`;
+      toast('Configuracion importada','success');
+      addNotification('Configuracion restaurada desde backup','success');
+    }else{toast('Error: '+(r.error||''),'error')}
+  }catch(e){toast('Archivo invalido: '+e.message,'error')}
+  $('importConfigFile').value='';
+}
+
+// --- TG GROUPS SEARCH/FILTER ---
+let _tgGruposData=[];
+function filterTgGrupos(){
+  const search=($('tgGrupoSearch')?.value||'').toLowerCase();
+  const seccion=$('tgGrupoSeccionFilter')?.value||'';
+  const rows=document.querySelectorAll('#tgGruposContent table tbody tr');
+  rows.forEach(r=>{
+    const name=(r.dataset.name||'').toLowerCase();
+    const sec=r.dataset.seccion||'';
+    const matchSearch=!search||name.includes(search);
+    const matchSec=!seccion||sec===seccion;
+    r.style.display=(matchSearch&&matchSec)?'':'none';
+  });
+}
+function sortTgGrupos(){
+  const sort=$('tgGrupoSort')?.value||'name-asc';
+  const tbody=document.querySelector('#tgGruposContent table tbody');
+  if(!tbody)return;
+  const rows=Array.from(tbody.querySelectorAll('tr'));
+  rows.sort((a,b)=>{
+    const na=(a.dataset.name||'').toLowerCase(),nb=(b.dataset.name||'').toLowerCase();
+    if(sort==='name-asc')return na.localeCompare(nb);
+    if(sort==='name-desc')return nb.localeCompare(na);
+    return 0;
+  });
+  rows.forEach(r=>tbody.appendChild(r));
+}
+
+// --- LOCAL CACHE ---
+const CACHE_TTL=300000;
+function getCached(key){
+  try{
+    const item=localStorage.getItem('cache_'+key);
+    if(!item)return null;
+    const parsed=JSON.parse(item);
+    if(Date.now()-parsed.ts>CACHE_TTL)return null;
+    return parsed.data;
+  }catch(e){return null}
+}
+function setCache(key,data){
+  try{localStorage.setItem('cache_'+key,JSON.stringify({data,ts:Date.now()}))}catch(e){}
+}
+
+// --- PAGINATION HELPER ---
+function paginateArray(arr,page,perPage){
+  perPage=perPage||50;
+  const total=arr.length;
+  const totalPages=Math.ceil(total/perPage);
+  const start=(page-1)*perPage;
+  const items=arr.slice(start,start+perPage);
+  return{items,page,totalPages,total};
+}
+function renderPagination(containerId,currentPage,totalPages,onPageChange){
+  if(totalPages<=1)return'';
+  let h='<div style="display:flex;justify-content:center;gap:5px;margin-top:15px;flex-wrap:wrap">';
+  if(currentPage>1)h+=`<button class="btn btn-sm btn-outline" onclick="${onPageChange}(${currentPage-1})">◀</button>`;
+  const start=Math.max(1,currentPage-2),end=Math.min(totalPages,currentPage+2);
+  for(let i=start;i<=end;i++){
+    h+=`<button class="btn btn-sm ${i===currentPage?'btn-primary':'btn-outline'}" onclick="${onPageChange}(${i})">${i}</button>`;
+  }
+  if(currentPage<totalPages)h+=`<button class="btn btn-sm btn-outline" onclick="${onPageChange}(${currentPage+1})">▶</button>`;
+  h+=`<span style="color:var(--text2);font-size:12px;align-self:center;margin-left:8px">Pag ${currentPage}/${totalPages}</span></div>`;
+  return h;
 }
 
 // --- INIT ---
