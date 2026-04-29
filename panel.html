@@ -408,7 +408,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="grupos" data-plat="wsp"><span class="icon">🌐</span><span>Grupos</span></a>
       <a href="#" data-section="tggrupos" data-plat="tg"><span class="icon">🌐</span><span>Grupos TG</span></a>
       <div class="nav-group" data-plat="wsp">Mensajeria WSP</div>
-      <a href="#" data-section="mensajes" data-plat="wsp"><span class="icon">✉</span><span>Mensajes</span></a>
+      <a href="#" data-section="mensajes" data-plat="wsp"><span class="icon">✉</span><span>Mensajes y Plantillas</span></a>
       <a href="#" data-section="envios" data-plat="wsp"><span class="icon">📤</span><span>Envio Unico</span></a>
       <a href="#" data-section="enviopersonal" data-plat="wsp"><span class="icon">💬</span><span>Envio Personal</span></a>
       <a href="#" data-section="enviomiembros" data-plat="wsp"><span class="icon">👥</span><span>Envio a Miembros</span></a>
@@ -423,23 +423,20 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="tgdetectar" data-plat="tg"><span class="icon">🔍</span><span>Detectar Grupos TG</span></a>
       <a href="#" data-section="tgstats" data-plat="tg"><span class="icon">📈</span><span>Stats TG</span></a>
       <div class="nav-group">Herramientas</div>
-      <a href="#" data-section="plantillas"><span class="icon">📋</span><span>Plantillas</span></a>
       <a href="#" data-section="historial" data-plat="wsp"><span class="icon">📜</span><span>Historial WSP</span></a>
-      <a href="#" data-section="dmdashboard" data-plat="wsp"><span class="icon">📊</span><span>Dashboard DMs</span></a>
       <div class="nav-group" data-plat="wsp">Monitoreo</div>
       <a href="#" data-section="logs" data-plat="wsp"><span class="icon">📋</span><span>Logs del Bot</span></a>
       <a href="#" data-section="retry" data-plat="wsp"><span class="icon">🔄</span><span>Cola de Reintentos</span></a>
       <div class="nav-group" data-plat="wsp">Config WSP</div>
       <a href="#" data-section="config" data-plat="wsp"><span class="icon">⚙</span><span>Config Envio</span></a>
-      <a href="#" data-section="listanegra" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra Grupos</span></a>
-      <a href="#" data-section="listanegranumeros" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra Numeros</span></a>
+      <a href="#" data-section="listanegra" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra</span></a>
       <a href="#" data-section="autoresp" data-plat="wsp"><span class="icon">🤖</span><span>Auto-Responder</span></a>
       <div class="nav-group" data-plat="tg">Config TG</div>
       <a href="#" data-section="tgautoresp" data-plat="tg"><span class="icon">🤖</span><span>Auto-Responder TG</span></a>
       <a href="#" data-section="tgconfig" data-plat="tg"><span class="icon">⚙</span><span>Config Envio TG</span></a>
       <a href="#" data-section="tglistanegra" data-plat="tg"><span class="icon">🚫</span><span>Lista Negra TG</span></a>
       <div class="nav-group">General</div>
-      <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas</span></a>
+      <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas y DMs</span></a>
       <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
       <div class="nav-group admin-only" style="display:none">Admin</div>
       <a href="#" data-section="admin" class="admin-only" style="display:none"><span class="icon">👑</span><span>Admin Panel</span></a>
@@ -581,12 +578,22 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div id="gruposContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
-    <!-- MENSAJES -->
+    <!-- MENSAJES Y PLANTILLAS (consolidado) -->
     <div class="section" id="sec-mensajes">
-      <h2>✉ Mensajes</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Crea y administra tus mensajes. Estos mensajes se usan para enviarlos a grupos con Envio Unico o con Campanas. Puedes incluir texto e imagenes.</p>
-      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearMensaje()">➕ Crear Mensaje</button></div>
-      <div id="mensajesContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      <h2>✉ Mensajes y Plantillas</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Crea y administra tus mensajes para envios y campanas. Guarda plantillas reutilizables para agilizar tu trabajo.</p>
+      <div style="display:flex;gap:5px;margin-bottom:15px">
+        <button class="btn btn-primary" id="tabMensajes" onclick="switchMsgTab('mensajes')" style="opacity:1">✉ Mensajes</button>
+        <button class="btn" id="tabPlantillas" onclick="switchMsgTab('plantillas')" style="opacity:0.6">📋 Plantillas</button>
+      </div>
+      <div id="msgTabMensajes">
+        <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearMensaje()">➕ Crear Mensaje</button></div>
+        <div id="mensajesContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
+      <div id="msgTabPlantillas" style="display:none">
+        <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearPlantilla()">➕ Nueva Plantilla</button></div>
+        <div id="plantillasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
     </div>
 
     <!-- ENVIOS -->
@@ -623,16 +630,39 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div id="configContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
-    <!-- LISTA NEGRA -->
+    <!-- LISTA NEGRA (consolidado: grupos + numeros) -->
     <div class="section" id="sec-listanegra">
-      <h2>🚫 Lista Negra de Grupos</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Agrega grupos a la lista negra para que el bot no envie mensajes a ellos. Util cuando quieres excluir ciertos grupos de tus envios masivos o campanas.</p>
-      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
-        <input type="text" id="inputBlacklist" placeholder="Numero (ej: 51999888777)" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;flex:1;min-width:200px">
-        <button class="btn btn-danger" onclick="agregarBlacklist()">🚫 Bloquear</button>
-        <button class="btn btn-outline" onclick="limpiarBlacklist()">🗑 Limpiar</button>
+      <h2>🚫 Lista Negra</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Excluye grupos y numeros de tus envios masivos, campanas y DMs.</p>
+      <div style="display:flex;gap:5px;margin-bottom:15px">
+        <button class="btn btn-primary" id="tabBLGrupos" onclick="switchBlacklistTab('grupos')" style="opacity:1">👥 Grupos</button>
+        <button class="btn" id="tabBLNumeros" onclick="switchBlacklistTab('numeros')" style="opacity:0.6">📱 Numeros</button>
       </div>
-      <div id="listaNegraContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      <div id="blTabGrupos">
+        <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+          <input type="text" id="inputBlacklist" placeholder="Numero (ej: 51999888777)" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;flex:1;min-width:200px">
+          <button class="btn btn-danger" onclick="agregarBlacklist()">🚫 Bloquear</button>
+          <button class="btn btn-outline" onclick="limpiarBlacklist()">🗑 Limpiar</button>
+        </div>
+        <div id="listaNegraContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
+      <div id="blTabNumeros" style="display:none">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:15px">
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+            <label>Numero (ej: 51987654321)</label>
+            <input type="text" id="inputBlacklistNumero" placeholder="Numero sin + ni espacios">
+          </div>
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
+            <label>Razon (opcional)</label>
+            <input type="text" id="inputBlacklistNumeroRazon" placeholder="Razon">
+          </div>
+          <button class="btn btn-danger" onclick="agregarBlacklistNumero()">🚫 Bloquear</button>
+          <button class="btn btn-primary" onclick="verificarNumeroWsp()">🔍 Verificar WSP</button>
+        </div>
+        <div id="verificarResult" style="display:none;padding:10px;background:var(--bg3);border-radius:8px;margin-bottom:15px;font-size:13px"></div>
+        <div style="margin-bottom:10px"><button class="btn btn-danger" onclick="limpiarBlacklistNumeros()">🗑 Limpiar Todo</button></div>
+        <div id="blacklistNumerosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
     </div>
 
     <!-- AUTO RESPONDER -->
@@ -1045,10 +1075,19 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 
     <!-- STATS -->
     <div class="section" id="sec-stats">
-      <h2>📈 Estadisticas por Grupo</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Ve las estadisticas detalladas de envios por cada grupo: cuantos mensajes se enviaron, cuantos fallaron y la tasa de exito. Exporta los datos a CSV.</p>
-      <div style="margin-bottom:15px"><button class="btn btn-success" onclick="exportarStatsCSV()">📥 Exportar CSV</button></div>
-      <div id="statsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      <h2>📈 Estadisticas y DMs</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Estadisticas detalladas de envios a grupos y DMs a miembros.</p>
+      <div style="display:flex;gap:5px;margin-bottom:15px">
+        <button class="btn btn-primary" id="tabStatsGrupos" onclick="switchStatsTab('grupos')" style="opacity:1">👥 Estadisticas Grupos</button>
+        <button class="btn" id="tabStatsDMs" onclick="switchStatsTab('dms')" style="opacity:0.6">💬 Dashboard DMs</button>
+      </div>
+      <div id="statsTabGrupos">
+        <div style="margin-bottom:15px"><button class="btn btn-success" onclick="exportarStatsCSV()">📥 Exportar CSV</button></div>
+        <div id="statsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
+      <div id="statsTabDMs" style="display:none">
+        <div id="dmDashboardContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+      </div>
     </div>
 
     <!-- ADMIN -->
@@ -1251,13 +1290,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div class="grid" id="tgStatsCards"></div>
     </div>
 
-    <!-- PLANTILLAS -->
-    <div class="section" id="sec-plantillas">
-      <h2>📋 Plantillas de Mensajes</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Guarda mensajes frecuentes para reutilizarlos rapido.</p>
-      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearPlantilla()">➕ Nueva Plantilla</button></div>
-      <div id="plantillasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
-    </div>
+    <!-- PLANTILLAS (ahora integrado en sec-mensajes) -->
 
     <!-- HISTORIAL -->
     <div class="section" id="sec-historial">
@@ -1294,33 +1327,9 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div id="historialContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
-    <!-- DM DASHBOARD -->
-    <div class="section" id="sec-dmdashboard">
-      <h2>📊 Dashboard de DMs</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Estadisticas de envios a miembros (DMs directos).</p>
-      <div id="dmDashboardContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
-    </div>
+    <!-- DM DASHBOARD (ahora integrado en sec-stats) -->
 
-    <!-- BLACKLIST NUMEROS -->
-    <div class="section" id="sec-listanegranumeros">
-      <h2>🚫 Lista Negra de Numeros</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Bloquea numeros individuales para que no reciban DMs.</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:15px">
-        <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
-          <label>Numero (ej: 51987654321)</label>
-          <input type="text" id="inputBlacklistNumero" placeholder="Numero sin + ni espacios">
-        </div>
-        <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
-          <label>Razon (opcional)</label>
-          <input type="text" id="inputBlacklistNumeroRazon" placeholder="Razon">
-        </div>
-        <button class="btn btn-danger" onclick="agregarBlacklistNumero()">🚫 Bloquear</button>
-        <button class="btn btn-primary" onclick="verificarNumeroWsp()">🔍 Verificar WSP</button>
-      </div>
-      <div id="verificarResult" style="display:none;padding:10px;background:var(--bg3);border-radius:8px;margin-bottom:15px;font-size:13px"></div>
-      <div style="margin-bottom:10px"><button class="btn btn-danger" onclick="limpiarBlacklistNumeros()">🗑 Limpiar Todo</button></div>
-      <div id="blacklistNumerosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
-    </div>
+    <!-- BLACKLIST NUMEROS (ahora integrado en sec-listanegra) -->
 
     <!-- ACTIVIDAD -->
     <div class="section" id="sec-actividad">
@@ -1437,6 +1446,32 @@ function initPlatformSwitch(){
   document.querySelectorAll('.sidebar nav [data-plat]').forEach(el=>{
     el.style.display=el.dataset.plat===p?'':'none';
   });
+}
+
+// --- TAB SWITCHING (consolidated sections) ---
+function switchMsgTab(tab){
+  $('msgTabMensajes').style.display=tab==='mensajes'?'':'none';
+  $('msgTabPlantillas').style.display=tab==='plantillas'?'':'none';
+  $('tabMensajes').style.opacity=tab==='mensajes'?'1':'0.6';
+  $('tabMensajes').className=tab==='mensajes'?'btn btn-primary':'btn';
+  $('tabPlantillas').style.opacity=tab==='plantillas'?'1':'0.6';
+  $('tabPlantillas').className=tab==='plantillas'?'btn btn-primary':'btn';
+}
+function switchBlacklistTab(tab){
+  $('blTabGrupos').style.display=tab==='grupos'?'':'none';
+  $('blTabNumeros').style.display=tab==='numeros'?'':'none';
+  $('tabBLGrupos').style.opacity=tab==='grupos'?'1':'0.6';
+  $('tabBLGrupos').className=tab==='grupos'?'btn btn-primary':'btn';
+  $('tabBLNumeros').style.opacity=tab==='numeros'?'1':'0.6';
+  $('tabBLNumeros').className=tab==='numeros'?'btn btn-primary':'btn';
+}
+function switchStatsTab(tab){
+  $('statsTabGrupos').style.display=tab==='grupos'?'':'none';
+  $('statsTabDMs').style.display=tab==='dms'?'':'none';
+  $('tabStatsGrupos').style.opacity=tab==='grupos'?'1':'0.6';
+  $('tabStatsGrupos').className=tab==='grupos'?'btn btn-primary':'btn';
+  $('tabStatsDMs').style.opacity=tab==='dms'?'1':'0.6';
+  $('tabStatsDMs').className=tab==='dms'?'btn btn-primary':'btn';
 }
 
 // --- AUTH ---
@@ -1588,7 +1623,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,listanegranumeros:loadListaNegraNumeros,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,dmdashboard:loadDmDashboard,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
