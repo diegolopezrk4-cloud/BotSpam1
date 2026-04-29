@@ -610,9 +610,11 @@ poll();
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 try {
                     const started = await motor.enviarAPersonales(userId, mensaje, imagenPath, sock);
+                    if (started) db.agregarLog(userId, 'envio', 'Envio personal iniciado');
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
                 } catch (e) {
+                    db.agregarLog(userId, 'error', `Error envio personal: ${e.message}`);
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
                 }
@@ -1592,18 +1594,35 @@ poll();
                 if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 db.registrarPromoEscucha(body.u, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '');
                 db.limpiarPromoRespuestas(body.u);
-                // Stop any existing listeners before re-registering
+                // Save timeout config if provided (Mejora 3)
+                if (body.timeout_horas !== undefined) {
+                    db.setPromoTimeout(body.u, body.timeout_horas, body.recordatorio_activo, body.mensaje_recordatorio);
+                }
+                // Handle response images (Mejora 8)
+                let respAceptarImagen = null, respRechazarImagen = null;
+                if (body.resp_aceptar_imagen_b64) {
+                    const fotosDir = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir)) fs.mkdirSync(fotosDir, { recursive: true });
+                    respAceptarImagen = path.join(fotosDir, `promo_aceptar_${Date.now()}.jpg`);
+                    fs.writeFileSync(respAceptarImagen, Buffer.from(body.resp_aceptar_imagen_b64, "base64"));
+                }
+                if (body.resp_rechazar_imagen_b64) {
+                    const fotosDir = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir)) fs.mkdirSync(fotosDir, { recursive: true });
+                    respRechazarImagen = path.join(fotosDir, `promo_rechazar_${Date.now()}.jpg`);
+                    fs.writeFileSync(respRechazarImagen, Buffer.from(body.resp_rechazar_imagen_b64, "base64"));
+                }
                 motor.detenerPromoEscucha(body.u);
-                // Start listening on all connected accounts
                 try {
                     const sesiones = db.getSesiones(body.u);
                     for (const s of sesiones) {
                         try {
                             const sock = await motor.getOrConnectClient(body.u, s.nombre);
-                            motor.iniciarPromoEscucha(body.u, sock, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '');
+                            motor.iniciarPromoEscucha(body.u, sock, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '', respAceptarImagen, respRechazarImagen);
                         } catch (e) {}
                     }
                 } catch (e) {}
+                db.agregarLog(body.u, 'promo', 'Escucha promo activada');
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
@@ -1615,6 +1634,7 @@ poll();
                 const respuestas = db.getPromoRespuestas(body.u);
                 const aceptados = respuestas.filter(r => r.tipo === 'aceptado');
                 const rechazados = respuestas.filter(r => r.tipo === 'rechazado');
+                db.agregarLog(body.u, 'promo', `Escucha detenida. Aceptados: ${aceptados.length}, Rechazados: ${rechazados.length}`);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, aceptados, rechazados }));
             }
@@ -1625,8 +1645,119 @@ poll();
                 const respuestas = db.getPromoRespuestas(userId);
                 const aceptados = respuestas.filter(r => r.tipo === 'aceptado');
                 const rechazados = respuestas.filter(r => r.tipo === 'rechazado');
+                const total = respuestas.length;
+                const sinRespuesta = 0; // We don't track total sent yet
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, activo: !!escucha, aceptados, rechazados }));
+                return res.end(JSON.stringify({ ok: true, activo: !!escucha, aceptados, rechazados, total }));
+            }
+            // Mejora 1: Enviar promo + activar escucha en un solo paso
+            if (url.pathname === "/api/promo/enviar_y_escuchar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje" })); }
+                // Save image if provided
+                let imagenPath = null;
+                if (body.imagen_b64 && body.imagen_nombre) {
+                    const fotosDir = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir)) fs.mkdirSync(fotosDir, { recursive: true });
+                    const safeName = path.basename(body.imagen_nombre).replace(/[^a-zA-Z0-9._-]/g, '_');
+                    imagenPath = path.join(fotosDir, `promo_${Date.now()}_${safeName}`);
+                    fs.writeFileSync(imagenPath, Buffer.from(body.imagen_b64, "base64"));
+                }
+                // Register promo listening
+                db.registrarPromoEscucha(body.u, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '');
+                db.limpiarPromoRespuestas(body.u);
+                if (body.timeout_horas !== undefined) {
+                    db.setPromoTimeout(body.u, body.timeout_horas, body.recordatorio_activo, body.mensaje_recordatorio);
+                }
+                motor.detenerPromoEscucha(body.u);
+                // Start listening and send promo
+                let sock;
+                const sesiones = db.getSesiones(body.u);
+                for (const s of sesiones) {
+                    try {
+                        sock = await motor.getOrConnectClient(body.u, s.nombre);
+                        motor.iniciarPromoEscucha(body.u, sock, body.palabra_aceptar || 'si', body.palabra_rechazar || 'no', body.respuesta_aceptar || '', body.respuesta_rechazar || '');
+                    } catch (e) {}
+                }
+                if (body.cuenta) {
+                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (e) {}
+                }
+                if (!sock) sock = botSock;
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                // Send the promo message
+                const started = await motor.enviarAPersonales(body.u, body.mensaje, imagenPath, sock);
+                db.agregarLog(body.u, 'promo', 'Promo enviada + escucha activada');
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: started, message: started ? "promo enviada y escucha activada" : "ya hay un envio activo" }));
+            }
+
+            // ─── PROMO KEYWORDS (Mejora 7) ───
+            if (url.pathname === "/api/promo/keywords" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const keywords = db.getPromoKeywords(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, keywords }));
+            }
+            if (url.pathname === "/api/promo/keywords/agregar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.palabra) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o palabra" })); }
+                // Handle keyword image upload
+                let imgPath = null;
+                if (body.imagen_b64) {
+                    const fotosDir = path.join(__dirname, "fotos");
+                    if (!fs.existsSync(fotosDir)) fs.mkdirSync(fotosDir, { recursive: true });
+                    imgPath = path.join(fotosDir, `keyword_${Date.now()}.jpg`);
+                    fs.writeFileSync(imgPath, Buffer.from(body.imagen_b64, "base64"));
+                }
+                db.agregarPromoKeyword(body.u, body.palabra, body.respuesta_texto || '', imgPath, body.tipo || 'aceptar');
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/promo/keywords/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.eliminarPromoKeyword(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/promo/keywords/limpiar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.limpiarPromoKeywords(body.u);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── RETRY QUEUE (Mejora 4) ───
+            if (url.pathname === "/api/retry/stats" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const stats = db.getRetryStats(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...stats }));
+            }
+            if (url.pathname === "/api/retry/limpiar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                db.limpiarRetryCompletados(body.u);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── BOT LOGS (Mejora 6) ───
+            if (url.pathname === "/api/logs" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const limite = parseInt(url.searchParams.get("limite")) || 100;
+                const logs = db.getLogs(userId, limite);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs }));
+            }
+            if (url.pathname === "/api/logs/limpiar" && req.method === "POST") {
+                const body = await readBody();
+                db.limpiarLogs(body.u);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
             }
 
             // ─── GRUPOS/DEL con soporte link ───
@@ -1778,6 +1909,8 @@ async function startBot() {
 
             motor.setBotSocket(botSock);
             motor.iniciarSchedulerMiembros(botSock);
+            motor.iniciarRetryProcessor();
+            motor.iniciarPromoTimeoutChecker();
             console.log(`\u{1F4F1} Bot disponible como cuenta de spam: '${motor.BOT_NOMBRE}'`);
             console.log("\u{1F4F1} Listo para recibir mensajes.\n");
 

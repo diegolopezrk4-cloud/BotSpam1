@@ -365,6 +365,56 @@ function init() {
             FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
         );
     `);
+    // Table for retry queue (Mejora 4)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS retry_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            jid TEXT,
+            mensaje TEXT,
+            imagen_path TEXT DEFAULT NULL,
+            intentos INTEGER DEFAULT 0,
+            max_intentos INTEGER DEFAULT 3,
+            proximo_intento TEXT DEFAULT (datetime('now', '+5 minutes')),
+            estado TEXT DEFAULT 'pendiente',
+            error TEXT DEFAULT '',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+    `);
+    // Table for promo timeout config (Mejora 3)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS promo_timeout (
+            user_id TEXT PRIMARY KEY,
+            timeout_horas INTEGER DEFAULT 24,
+            recordatorio_activo INTEGER DEFAULT 0,
+            mensaje_recordatorio TEXT DEFAULT '',
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+    `);
+    // Table for multi-keyword promo responses (Mejora 7)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS promo_keywords (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            palabra TEXT,
+            respuesta_texto TEXT DEFAULT '',
+            respuesta_imagen TEXT DEFAULT NULL,
+            tipo TEXT DEFAULT 'aceptar',
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES usuarios(wsp_id)
+        );
+    `);
+    // Table for activity logs (Mejora 6)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS bot_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            tipo TEXT DEFAULT 'info',
+            mensaje TEXT,
+            fecha TEXT DEFAULT (datetime('now'))
+        );
+    `);
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -1078,12 +1128,24 @@ function exportarCampanas(userId) {
 
 // --- PANEL AUTH ---
 function panelLogin(telegramId, password) {
+    const bcrypt = require("bcryptjs");
     const user = db.prepare("SELECT * FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
     if (!user) return { ok: false, error: "no_registrado" };
-    if (user.password !== password) return { ok: false, error: "password_incorrecta" };
+    // Support both hashed and plain text passwords (backward compat)
+    let passOk = false;
+    if (user.password.startsWith("$2a$") || user.password.startsWith("$2b$")) {
+        passOk = bcrypt.compareSync(password, user.password);
+    } else {
+        passOk = (user.password === password);
+        // Migrate plain password to bcrypt on successful login
+        if (passOk) {
+            const hashed = bcrypt.hashSync(password, 10);
+            db.prepare("UPDATE panel_users SET password = ? WHERE telegram_id = ?").run(hashed, String(telegramId));
+        }
+    }
+    if (!passOk) return { ok: false, error: "password_incorrecta" };
     const usu = getUsuario(String(telegramId));
     let esAdmin = usu ? (usu.es_admin === 1) : false;
-    // Also check ADMIN_TELEGRAM_IDS from config
     if (!esAdmin) {
         try {
             const cfg = require("./config_wsp");
@@ -1094,9 +1156,11 @@ function panelLogin(telegramId, password) {
 }
 
 function panelRegistro(telegramId, password, username) {
+    const bcrypt = require("bcryptjs");
     const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
     if (existing) return { ok: false, error: "ya_registrado" };
-    db.prepare("INSERT INTO panel_users (telegram_id, username, password) VALUES (?, ?, ?)").run(String(telegramId), username || '', password);
+    const hashed = bcrypt.hashSync(password, 10);
+    db.prepare("INSERT INTO panel_users (telegram_id, username, password) VALUES (?, ?, ?)").run(String(telegramId), username || '', hashed);
     // Crear usuario principal si no existe y darle 1 dia demo
     const user = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(String(telegramId));
     if (!user) {
@@ -1107,10 +1171,18 @@ function panelRegistro(telegramId, password, username) {
 }
 
 function panelCambiarPassword(telegramId, oldPass, newPass) {
+    const bcrypt = require("bcryptjs");
     const user = db.prepare("SELECT * FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
     if (!user) return { ok: false, error: "Usuario no encontrado" };
-    if (user.password !== oldPass) return { ok: false, error: "Contraseña actual incorrecta" };
-    db.prepare("UPDATE panel_users SET password = ? WHERE telegram_id = ?").run(newPass, String(telegramId));
+    let passOk = false;
+    if (user.password.startsWith("$2a$") || user.password.startsWith("$2b$")) {
+        passOk = bcrypt.compareSync(oldPass, user.password);
+    } else {
+        passOk = (user.password === oldPass);
+    }
+    if (!passOk) return { ok: false, error: "Contraseña actual incorrecta" };
+    const hashed = bcrypt.hashSync(newPass, 10);
+    db.prepare("UPDATE panel_users SET password = ? WHERE telegram_id = ?").run(hashed, String(telegramId));
     return { ok: true };
 }
 
@@ -1396,6 +1468,78 @@ function limpiarPromoRespuestas(userId) {
     db.prepare("DELETE FROM promo_respuestas WHERE user_id = ?").run(userId);
 }
 
+// --- RETRY QUEUE (Mejora 4) ---
+function agregarRetryQueue(userId, jid, mensaje, imagenPath) {
+    db.prepare("INSERT INTO retry_queue (user_id, jid, mensaje, imagen_path) VALUES (?, ?, ?, ?)").run(userId, jid, mensaje, imagenPath || null);
+}
+function getRetryPendientes(userId) {
+    return db.prepare("SELECT * FROM retry_queue WHERE user_id = ? AND estado = 'pendiente' AND intentos < max_intentos AND proximo_intento <= datetime('now') ORDER BY fecha ASC LIMIT 50").all(userId);
+}
+function getRetryPendientesGlobal() {
+    return db.prepare("SELECT * FROM retry_queue WHERE estado = 'pendiente' AND intentos < max_intentos AND proximo_intento <= datetime('now') ORDER BY fecha ASC LIMIT 100").all();
+}
+function actualizarRetry(id, intentos, estado, error) {
+    const proximoIntento = estado === 'pendiente' ? `datetime('now', '+${5 * intentos} minutes')` : null;
+    if (estado === 'pendiente') {
+        db.prepare("UPDATE retry_queue SET intentos = ?, estado = ?, error = ?, proximo_intento = datetime('now', '+' || (5 * ?) || ' minutes') WHERE id = ?").run(intentos, estado, error || '', intentos, id);
+    } else {
+        db.prepare("UPDATE retry_queue SET intentos = ?, estado = ?, error = ? WHERE id = ?").run(intentos, estado, error || '', id);
+    }
+}
+function limpiarRetryCompletados(userId) {
+    db.prepare("DELETE FROM retry_queue WHERE user_id = ? AND (estado = 'enviado' OR estado = 'fallido')").run(userId);
+}
+function getRetryStats(userId) {
+    const pendientes = db.prepare("SELECT COUNT(*) as total FROM retry_queue WHERE user_id = ? AND estado = 'pendiente'").get(userId);
+    const enviados = db.prepare("SELECT COUNT(*) as total FROM retry_queue WHERE user_id = ? AND estado = 'enviado'").get(userId);
+    const fallidos = db.prepare("SELECT COUNT(*) as total FROM retry_queue WHERE user_id = ? AND estado = 'fallido'").get(userId);
+    return { pendientes: pendientes.total, enviados: enviados.total, fallidos: fallidos.total };
+}
+
+// --- PROMO TIMEOUT (Mejora 3) ---
+function getPromoTimeout(userId) {
+    return db.prepare("SELECT * FROM promo_timeout WHERE user_id = ?").get(userId);
+}
+function setPromoTimeout(userId, timeoutHoras, recordatorioActivo, mensajeRecordatorio) {
+    db.prepare("INSERT OR REPLACE INTO promo_timeout (user_id, timeout_horas, recordatorio_activo, mensaje_recordatorio) VALUES (?, ?, ?, ?)").run(userId, timeoutHoras || 24, recordatorioActivo ? 1 : 0, mensajeRecordatorio || '');
+}
+
+// --- PROMO KEYWORDS (Mejora 7) ---
+function getPromoKeywords(userId) {
+    return db.prepare("SELECT * FROM promo_keywords WHERE user_id = ? ORDER BY id ASC").all(userId);
+}
+function agregarPromoKeyword(userId, palabra, respuestaTexto, respuestaImagen, tipo) {
+    db.prepare("INSERT INTO promo_keywords (user_id, palabra, respuesta_texto, respuesta_imagen, tipo) VALUES (?, ?, ?, ?, ?)").run(userId, palabra, respuestaTexto || '', respuestaImagen || null, tipo || 'aceptar');
+}
+function eliminarPromoKeyword(id) {
+    db.prepare("DELETE FROM promo_keywords WHERE id = ?").run(id);
+}
+function limpiarPromoKeywords(userId) {
+    db.prepare("DELETE FROM promo_keywords WHERE user_id = ?").run(userId);
+}
+
+// --- BOT LOGS (Mejora 6) ---
+function agregarLog(userId, tipo, mensaje) {
+    try {
+        db.prepare("INSERT INTO bot_logs (user_id, tipo, mensaje) VALUES (?, ?, ?)").run(userId || 'system', tipo || 'info', mensaje);
+        // Keep only last 500 logs per user
+        db.prepare("DELETE FROM bot_logs WHERE id NOT IN (SELECT id FROM bot_logs WHERE user_id = ? ORDER BY id DESC LIMIT 500) AND user_id = ?").run(userId || 'system', userId || 'system');
+    } catch (e) {}
+}
+function getLogs(userId, limite) {
+    if (userId) {
+        return db.prepare("SELECT * FROM bot_logs WHERE user_id = ? ORDER BY id DESC LIMIT ?").all(userId, limite || 100);
+    }
+    return db.prepare("SELECT * FROM bot_logs ORDER BY id DESC LIMIT ?").all(limite || 100);
+}
+function limpiarLogs(userId) {
+    if (userId) {
+        db.prepare("DELETE FROM bot_logs WHERE user_id = ?").run(userId);
+    } else {
+        db.prepare("DELETE FROM bot_logs").run();
+    }
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -1441,4 +1585,12 @@ module.exports = {
     getNumerosManuales, agregarNumeroManual, agregarNumerosManualesBulk, eliminarNumeroManual, limpiarNumerosManuales,
     // Promo escucha
     getPromoEscucha, registrarPromoEscucha, detenerPromoEscucha, registrarPromoRespuesta, getPromoRespuestas, limpiarPromoRespuestas,
+    // Retry queue (Mejora 4)
+    agregarRetryQueue, getRetryPendientes, getRetryPendientesGlobal, actualizarRetry, limpiarRetryCompletados, getRetryStats,
+    // Promo timeout (Mejora 3)
+    getPromoTimeout, setPromoTimeout,
+    // Promo keywords (Mejora 7)
+    getPromoKeywords, agregarPromoKeyword, eliminarPromoKeyword, limpiarPromoKeywords,
+    // Bot logs (Mejora 6)
+    agregarLog, getLogs, limpiarLogs,
 };
