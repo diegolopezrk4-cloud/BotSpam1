@@ -614,6 +614,13 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <select id="emDestino"><option value="">-- Opcional: agregar miembros aqui --</option></select>
         </div>
       </div>
+      <div class="form-group" style="margin-bottom:15px">
+        <label>🌍 Filtrar por codigo de pais</label>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <select id="emPais" style="flex:1;max-width:300px" onchange="filtrarMiembrosPorPais()"><option value="">-- Todos los paises --</option></select>
+          <span id="emPaisCount" style="color:var(--text2);font-size:13px"></span>
+        </div>
+      </div>
       <div class="form-group">
         <label>Mensaje DM (dejar vacio si solo quieres agregar miembros)</label>
         <textarea id="emMensaje" rows="4" placeholder="Mensaje que se enviara como DM a cada miembro..."></textarea>
@@ -2135,22 +2142,63 @@ async function cargarGruposCuenta(){
     toast(postables.length+' grupos cargados ('+grupos.length+' total, filtrados solo donde puedes enviar)','success');
   }else{toast('Error: '+(r.error||''),'error')}
 }
+let _miembrosCache=[];
+const COUNTRY_NAMES={1:'US/CA',7:'RU',20:'EG',27:'ZA',30:'GR',31:'NL',32:'BE',33:'FR',34:'ES',36:'HU',39:'IT',40:'RO',41:'CH',43:'AT',44:'UK',45:'DK',46:'SE',47:'NO',48:'PL',49:'DE',51:'PE',52:'MX',53:'CU',54:'AR',55:'BR',56:'CL',57:'CO',58:'VE',60:'MY',61:'AU',62:'ID',63:'PH',64:'NZ',65:'SG',66:'TH',81:'JP',82:'KR',84:'VN',86:'CN',90:'TR',91:'IN',92:'PK',93:'AF',94:'LK',95:'MM',98:'IR',212:'MA',213:'DZ',216:'TN',218:'LY',220:'GM',221:'SN',234:'NG',249:'SD',254:'KE',255:'TZ',256:'UG',260:'ZM',263:'ZW',265:'MW',267:'BW',351:'PT',352:'LU',353:'IE',354:'IS',358:'FI',370:'LT',371:'LV',372:'EE',380:'UA',381:'RS',385:'HR',386:'SI',420:'CZ',421:'SK',502:'GT',503:'SV',504:'HN',505:'NI',506:'CR',507:'PA',509:'HT',521:'MX',591:'BO',592:'GY',593:'EC',594:'GF',595:'PY',596:'MQ',597:'SR',598:'UY',880:'BD',961:'LB',962:'JO',963:'SY',964:'IQ',965:'KW',966:'SA',967:'YE',968:'OM',971:'AE',972:'IL',973:'BH',974:'QA',977:'NP',992:'TJ',993:'TM',994:'AZ',995:'GE',996:'KG',998:'UZ'};
+function detectCountryCode(num){
+  if(!num||!/^\d+$/.test(num))return null;
+  for(const len of[3,2,1]){
+    const prefix=num.substring(0,len);
+    if(COUNTRY_NAMES[prefix])return prefix;
+  }
+  return num.substring(0,2);
+}
 async function cargarMiembros(){
   const grupoJid=$('emGrupo').value;
   const cuenta=$('emCuenta').value;
-  if(!grupoJid){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>Selecciona un grupo</p></div>';return}
+  if(!grupoJid){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>Selecciona un grupo</p></div>';_miembrosCache=[];return}
   $('miembrosContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando miembros...</div>';
   let url='/api/miembros_grupo?u='+userId+'&grupo='+encodeURIComponent(grupoJid)+'&cuenta='+encodeURIComponent(cuenta);
   const r=await api(url);
-  if(!r.ok){$('miembrosContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
+  if(!r.ok){$('miembrosContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';_miembrosCache=[];return}
   const m=r.miembros||[];
+  _miembrosCache=m;
   if(!m.length){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>No se encontraron miembros</p></div>';return}
+  // Populate country filter
+  const countryCounts={};
+  m.forEach(x=>{
+    const num=x.numero||(x.id?x.id.split('@')[0]:'');
+    const cc=detectCountryCode(num);
+    if(cc){countryCounts[cc]=(countryCounts[cc]||0)+1;}
+  });
+  const sel=$('emPais');
+  sel.innerHTML='<option value="">Todos los paises ('+m.length+' miembros)</option>';
+  Object.keys(countryCounts).sort((a,b)=>countryCounts[b]-countryCounts[a]).forEach(cc=>{
+    const name=COUNTRY_NAMES[cc]||'';
+    sel.innerHTML+=`<option value="${cc}">+${cc} ${name} (${countryCounts[cc]} miembros)</option>`;
+  });
+  $('emPaisCount').textContent='';
+  renderMiembrosTable(m);
+}
+function filtrarMiembrosPorPais(){
+  const cc=$('emPais').value;
+  if(!cc){renderMiembrosTable(_miembrosCache);$('emPaisCount').textContent='';return}
+  const filtered=_miembrosCache.filter(x=>{
+    const num=x.numero||(x.id?x.id.split('@')[0]:'');
+    return num.startsWith(cc);
+  });
+  $('emPaisCount').textContent=filtered.length+' de '+_miembrosCache.length+' miembros';
+  renderMiembrosTable(filtered);
+}
+function renderMiembrosTable(m){
+  if(!m.length){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>No hay miembros con este filtro</p></div>';return}
   let h='<div class="table-wrap"><div class="table-header"><h3>👥 '+m.length+' Miembros</h3></div>';
-  h+='<table><thead><tr><th>#</th><th>Numero</th><th>ID</th><th>Admin</th></tr></thead><tbody>';
+  h+='<table><thead><tr><th>#</th><th>Numero</th><th>Pais</th><th>Admin</th></tr></thead><tbody>';
   m.forEach((x,i)=>{
     const num=x.numero||(x.id?x.id.split('@')[0]:'?');
+    const cc=detectCountryCode(num);
     const displayNum=num.match(/^\d{7,15}$/)?'+'+num:num;
-    h+=`<tr><td>${i+1}</td><td><b>${displayNum}</b></td><td style="font-size:11px;color:var(--text2)">${x.id||x}</td><td>${x.admin?'<span class="badge badge-info">Admin</span>':''}</td></tr>`;
+    const pais=cc?('+'+cc+' '+(COUNTRY_NAMES[cc]||'')):'?';
+    h+=`<tr><td>${i+1}</td><td><b>${displayNum}</b></td><td style="font-size:12px">${pais}</td><td>${x.admin?'<span class="badge badge-info">Admin</span>':''}</td></tr>`;
   });
   h+='</tbody></table></div>';
   $('miembrosContent').innerHTML=h;
@@ -2159,13 +2207,16 @@ async function enviarAMiembros(){
   if(!requireMembresia())return;
   const grupo=$('emGrupo').value,msg=$('emMensaje').value.trim(),cuenta=$('emCuenta').value;
   const batchSize=$('emBatchSize').value,delayMinutes=$('emDelayMinutes').value||5;
+  const paisFilter=$('emPais').value;
   if(!grupo){toast('Selecciona un grupo','error');return}
   if(!msg){toast('Escribe un mensaje','error');return}
+  const paisInfo=paisFilter?' (solo +'+paisFilter+')':'';
   const batchInfo=batchSize?' (en lotes de '+batchSize+', pausa '+delayMinutes+' min)':'';
-  if(!confirm('Enviar DM a todos los miembros del grupo seleccionado'+batchInfo+'?'))return;
-  toast('Iniciando envio a miembros...','success');
+  if(!confirm('Enviar DM a los miembros'+paisInfo+' del grupo seleccionado'+batchInfo+'?'))return;
+  toast('Iniciando envio a miembros'+paisInfo+'...','success');
   const payload={u:userId,grupo,mensaje:msg};
   if(cuenta)payload.cuenta=cuenta;
+  if(paisFilter)payload.country_code=paisFilter;
   if(batchSize){payload.batch_size=parseInt(batchSize);payload.delay_minutes=parseInt(delayMinutes);}
   const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.grupo_nombre?' de '+r.grupo_nombre:'')+(r.filtered?' ('+r.filtered+' filtrados)':'')+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');}

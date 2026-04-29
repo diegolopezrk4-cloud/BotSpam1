@@ -1066,9 +1066,10 @@ poll();
                         if (jid.endsWith("@lid")) continue;
                         const num = jidToNumber(jid);
                         if (!num || !/^\d{7,15}$/.test(num)) continue;
-                        // Skip sender's own JID, blacklisted numbers, and duplicates
+                        // Skip sender's own JID, blacklisted numbers, country filter, and duplicates
                         if (num === myNum) continue;
                         if (blNums.has(num)) continue;
+                        if (body.country_code && !num.startsWith(body.country_code)) continue;
                         if (seen.has(num)) continue;
                         seen.add(num);
                         jids.push(jid);
