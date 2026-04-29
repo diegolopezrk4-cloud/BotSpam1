@@ -1256,6 +1256,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                     console.log(`[EnvioMiembros]   OK → key.id=${msgId || "?"} entrega=${estadoEntrega || "?"}`);
                     enviados++;
                     db.registrarEnvio(userId, 0, jid, "enviado_personal", grupoNombre, "personal", estadoEntrega, (mensaje || "").substring(0, 50));
+                    if (_promoListeners[userId]) _promoListeners[userId].promoSentJids.add(jid);
                 } catch (e) {
                     console.log(`[EnvioMiembros]   ERROR → ${e.message}`);
                     errores++;

@@ -808,7 +808,18 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <!-- Envio Todo en Uno (Mejora 1) -->
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent2)">
         <h3 style="margin-bottom:12px;color:var(--accent2)">🚀 Enviar Promo + Activar Escucha (Todo en Uno)</h3>
-        <p style="color:var(--text2);font-size:13px;margin-bottom:12px">Escribe tu mensaje promo, adjunta una imagen (opcional) y el bot lo enviara a todos tus contactos personales y activara la escucha automaticamente.</p>
+        <p style="color:var(--text2);font-size:13px;margin-bottom:12px">Escribe tu mensaje promo, adjunta una imagen (opcional) y el bot lo enviara y activara la escucha automaticamente.</p>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>📨 Tipo de envio</label>
+          <div style="display:flex;gap:10px">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;padding:8px 15px;border-radius:8px;border:2px solid var(--accent);background:var(--bg2)" id="promoTipoPersonalLabel">
+              <input type="radio" name="promoTipo" value="personal" checked onchange="togglePromoTipo()"> 💬 Envio Personal
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;padding:8px 15px;border-radius:8px;border:2px solid var(--border);background:var(--bg2)" id="promoTipoMiembrosLabel">
+              <input type="radio" name="promoTipo" value="miembros" onchange="togglePromoTipo()"> 👥 Envio a Miembros
+            </label>
+          </div>
+        </div>
         <div class="form-group">
           <label>📝 Mensaje de la promo</label>
           <textarea id="promoMensaje" rows="3" placeholder="Ej: Hola! Tenemos una oferta especial para ti. Responde SI si te interesa o NO si no." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:14px;resize:vertical"></textarea>
@@ -817,8 +828,22 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <label>🖼 Imagen de la promo (opcional)</label>
           <input type="file" id="promoImagen" accept="image/*" style="font-size:13px">
         </div>
+        <!-- Miembros mode: extra fields -->
+        <div id="promoMiembrosFields" style="display:none">
+          <div class="form-group">
+            <label>📂 Cuenta para cargar grupos (puede ser diferente a la cuenta de envio)</label>
+            <div style="display:flex;gap:10px;align-items:center">
+              <select id="promoGrupoCuenta" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)"><option value="">-- Selecciona cuenta --</option></select>
+              <button class="btn btn-primary" onclick="cargarGruposPromoMiembros()">🔄 Cargar Grupos</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>👥 Grupo (de donde tomar miembros)</label>
+            <select id="promoGrupo" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%"><option value="">-- Carga grupos primero --</option></select>
+          </div>
+        </div>
         <div class="form-group">
-          <label>Cuenta WhatsApp</label>
+          <label>📤 Cuenta WhatsApp para enviar</label>
           <select id="promoCuenta" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%">
             <option value="">-- Usar cuenta principal --</option>
           </select>
@@ -2768,6 +2793,11 @@ async function enviarPromoTodoEnUno(){
   if(!requireMembresia())return;
   const mensaje=$('promoMensaje')?.value?.trim();
   if(!mensaje){toast('Escribe un mensaje para la promo','error');return}
+  const tipoEnvio=document.querySelector('input[name="promoTipo"]:checked')?.value||'personal';
+  if(tipoEnvio==='miembros'){
+    const grupo=$('promoGrupo')?.value;
+    if(!grupo){toast('Selecciona un grupo para tomar miembros','error');return}
+  }
   const aceptar=$('promoAceptar').value.trim()||'si';
   const rechazar=$('promoRechazar').value.trim()||'no';
   const respAceptar=$('promoRespAceptar')?.value?.trim()||'';
@@ -2785,7 +2815,11 @@ async function enviarPromoTodoEnUno(){
   const respAceptarImgB64=await fileToBase64($('promoRespAceptarImg'));
   const respRechazarImgB64=await fileToBase64($('promoRespRechazarImg'));
   toast('Enviando promo y activando escucha...','success');
-  const payload={u:userId,mensaje,palabra_aceptar:aceptar,palabra_rechazar:rechazar,respuesta_aceptar:respAceptar,respuesta_rechazar:respRechazar,cuenta,timeout_horas:timeoutHoras,recordatorio_activo:recordatorio,mensaje_recordatorio:msgRecordatorio};
+  const payload={u:userId,mensaje,palabra_aceptar:aceptar,palabra_rechazar:rechazar,respuesta_aceptar:respAceptar,respuesta_rechazar:respRechazar,cuenta,timeout_horas:timeoutHoras,recordatorio_activo:recordatorio,mensaje_recordatorio:msgRecordatorio,tipo_envio:tipoEnvio};
+  if(tipoEnvio==='miembros'){
+    payload.grupo=$('promoGrupo').value;
+    payload.grupo_cuenta=$('promoGrupoCuenta').value;
+  }
   if(imagenB64){payload.imagen_b64=imagenB64;payload.imagen_nombre=imagenNombre}
   if(respAceptarImgB64)payload.resp_aceptar_imagen_b64=respAceptarImgB64;
   if(respRechazarImgB64)payload.resp_rechazar_imagen_b64=respRechazarImgB64;
@@ -2832,7 +2866,43 @@ async function loadPromoCuentas(){
   const r=await api('/api/sesiones?u='+userId);
   const sel=$('promoCuenta');if(!sel)return;
   sel.innerHTML='<option value="">-- Usar cuenta principal --</option>';
-  if(r.ok&&r.sesiones){r.sesiones.forEach(s=>{sel.innerHTML+='<option value="'+s.nombre+'">'+s.nombre+(s.telefono?' ('+s.telefono+')':'')+'</option>'})}
+  const sel2=$('promoGrupoCuenta');
+  if(sel2)sel2.innerHTML='<option value="">-- Selecciona cuenta --</option>';
+  if(r.ok&&r.sesiones){r.sesiones.forEach(s=>{
+    const opt='<option value="'+s.nombre+'">'+s.nombre+(s.telefono?' ('+s.telefono+')':'')+'</option>';
+    sel.innerHTML+=opt;
+    if(sel2)sel2.innerHTML+=opt;
+  })}
+}
+function togglePromoTipo(){
+  const tipo=document.querySelector('input[name="promoTipo"]:checked')?.value||'personal';
+  const fields=$('promoMiembrosFields');
+  const lP=$('promoTipoPersonalLabel'),lM=$('promoTipoMiembrosLabel');
+  if(tipo==='miembros'){
+    fields.style.display='block';
+    lM.style.borderColor='var(--accent)';lP.style.borderColor='var(--border)';
+  }else{
+    fields.style.display='none';
+    lP.style.borderColor='var(--accent)';lM.style.borderColor='var(--border)';
+  }
+}
+async function cargarGruposPromoMiembros(){
+  const cuenta=$('promoGrupoCuenta').value;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
+  toast('Cargando grupos de '+cuenta+'...','success');
+  const sel=$('promoGrupo');
+  sel.innerHTML='<option value="">-- Cargando... --</option>';
+  const r=await api('/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
+  sel.innerHTML='<option value="">-- Selecciona grupo --</option>';
+  if(r.ok){
+    const grupos=(r.grupos||[]).sort((a,b)=>(a.subject||'').localeCompare(b.subject||''));
+    grupos.forEach(g=>{
+      const name=g.subject||'Sin nombre';
+      const badge=g.esAdmin?' [Admin]':'';
+      sel.innerHTML+=`<option value="${g.jid}">${name}${badge} (${g.size} miembros)</option>`;
+    });
+    toast(grupos.length+' grupos cargados','success');
+  }else{toast('Error: '+(r.error||''),'error')}
 }
 
 // --- LOGS (Mejora 6) ---
