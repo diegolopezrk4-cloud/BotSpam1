@@ -729,7 +729,7 @@ poll();
                     try {
                         const groupJid = await motor.resolveGroupJid(botSock, g.link);
                         if (!groupJid) { db.registrarEnvio(body.u, 0, g.link, "error"); fallidos++; continue; }
-                        const result = motor.sendToGroup ? await motor.sendToGroup(botSock, groupJid, template.mensaje) : null;
+                        const result = motor.sendToGroup ? await motor.sendToGroup(botSock, groupJid, template.mensaje, template.imagen_path) : null;
                         if (result && result.sent) {
                             db.registrarEnvio(body.u, 0, g.link, "enviado");
                             exitosos++;
