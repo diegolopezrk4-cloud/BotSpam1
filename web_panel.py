@@ -664,11 +664,18 @@ async def api_tg_historial(request):
     if not user_id:
         return web.json_response({"ok": False, "error": "falta u"}, status=400)
     historial = await db.get_historial_envios(user_id, limite=100)
+    grupos = await db.get_grupos(user_id)
+    link_to_name = {}
+    for g in grupos:
+        link = g["link"]
+        name = link.replace("https://t.me/", "").replace("http://t.me/", "").replace("@", "")
+        link_to_name[link] = name
     return web.json_response({
         "ok": True,
         "historial": [
             {
-                "grupo": h["grupo_link"],
+                "grupo": link_to_name.get(h["grupo_link"], h["grupo_link"]),
+                "grupo_link": h["grupo_link"],
                 "resultado": h["resultado"],
                 "fecha": h["fecha"],
             } for h in historial
@@ -692,7 +699,7 @@ async def api_tg_autoresponder(request):
         "ok": True,
         "activo": activo,
         "contacto": contacto,
-        "keywords": [{"id": k["id"], "keyword": k["palabra"], "respuesta": ""} for k in keywords]
+        "keywords": [{"id": k["id"], "keyword": k["palabra"], "palabra": k["palabra"], "respuesta": k["respuesta"] or ""} for k in keywords]
     })
 
 
@@ -721,7 +728,7 @@ async def api_tg_autoresponder_keyword_add(request):
     respuesta = body.get("respuesta", "").strip()
     if not user_id or not keyword:
         return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
-    await db.agregar_keywords(user_id, [keyword])
+    await db.agregar_keywords(user_id, [keyword], respuesta)
     return web.json_response({"ok": True})
 
 
@@ -818,15 +825,51 @@ async def api_tg_stats(request):
     activas = sum(1 for c in campanas if c["activa"])
     total_env = sum(c["enviados"] for c in campanas)
     total_err = sum(c["errores"] for c in campanas)
+    sesiones = await db.get_sesiones(user_id)
     return web.json_response({
         "ok": True,
+        "stats": {
+            "total_envios": total_env,
+            "exitosos": total_env - total_err,
+            "fallidos": total_err,
+            "grupos": dashboard.get("grupos", 0),
+            "cuentas": len(sesiones),
+            "campanas": len(campanas),
+            "campanas_activas": activas,
+        },
         "campanas_total": len(campanas),
         "campanas_activas": activas,
         "enviados_total": total_env,
         "errores_total": total_err,
+        "cuentas": len(sesiones),
         "grupos": dashboard.get("grupos", 0),
-        "cuentas": dashboard.get("cuentas", 0),
     })
+
+
+# ─────────────────────────────────────────
+#   SYNC MEMBRESIA TG <-> WSP
+# ─────────────────────────────────────────
+
+async def api_tg_sync_membresia(request):
+    body = await request.json()
+    user_id = body.get("telegram_id") or body.get("user_id")
+    dias = int(body.get("dias", 0))
+    plan = body.get("plan", "")
+    if not user_id:
+        return web.json_response({"ok": False, "error": "falta telegram_id"}, status=400)
+    user = await db.get_usuario(user_id)
+    if not user:
+        await db.crear_usuario(user_id, body.get("username", ""))
+    if plan == "permanente":
+        async with db._connect() as conn:
+            await conn.execute(
+                "UPDATE usuarios SET plan='permanente', activo=1, fecha_expira=NULL WHERE telegram_id=?",
+                (int(user_id),)
+            )
+            await conn.commit()
+    elif dias > 0:
+        await db.activar_membresia(user_id, dias)
+    return web.json_response({"ok": True})
 
 
 # ─────────────────────────────────────────
@@ -954,6 +997,9 @@ def create_app():
 
     # Stats TG
     app.router.add_get("/api/tg/stats", api_tg_stats)
+
+    # Sync membresia
+    app.router.add_post("/api/tg/sync_membresia", api_tg_sync_membresia)
 
     # Detectar
     app.router.add_get("/api/tg/detectar", api_tg_detectar)

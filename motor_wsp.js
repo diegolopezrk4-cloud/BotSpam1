@@ -835,6 +835,13 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
             if (!socks.length) return;
 
             const keywordsLower = palabras.map(p => p.toLowerCase().trim());
+            const autoReglas = db.getAutoRespuestas(userId);
+            const autoReglasMap = {};
+            for (const r of autoReglas) {
+                const kw = (r.palabra || "").toLowerCase().trim();
+                if (kw) autoReglasMap[kw] = (r.respuesta || "").split("|").map(s => s.trim()).filter(s => s);
+            }
+            const autoRespCounters = {};
 
             for (const { nombre, sock } of socks) {
                 sock.ev.on("messages.upsert", async ({ messages }) => {
@@ -848,7 +855,31 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
                             || msg.message.extendedTextMessage?.text
                             || "";
                         const lower = text.toLowerCase();
+                        const pushName = msg.pushName || "";
 
+                        // Check auto_respuestas rules first (varied responses)
+                        let matched = false;
+                        for (const [kw, respuestas] of Object.entries(autoReglasMap)) {
+                            if (lower.includes(kw) && respuestas.length > 0) {
+                                if (!autoRespCounters[kw]) autoRespCounters[kw] = 0;
+                                const idx = autoRespCounters[kw] % respuestas.length;
+                                autoRespCounters[kw]++;
+                                let respText = respuestas[idx]
+                                    .replace(/\{usuario\}/gi, pushName || contacto)
+                                    .replace(/\{contacto\}/gi, contacto);
+                                try {
+                                    await sock.sendMessage(jid, { text: respText }, { quoted: msg });
+                                    db.registrarRespuesta(userId, jid, kw);
+                                } catch (e) {
+                                    console.error(`Responder error: ${e.message}`);
+                                }
+                                matched = true;
+                                break;
+                            }
+                        }
+                        if (matched) continue;
+
+                        // Fallback to simple keyword match
                         for (const kw of keywordsLower) {
                             if (lower.includes(kw)) {
                                 try {

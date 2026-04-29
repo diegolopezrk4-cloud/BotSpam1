@@ -132,6 +132,14 @@ async def init_db():
         """)
         await db.commit()
 
+    # Migrations
+    async with _connect() as db:
+        try:
+            await db.execute("ALTER TABLE responder_keywords ADD COLUMN respuesta TEXT DEFAULT ''")
+            await db.commit()
+        except Exception:
+            pass
+
 # ─────────────────────────────────────────
 #   USUARIOS
 # ─────────────────────────────────────────
@@ -535,14 +543,14 @@ async def get_keywords(user_id):
         ) as cur:
             return [r[0] for r in await cur.fetchall()]
 
-async def agregar_keywords(user_id, palabras):
+async def agregar_keywords(user_id, palabras, respuesta=""):
     async with _connect() as db:
         for p in palabras:
             p = p.strip().lower()
             if p:
                 await db.execute(
-                    "INSERT OR IGNORE INTO responder_keywords (user_id, palabra) VALUES (?,?)",
-                    (user_id, p)
+                    "INSERT INTO responder_keywords (user_id, palabra, respuesta) VALUES (?,?,?)",
+                    (user_id, p, respuesta)
                 )
         await db.commit()
 
@@ -550,7 +558,7 @@ async def get_keywords_full(user_id):
     async with _connect() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT id, palabra FROM responder_keywords WHERE user_id=?", (user_id,)
+            "SELECT id, palabra, respuesta FROM responder_keywords WHERE user_id=?", (user_id,)
         ) as cur:
             return await cur.fetchall()
 

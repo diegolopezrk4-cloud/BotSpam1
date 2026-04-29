@@ -12,7 +12,7 @@ def ahora_peru():
     return datetime.now(PERU_TZ)
 from db import (get_campana_by_id, get_grupos_campana, get_sesiones_campana,
                 actualizar_stats_campana, set_campana_activa, get_campana_config,
-                get_all_responder_activos, get_keywords, get_sesiones,
+                get_all_responder_activos, get_keywords, get_keywords_full, get_sesiones,
                 registrar_envio, registrar_respuesta, get_grupos,
                 eliminar_grupo_por_link)
 
@@ -526,6 +526,22 @@ async def worker_responder(user_id, contacto, keywords, bot_notificar=None):
             f"Hola, yo tengo disponible.\nContactame en {contacto}",
         ]
 
+        # Load keyword-specific responses from DB
+        keyword_responses = {}
+        keyword_counters = {}
+        try:
+            kw_full = await get_keywords_full(user_id)
+            for kw_row in kw_full:
+                kw_text = (kw_row["palabra"] or "").lower().strip()
+                kw_resp = kw_row["respuesta"] or ""
+                if kw_text and kw_resp:
+                    responses = [r.strip() for r in kw_resp.split("|") if r.strip()]
+                    if responses:
+                        keyword_responses[kw_text] = responses
+                        keyword_counters[kw_text] = 0
+        except Exception:
+            pass
+
         mensajes_respondidos = set()
         grupos_activos = []
         total_respondidos = 0
@@ -622,10 +638,24 @@ async def worker_responder(user_id, contacto, keywords, bot_notificar=None):
                             continue
 
                         texto_lower = msg.text.lower()
+                        sender_name = ""
+                        try:
+                            sender = msg.sender
+                            if sender:
+                                sender_name = getattr(sender, 'first_name', '') or getattr(sender, 'username', '') or ''
+                        except Exception:
+                            pass
                         for kw in keywords_lower:
                             if kw in texto_lower:
                                 try:
-                                    resp = random.choice(respuestas_variadas)
+                                    if kw in keyword_responses:
+                                        idx = keyword_counters.get(kw, 0) % len(keyword_responses[kw])
+                                        keyword_counters[kw] = idx + 1
+                                        resp = keyword_responses[kw][idx]
+                                        resp = resp.replace("{usuario}", sender_name or contacto)
+                                        resp = resp.replace("{contacto}", contacto)
+                                    else:
+                                        resp = random.choice(respuestas_variadas)
                                     await msg.reply(resp)
                                     await registrar_respuesta(user_id, grupo_link, kw)
                                     total_respondidos += 1

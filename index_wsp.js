@@ -982,19 +982,51 @@ poll();
                     }
                     const meta = await sock.groupMetadata(body.origen);
                     const jids = (meta.participants || []).map(p => p.id);
-                    let agregados = 0, fallidos = 0;
-                    for (const jid of jids) {
-                        try {
-                            await sock.groupParticipantsUpdate(body.destino, [jid], "add");
-                            agregados++;
-                            await new Promise(r => setTimeout(r, 2000));
-                        } catch { fallidos++; }
-                    }
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, agregados, fallidos }));
+                    res.end(JSON.stringify({ ok: true, total: jids.length, message: "Agregando miembros en segundo plano..." }));
+                    // Run in background to avoid timeout and crash
+                    let agregados = 0, fallidos = 0;
+                    const BATCH = 5;
+                    const DELAY_BETWEEN = 5000;
+                    const DELAY_BATCH = 30000;
+                    for (let i = 0; i < jids.length; i++) {
+                        try {
+                            // Re-check connection before each add
+                            if (body.cuenta) {
+                                sock = await motor.getOrConnectClient(body.u, body.cuenta);
+                            }
+                            if (!sock || !sock.ws || sock.ws.readyState !== 1) {
+                                console.log(`[agregar_miembros] Socket cerrado, reconectando...`);
+                                if (body.cuenta) {
+                                    sock = await motor.getOrConnectClient(body.u, body.cuenta);
+                                } else {
+                                    break;
+                                }
+                            }
+                            await sock.groupParticipantsUpdate(body.destino, [jids[i]], "add");
+                            agregados++;
+                        } catch (e) {
+                            console.log(`[agregar_miembros] Error ${jids[i]}: ${e.message}`);
+                            fallidos++;
+                            if (e.message && (e.message.includes("closed") || e.message.includes("disconnect") || e.message.includes("timed out"))) {
+                                await new Promise(r => setTimeout(r, 10000));
+                                if (body.cuenta) {
+                                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) { break; }
+                                } else { break; }
+                            }
+                        }
+                        await new Promise(r => setTimeout(r, DELAY_BETWEEN));
+                        if ((i + 1) % BATCH === 0 && i + 1 < jids.length) {
+                            console.log(`[agregar_miembros] Pausa de lote (${i + 1}/${jids.length})`);
+                            await new Promise(r => setTimeout(r, DELAY_BATCH));
+                        }
+                    }
+                    console.log(`[agregar_miembros] Completado: ${agregados} ok, ${fallidos} error de ${jids.length}`);
                 } catch (e) {
-                    res.writeHead(500);
-                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                    if (!res.writableEnded) {
+                        res.writeHead(500);
+                        return res.end(JSON.stringify({ ok: false, error: e.message }));
+                    }
                 }
             }
 
@@ -1098,6 +1130,15 @@ poll();
                 } else {
                     db.activarMembresia(user.wsp_id, dias);
                 }
+                // Sync membership to TG database
+                try {
+                    const http = require("http");
+                    const syncData = JSON.stringify({ telegram_id: tid, dias, plan, username: body.username || "" });
+                    const syncReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                    syncReq.on("error", () => {});
+                    syncReq.write(syncData);
+                    syncReq.end();
+                } catch (_) {}
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }

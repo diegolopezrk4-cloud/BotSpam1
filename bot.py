@@ -19,6 +19,7 @@ from aiogram.types import (InlineKeyboardMarkup, InlineKeyboardButton,
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
 
+import aiohttp
 import db
 import wsp_bridge
 from motor import (iniciar_campana, detener_campana, tareas_activas, get_session_path,
@@ -47,6 +48,18 @@ PLANES = {
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("JDSpamBot")
+
+async def sync_membresia_wsp(telegram_id, dias, plan="", username=""):
+    """Sync membership change to WSP database via WSP API."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                "http://127.0.0.1:3000/api/admin/membresia",
+                json={"admin_id": str(ADMIN_ID), "telegram_id": str(telegram_id), "dias": dias, "plan": plan, "username": username},
+                timeout=aiohttp.ClientTimeout(total=5)
+            )
+    except Exception:
+        pass
 bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher(storage=MemoryStorage())
 
@@ -1983,6 +1996,7 @@ async def cb_admin_activar_pago(call: types.CallbackQuery):
     dias = int(partes[2])
     await db.activar_membresia(uid, dias)
     plan_nombre = "Diario" if dias == 1 else "Semanal" if dias == 7 else "Mensual"
+    asyncio.create_task(sync_membresia_wsp(uid, dias, plan_nombre.lower()))
     await safe_edit(
         call.message,
         call.message.text + f"\n\n✅ ACTIVADO por {call.from_user.first_name}",
@@ -3988,6 +4002,7 @@ async def cmd_activar(msg: types.Message):
         dias = int(partes[2])
         await db.activar_membresia(uid, dias)
         plan_nombre = "Diario" if dias == 1 else "Semanal" if dias == 7 else "Mensual"
+        asyncio.create_task(sync_membresia_wsp(uid, dias, plan_nombre.lower()))
         await msg.answer(f"✅ Membresia activada.\n👤 {uid}\n📦 {plan_nombre}\n⏳ {dias} dias")
         try:
             await bot.send_message(uid,

@@ -546,10 +546,12 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- AUTO RESPONDER -->
     <div class="section" id="sec-autoresp">
       <h2>🤖 Auto-Responder</h2>
-      <div style="margin-bottom:15px;display:flex;gap:10px">
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="showCrearAutoResp()">➕ Agregar Regla</button>
+        <button class="btn btn-success" onclick="showImportarTxt()">📄 Importar TXT</button>
         <button class="btn btn-outline" onclick="limpiarAutoResp()">🗑 Limpiar</button>
       </div>
+      <p style="color:var(--text2);font-size:12px;margin-bottom:10px">💡 Usa <b>|</b> para separar respuestas variadas. Ej: "Netflix al mejor precio|Netflix con el mejor servicio". El bot rotara entre ellas. Usa <b>{usuario}</b> para insertar el nombre del contacto.</p>
       <div id="autoRespContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
@@ -1426,7 +1428,7 @@ async function loadTgHistorial(){
   let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Grupo</th><th>Resultado</th><th>Fecha</th></tr></thead><tbody>';
   h_data.forEach((x,i)=>{
     const res_badge=x.resultado==='enviado'?'<span class="badge badge-success">Enviado</span>':'<span class="badge badge-danger">'+esc(x.resultado||'Error')+'</span>';
-    h+=`<tr><td>${i+1}</td><td style="font-size:12px;max-width:250px;overflow:hidden;text-overflow:ellipsis">${esc(x.grupo_link||'?')}</td><td>${res_badge}</td><td style="font-size:11px">${esc(x.fecha||'—')}</td></tr>`;
+    h+=`<tr><td>${i+1}</td><td style="font-size:12px;max-width:250px;overflow:hidden;text-overflow:ellipsis">${esc(x.grupo||x.grupo_link||'?')}</td><td>${res_badge}</td><td style="font-size:11px">${esc(x.fecha||'—')}</td></tr>`;
   });
   h+='</tbody></table></div>';$('tgHistorialContent').innerHTML=h;
 }
@@ -1443,9 +1445,11 @@ async function loadTgAutoResp(){
   h+=`</div>`;
   h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent);display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">`;
   h+=`<div class="form-group" style="margin-bottom:0;flex:1;min-width:120px"><label>Palabra clave</label><input type="text" id="tgKwInput" placeholder="Ej: precio"></div>`;
-  h+=`<div class="form-group" style="margin-bottom:0;flex:2;min-width:200px"><label>Respuesta</label><input type="text" id="tgKwResp" placeholder="Respuesta automatica"></div>`;
+  h+=`<div class="form-group" style="margin-bottom:0;flex:2;min-width:200px"><label>Respuesta (usa | para variaciones)</label><input type="text" id="tgKwResp" placeholder="Resp1|Resp2|Resp3"></div>`;
   h+=`<button class="btn btn-primary" onclick="addTgKwPanel()">➕ Agregar</button>`;
+  h+=`<button class="btn btn-success btn-sm" onclick="showImportarTxtTg()">📄 TXT</button>`;
   h+=`<button class="btn btn-danger btn-sm" onclick="delAllTgKwPanel()">🗑 Limpiar</button></div>`;
+  h+=`<p style="font-size:11px;color:var(--text2);margin-bottom:10px">💡 Usa | para respuestas variadas. Usa {usuario} para insertar el nombre del contacto.</p>`;
   if(r.keywords&&r.keywords.length){
     h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;border:1px solid var(--border)"><h3 style="margin:0 0 10px">Palabras Clave (${r.keywords.length})</h3><table><thead><tr><th>Palabra</th><th>Respuesta</th><th></th></tr></thead><tbody>`;
     r.keywords.forEach(k=>{h+=`<tr><td><b>${esc(k.palabra||k.keyword)}</b></td><td style="font-size:12px;color:var(--text2)">${esc((k.respuesta||'').slice(0,80))}</td><td><button class="btn btn-danger btn-sm" onclick="delTgKwPanel(${k.id})">🗑</button></td></tr>`});
@@ -1457,6 +1461,26 @@ async function toggleTgAutoResp(activo){if(!requireMembresia())return;const r=aw
 async function addTgKwPanel(){if(!requireMembresia())return;const kw=$('tgKwInput').value.trim(),resp=$('tgKwResp').value.trim();if(!kw||!resp){toast('Palabra y respuesta requeridas','error');return}const r=await api('/api/tg/autoresponder/keyword/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,keyword:kw,respuesta:resp})});toast(r.ok?'Agregada':'Error',r.ok?'success':'error');loadTgAutoResp()}
 async function delTgKwPanel(id){if(!requireMembresia())return;const r=await api('/api/tg/autoresponder/keyword/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Eliminada':'Error',r.ok?'success':'error');loadTgAutoResp()}
 async function delAllTgKwPanel(){if(!requireMembresia())return;const r=await api('/api/tg/autoresponder/keyword/delall',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});toast(r.ok?'Limpiado':'Error',r.ok?'success':'error');loadTgAutoResp()}
+function showImportarTxtTg(){showModal(`<h3>📄 Importar TXT (Telegram)</h3><p style="font-size:13px;color:var(--text2);margin-bottom:10px">Formato: <code>palabra = respuesta1 | respuesta2</code><br>Ejemplo:<br><code>netflix = Netflix al mejor precio {usuario}|Netflix premium {usuario}</code></p><div class="form-group"><label>Archivo TXT</label><input type="file" id="tgArTxtFile" accept=".txt"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="importarTxtTgAR()">Importar</button></div>`)}
+async function importarTxtTgAR(){
+  const fileInput=$('tgArTxtFile');
+  if(!fileInput.files.length){toast('Selecciona un archivo','error');return}
+  const text=await fileInput.files[0].text();
+  const lines=text.split('\n').map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'));
+  let added=0;
+  for(const line of lines){
+    const sep=line.indexOf('=');
+    if(sep<1)continue;
+    const keyword=line.substring(0,sep).trim();
+    const respuesta=line.substring(sep+1).trim();
+    if(!keyword||!respuesta)continue;
+    const res=await api('/api/tg/autoresponder/keyword/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,keyword,respuesta})});
+    if(res.ok)added++;
+  }
+  closeModal();
+  toast(added+' keywords importadas','success');
+  loadTgAutoResp();
+}
 
 async function loadTgConfig(){
   const r=await api('/api/tg/config?u='+userId);
@@ -1876,11 +1900,31 @@ async function loadAutoResp(){
   reg.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${x.palabra||x.keyword||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${(x.respuesta||x.response||'').slice(0,80)}</td><td><button class="btn btn-danger btn-sm" onclick="elimAR(${x.id})">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('autoRespContent').innerHTML=h;
 }
-function showCrearAutoResp(){showModal(`<h3>➕ Auto-Respuesta</h3><div class="form-group"><label>Palabra clave</label><input id="arP" placeholder="Ej: precio"></div><div class="form-group"><label>Respuesta</label><textarea id="arR" rows="3" placeholder="Respuesta..."></textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearAR()">Agregar</button></div>`)}
+function showCrearAutoResp(){showModal(`<h3>➕ Auto-Respuesta</h3><div class="form-group"><label>Palabra clave</label><input id="arP" placeholder="Ej: precio, netflix"></div><div class="form-group"><label>Respuestas (separa con | para variaciones)</label><textarea id="arR" rows="4" placeholder="Ej: Netflix al mejor precio {usuario}|Netflix con el mejor servicio {usuario}|Hola {usuario}, Netflix disponible!"></textarea></div><p style="font-size:11px;color:var(--text2)">Usa {usuario} para insertar el nombre del contacto. Separa con | para que el bot rote entre respuestas.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearAR()">Agregar</button></div>`)}
 async function crearAR(){const p=$('arP').value.trim(),r=$('arR').value.trim();if(!p||!r){toast('Completa','error');return}closeModal();const res=await api('/api/auto_respuestas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'agregar',palabra:p,respuesta:r})});toast(res.ok?'Agregada':'Error',res.ok?'success':'error');loadAutoResp()}
 async function elimAR(id){await api('/api/auto_respuestas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'eliminar',id})});toast('Eliminada','success');loadAutoResp()}
 function limpiarAutoResp(){showModal(`<h3>🗑 Limpiar?</h3><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confLimpAR()">Limpiar</button></div>`)}
 async function confLimpAR(){closeModal();await api('/api/auto_respuestas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'limpiar'})});toast('Limpiadas','success');loadAutoResp()}
+function showImportarTxt(){showModal(`<h3>📄 Importar TXT</h3><p style="font-size:13px;color:var(--text2);margin-bottom:10px">Formato del archivo TXT (una regla por linea):<br><code>palabra_clave = respuesta1 | respuesta2 | respuesta3</code><br><br>Ejemplo:<br><code>netflix = Netflix al mejor precio {usuario}|Netflix premium aqui {usuario}</code><br><code>spotify = Spotify premium {usuario}|Mejor Spotify {usuario}</code></p><div class="form-group"><label>Archivo TXT</label><input type="file" id="arTxtFile" accept=".txt"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="importarTxtAR()">Importar</button></div>`)}
+async function importarTxtAR(){
+  const fileInput=$('arTxtFile');
+  if(!fileInput.files.length){toast('Selecciona un archivo','error');return}
+  const text=await fileInput.files[0].text();
+  const lines=text.split('\n').map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'));
+  let added=0;
+  for(const line of lines){
+    const sep=line.indexOf('=');
+    if(sep<1)continue;
+    const palabra=line.substring(0,sep).trim();
+    const respuesta=line.substring(sep+1).trim();
+    if(!palabra||!respuesta)continue;
+    const res=await api('/api/auto_respuestas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,accion:'agregar',palabra,respuesta})});
+    if(res.ok)added++;
+  }
+  closeModal();
+  toast(added+' reglas importadas','success');
+  loadAutoResp();
+}
 
 // --- AUTO-UNIRSE A GRUPOS ---
 function showAutoJoin(){
@@ -2058,7 +2102,7 @@ async function agregarMiembrosAGrupo(){if(!requireMembresia())return;
   const payload={u:userId,origen,destino};
   if(cuenta)payload.cuenta=cuenta;
   const r=await api('/api/agregar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  toast(r.ok?'Miembros agregados: '+(r.agregados||0)+' ok, '+(r.fallidos||0)+' error':'Error: '+(r.error||''),r.ok?'success':'error');
+  toast(r.ok?'Agregando '+(r.total||0)+' miembros en segundo plano (lotes de 5, 5s entre cada uno)':'Error: '+(r.error||''),r.ok?'success':'error');
 }
 
 // --- STATS ---
