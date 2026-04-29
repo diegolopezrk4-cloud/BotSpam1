@@ -59,18 +59,25 @@ async function connectClientAccount(userId, nombre, telefono) {
             }
             if (connection === "close") {
                 const code = lastDisconnect?.error?.output?.statusCode;
-                if (!resolved) {
-                    resolved = true;
-                    reject(new Error("Conexion cerrada" + (code ? ` (code ${code})` : "")));
-                }
                 // Clean up stale session
                 if (clientSessions[key] === sock) {
                     delete clientSessions[key];
                 }
+                if (code === 401 || code === DisconnectReason.loggedOut) {
+                    // Session was logged out - clean up auth files
+                    try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
+                    if (!resolved) {
+                        resolved = true;
+                        reject(new Error("Sesion WSP expirada o cerrada. Re-vincula tu cuenta desde Cuentas WSP."));
+                    }
+                } else if (!resolved) {
+                    resolved = true;
+                    reject(new Error("Conexion cerrada" + (code ? ` (code ${code})` : "") + ". Intenta de nuevo."));
+                }
             }
         });
         setTimeout(() => {
-            if (!resolved) { resolved = true; reject(new Error("Timeout conectando cuenta")); }
+            if (!resolved) { resolved = true; reject(new Error("Timeout conectando cuenta (60s)")); }
         }, 60000);
     });
 }
