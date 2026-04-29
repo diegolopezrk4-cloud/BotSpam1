@@ -2219,30 +2219,8 @@ async def cmd_estado(msg: types.Message):
 # ╚══════════════════════════════════════╝
 @dp.callback_query(F.data == "sec_cmds")
 async def cb_sec_cmds(call: types.CallbackQuery):
-    texto = (
-        "📖 GUIA RAPIDA J&D\n\n"
-        "1️⃣ Agrega una cuenta (/cuentas)\n"
-        "2️⃣ Agrega tus grupos (/grupos)\n"
-        "3️⃣ Crea una campana (/campanas)\n"
-        "4️⃣ Inicia la campana (/iniciar)\n\n"
-        "👇 Navega las secciones:"
-    )
-    botones = [
-        [InlineKeyboardButton(text="👤 Cuentas", callback_data="sec_cuentas"),
-         InlineKeyboardButton(text="🌐 Grupos", callback_data="sec_grupos")],
-        [InlineKeyboardButton(text="📋 Campanas", callback_data="sec_campanas"),
-         InlineKeyboardButton(text="🚀 Iniciar", callback_data="sec_iniciar")],
-        [InlineKeyboardButton(text="🤖 Responder", callback_data="sec_responder"),
-         InlineKeyboardButton(text="📊 Historial", callback_data="sec_historial")],
-        [InlineKeyboardButton(text="🗑 Eliminar", callback_data="sec_eliminar"),
-         InlineKeyboardButton(text="🛑 Detener", callback_data="sec_detener")],
-        [InlineKeyboardButton(text="📱 WhatsApp", callback_data="sec_wsp")],
-        kb_volver(),
-    ]
-    if es_admin(call.from_user.id):
-        botones.insert(-1, [InlineKeyboardButton(text="👑 Admin", callback_data="sec_admin")])
-    kb = InlineKeyboardMarkup(inline_keyboard=botones)
-    await safe_edit(call.message, texto, reply_markup=kb)
+    texto = await build_menu_text(call.from_user.id)
+    await safe_edit(call.message, texto, reply_markup=kb_inline_menu(call.from_user.id))
     await call.answer()
 
 @dp.message(Command("cmds"))
@@ -2250,30 +2228,8 @@ async def cb_sec_cmds(call: types.CallbackQuery):
 @dp.message(Command("help"))
 @dp.message(F.text == "📖 Comandos")
 async def cmd_cmds(msg: types.Message):
-    texto = (
-        "📖 GUIA RAPIDA J&D\n\n"
-        "1️⃣ Agrega una cuenta (/cuentas)\n"
-        "2️⃣ Agrega tus grupos (/grupos)\n"
-        "3️⃣ Crea una campana (/campanas)\n"
-        "4️⃣ Inicia la campana (/iniciar)\n\n"
-        "👇 Navega las secciones:"
-    )
-    botones = [
-        [InlineKeyboardButton(text="👤 Cuentas", callback_data="sec_cuentas"),
-         InlineKeyboardButton(text="🌐 Grupos", callback_data="sec_grupos")],
-        [InlineKeyboardButton(text="📋 Campanas", callback_data="sec_campanas"),
-         InlineKeyboardButton(text="🚀 Iniciar", callback_data="sec_iniciar")],
-        [InlineKeyboardButton(text="🤖 Responder", callback_data="sec_responder"),
-         InlineKeyboardButton(text="📊 Historial", callback_data="sec_historial")],
-        [InlineKeyboardButton(text="🗑 Eliminar", callback_data="sec_eliminar"),
-         InlineKeyboardButton(text="🛑 Detener", callback_data="sec_detener")],
-        [InlineKeyboardButton(text="📱 WhatsApp", callback_data="sec_wsp")],
-        kb_volver(),
-    ]
-    if es_admin(msg.from_user.id):
-        botones.insert(-1, [InlineKeyboardButton(text="👑 Admin", callback_data="sec_admin")])
-    kb = InlineKeyboardMarkup(inline_keyboard=botones)
-    await msg.answer(texto, reply_markup=kb)
+    texto = await build_menu_text(msg.from_user.id)
+    await msg.answer(texto, reply_markup=kb_inline_menu(msg.from_user.id))
 
 
 # ╔══════════════════════════════════════╗
@@ -2719,37 +2675,9 @@ async def cmd_detectar(msg: types.Message):
 # ╚══════════════════════════════════════╝
 @dp.callback_query(F.data == "sec_cmdtlg")
 async def cb_sec_cmdtlg(call: types.CallbackQuery):
-    """Muestra el menú principal de Telegram."""
-    texto = (
-        "📖 COMANDOS TELEGRAM\n\n"
-        "1️⃣ Agrega una cuenta (/cuentas)\n"
-        "2️⃣ Agrega tus grupos (/grupos)\n"
-        "3️⃣ Crea una campaña (/campanas)\n"
-        "4️⃣ Inicia la campaña (/iniciar)\n\n"
-        "👇 Navega las secciones:"
-    )
-    botones = [
-        [InlineKeyboardButton(text="👤 Cuentas", callback_data="sec_cuentas"),
-         InlineKeyboardButton(text="🌐 Grupos", callback_data="sec_grupos")],
-        [InlineKeyboardButton(text="🔍 Detectar Grupos", callback_data="grp_detectar_tg")],
-        [InlineKeyboardButton(text="📝 Mensajes/Campañas", callback_data="sec_campanas"),
-         InlineKeyboardButton(text="🚀 Iniciar", callback_data="sec_iniciar")],
-        [InlineKeyboardButton(text="🛑 Detener", callback_data="sec_detener"),
-         InlineKeyboardButton(text="⏰ Programados", callback_data="tg_programados")],
-        [InlineKeyboardButton(text="🤖 Responder", callback_data="sec_responder"),
-         InlineKeyboardButton(text="🚫 Lista Negra", callback_data="tg_listanegra")],
-        [InlineKeyboardButton(text="⚙ Config Envío", callback_data="tg_config"),
-         InlineKeyboardButton(text="📊 Historial", callback_data="sec_historial")],
-        [InlineKeyboardButton(text="📈 Stats", callback_data="tg_stats"),
-         InlineKeyboardButton(text="🗑 Eliminar", callback_data="sec_eliminar")],
-        [InlineKeyboardButton(text="👑 Membresía", callback_data="tg_membresia")],
-        [InlineKeyboardButton(text="🌐 Panel Web", callback_data="tg_panelweb")],
-        [InlineKeyboardButton(text="🔙 Volver", callback_data="menu_principal")],
-    ]
-    if es_admin(call.from_user.id):
-        botones.insert(-1, [InlineKeyboardButton(text="👑 Admin", callback_data="sec_admin")])
-    kb = InlineKeyboardMarkup(inline_keyboard=botones)
-    await safe_edit(call.message, texto, reply_markup=kb)
+    """Redirige al menú principal completo."""
+    texto = await build_menu_text(call.from_user.id)
+    await safe_edit(call.message, texto, reply_markup=kb_inline_menu(call.from_user.id))
     await call.answer()
 
 

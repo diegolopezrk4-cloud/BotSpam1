@@ -897,7 +897,15 @@ function panelLogin(telegramId, password) {
     if (!user) return { ok: false, error: "no_registrado" };
     if (user.password !== password) return { ok: false, error: "password_incorrecta" };
     const usu = getUsuario(String(telegramId));
-    return { ok: true, telegram_id: user.telegram_id, username: user.username, es_admin: usu ? (usu.es_admin === 1) : false };
+    let esAdmin = usu ? (usu.es_admin === 1) : false;
+    // Also check ADMIN_TELEGRAM_IDS from config
+    if (!esAdmin) {
+        try {
+            const cfg = require("./config_wsp");
+            if (cfg.ADMIN_TELEGRAM_IDS && cfg.ADMIN_TELEGRAM_IDS.includes(String(telegramId))) esAdmin = true;
+        } catch (e) {}
+    }
+    return { ok: true, telegram_id: user.telegram_id, username: user.username, es_admin: esAdmin };
 }
 
 function panelRegistro(telegramId, password, username) {

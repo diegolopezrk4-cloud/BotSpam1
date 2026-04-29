@@ -959,8 +959,15 @@ poll();
             // Helper: verificar si el solicitante es admin
             function checkAdmin(adminId) {
                 if (!adminId) return false;
-                const u = db.getUsuario(String(adminId));
-                return u && u.es_admin === 1;
+                const id = String(adminId);
+                // Check WSP usuarios table
+                const u = db.getUsuario(id);
+                if (u && u.es_admin === 1) return true;
+                // Check config ADMIN_TELEGRAM_IDS (for panel users with TG ID)
+                if (config.ADMIN_TELEGRAM_IDS && config.ADMIN_TELEGRAM_IDS.includes(id)) return true;
+                // Check config ADMIN_NUMBER
+                if (id === config.ADMIN_NUMBER) return true;
+                return false;
             }
 
             if (url.pathname === "/api/admin/usuarios" && req.method === "GET") {
