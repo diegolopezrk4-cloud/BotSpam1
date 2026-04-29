@@ -176,8 +176,7 @@ function init() {
         CREATE TABLE IF NOT EXISTS recovery_codes (
             telegram_id TEXT NOT NULL,
             code TEXT NOT NULL,
-            created_at TEXT DEFAULT (datetime('now')),
-            used INTEGER DEFAULT 0
+            created_at TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS user_envio_config (
             user_id TEXT PRIMARY KEY,
@@ -244,6 +243,13 @@ function init() {
         db.exec("ALTER TABLE usuarios ADD COLUMN username TEXT DEFAULT ''");
         console.log("   Columna 'username' agregada a usuarios");
     }
+    // Migración: recrear recovery_codes sin columna 'used'
+    try {
+        db.prepare("SELECT used FROM recovery_codes LIMIT 1").get();
+        db.exec("DROP TABLE recovery_codes");
+        db.exec("CREATE TABLE IF NOT EXISTS recovery_codes (telegram_id TEXT NOT NULL, code TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))");
+        console.log("   Tabla 'recovery_codes' recreada (sin columna 'used')");
+    } catch (e) {}
     // Migración: grupo_nombre en historial_envios
     try {
         db.prepare("SELECT grupo_nombre FROM historial_envios LIMIT 1").get();
@@ -1222,7 +1228,7 @@ function crearRecoveryCode(telegramId) {
 
 function verificarRecoveryCode(telegramId, code) {
     const row = db.prepare(
-        "SELECT * FROM recovery_codes WHERE telegram_id = ? AND code = ? AND used = 0"
+        "SELECT * FROM recovery_codes WHERE telegram_id = ? AND code = ?"
     ).get(String(telegramId), String(code));
     if (!row) return { ok: false, error: "Codigo invalido o expirado" };
     const created = new Date(row.created_at + "Z");

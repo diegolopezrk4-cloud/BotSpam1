@@ -4151,7 +4151,7 @@ async def recibir_nueva_password(msg: types.Message, state: FSMContext):
         async with _aiosqlite.connect("wsp_titan.db", timeout=10) as wdb:
             wdb.row_factory = _aiosqlite.Row
             async with wdb.execute(
-                "SELECT code FROM recovery_codes WHERE telegram_id = ? AND used = 0 ORDER BY created_at DESC LIMIT 1",
+                "SELECT code FROM recovery_codes WHERE telegram_id = ? ORDER BY created_at DESC LIMIT 1",
                 (tid,)
             ) as cur:
                 row = await cur.fetchone()

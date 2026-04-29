@@ -685,8 +685,8 @@ poll();
                             } catch(_) { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Error al enviar codigo" })); }
                         });
                     });
-                    tgReq.on("error", () => { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Bot de Telegram no disponible" })); });
-                    tgReq.setTimeout(10000, () => { tgReq.destroy(); res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Bot de Telegram no responde" })); });
+                    tgReq.on("error", () => { if (!res.writableEnded) { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Bot de Telegram no disponible" })); } });
+                    tgReq.setTimeout(10000, () => { tgReq.destroy(); if (!res.writableEnded) { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Bot de Telegram no responde" })); } });
                     tgReq.write(payload);
                     tgReq.end();
                 } catch(e) { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Error interno: " + e.message })); }
