@@ -437,6 +437,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- DASHBOARD -->
     <div class="section active" id="sec-dashboard">
       <h2>📊 Dashboard</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Vista general de tu cuenta. Aqui puedes ver tus envios del dia, tasa de entrega, graficos de actividad y los limites de tu plan actual.</p>
       <div class="grid" id="dashCards"></div>
       <div class="grid">
         <div class="table-wrap">
@@ -498,6 +499,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- GRUPOS -->
     <div class="section" id="sec-grupos">
       <h2>🌐 Grupos WhatsApp</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Administra tus grupos de WhatsApp. Detecta automaticamente los grupos donde esta tu cuenta, agrega nuevos por link, o usa Auto-unirse para entrar a varios grupos a la vez.</p>
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent)">
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
@@ -517,6 +519,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- MENSAJES -->
     <div class="section" id="sec-mensajes">
       <h2>✉ Mensajes</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Crea y administra tus mensajes. Estos mensajes se usan para enviarlos a grupos con Envio Unico o con Campanas. Puedes incluir texto e imagenes.</p>
       <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearMensaje()">➕ Crear Mensaje</button></div>
       <div id="mensajesContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
@@ -524,7 +527,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- ENVIOS -->
     <div class="section" id="sec-envios">
       <h2>📤 Envio Unico</h2>
-      <p style="color:var(--text2);margin-bottom:20px;font-size:14px">Selecciona un mensaje y envialo a tus grupos una sola vez.</p>
+      <p style="color:var(--text2);margin-bottom:20px;font-size:14px">Envia un mensaje a todos tus grupos de WhatsApp una sola vez. Selecciona el mensaje que creaste en la seccion de Mensajes, elige la cuenta y los grupos destino, y el bot lo enviara automaticamente con delays anti-baneo.</p>
       <div id="enviosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
       <div class="table-wrap" style="margin-top:20px">
         <div class="table-header"><h3>📊 Historial de Envios</h3></div>
@@ -535,6 +538,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- PROGRAMADOS -->
     <div class="section" id="sec-programados">
       <h2>⏰ Envios Programados</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Programa envios automaticos a una hora especifica. El bot enviara tu mensaje a los grupos seleccionados en la hora que configures, sin que tengas que estar presente. Puedes repetirlo diariamente.</p>
       <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearProgramado()">➕ Programar Envio</button></div>
       <div id="programadosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
@@ -542,6 +546,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- CAMPANAS -->
     <div class="section" id="sec-campanas">
       <h2>📋 Campanas</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Las campanas son envios continuos y automaticos. A diferencia del Envio Unico, una campana envia tu mensaje a los grupos en ciclos repetitivos con intervalos configurables. Ideal para mantener presencia constante en grupos.</p>
       <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearCampana()">➕ Crear Campana</button></div>
       <div id="campanasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
@@ -549,12 +554,14 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- CONFIG -->
     <div class="section" id="sec-config">
       <h2>⚙ Configuracion de Envio</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Configura los tiempos de espera entre envios, tamano de lotes y horarios permitidos. Ajusta estos valores para optimizar la velocidad de envio sin arriesgar baneo de tus cuentas.</p>
       <div id="configContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- LISTA NEGRA -->
     <div class="section" id="sec-listanegra">
-      <h2>🚫 Lista Negra</h2>
+      <h2>🚫 Lista Negra de Grupos</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Agrega grupos a la lista negra para que el bot no envie mensajes a ellos. Util cuando quieres excluir ciertos grupos de tus envios masivos o campanas.</p>
       <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
         <input type="text" id="inputBlacklist" placeholder="Numero (ej: 51999888777)" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;flex:1;min-width:200px">
         <button class="btn btn-danger" onclick="agregarBlacklist()">🚫 Bloquear</button>
@@ -566,6 +573,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- AUTO RESPONDER -->
     <div class="section" id="sec-autoresp">
       <h2>🤖 Auto-Responder</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Configura respuestas automaticas para cuando alguien escribe una palabra clave en un grupo. El bot detecta la palabra y responde automaticamente con el mensaje que configures. Ideal para responder preguntas frecuentes.</p>
       <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="showCrearAutoResp()">➕ Agregar Regla</button>
         <button class="btn btn-success" onclick="showImportarTxt()">📄 Importar TXT</button>
@@ -776,6 +784,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- STATS -->
     <div class="section" id="sec-stats">
       <h2>📈 Estadisticas por Grupo</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Ve las estadisticas detalladas de envios por cada grupo: cuantos mensajes se enviaron, cuantos fallaron y la tasa de exito. Exporta los datos a CSV.</p>
       <div style="margin-bottom:15px"><button class="btn btn-success" onclick="exportarStatsCSV()">📥 Exportar CSV</button></div>
       <div id="statsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
@@ -991,6 +1000,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- HISTORIAL -->
     <div class="section" id="sec-historial">
       <h2>📜 Historial de Envios</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Consulta el registro completo de todos los mensajes enviados. Filtra por tipo (DMs o Grupos), resultado (exitoso/fallido) y fecha. Exporta a CSV para analisis detallado.</p>
       <!-- Stats summary -->
       <div id="historialStats" style="display:flex;gap:15px;flex-wrap:wrap;margin-bottom:15px"></div>
       <!-- Tab buttons -->
