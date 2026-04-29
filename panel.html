@@ -203,15 +203,26 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 .toast.success { border-color: var(--success); }
 .toast.error { border-color: var(--danger); }
 
-/* RESPONSIVE */
+/* RESPONSIVE — MOBILE */
+.hamburger { display: none; position: fixed; top: 12px; left: 12px; z-index: 200; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; width: 40px; height: 40px; align-items: center; justify-content: center; cursor: pointer; font-size: 22px; color: var(--text); box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+.sidebar-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 99; }
 @media (max-width: 768px) {
-  .sidebar { width: 60px; }
-  .sidebar .brand h2 span, .sidebar .brand small, .sidebar .user-info, .sidebar nav a span:not(.icon), .sidebar nav .nav-group, .sidebar .bottom-actions span { display: none; }
-  .sidebar nav a { justify-content: center; padding: 13px; border-left: none; }
-  .sidebar nav a .icon { font-size: 19px; }
-  .sidebar .bottom-actions button { font-size: 15px; padding: 10px; }
-  .main { margin-left: 60px; padding: 15px; }
+  .hamburger { display: flex; }
+  .sidebar { transform: translateX(-100%); width: 260px; z-index: 150; }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-overlay.open { display: block; }
+  .main { margin-left: 0; padding: 15px; padding-top: 60px; }
   .grid { grid-template-columns: 1fr; }
+  .section h2 { font-size: 18px; }
+  .table-wrap { overflow-x: auto; }
+  table th, table td { padding: 8px 10px; font-size: 11px; white-space: nowrap; }
+  .btn { padding: 10px 14px; font-size: 14px; }
+  .form-group input, .form-group textarea, .form-group select { font-size: 16px; padding: 12px; }
+  .theme-toggle { top: 12px; right: 12px; }
+  .lang-toggle { top: 12px; right: 60px; }
+  .notif-bell { top: 12px; right: 108px; }
+  .notif-panel { width: calc(100vw - 30px); right: 15px; }
+  .auth-card { padding: 30px 20px; }
 }
 
 /* LOADING / EMPTY */
@@ -329,7 +340,9 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 
 <!-- APP -->
 <div class="app" id="app">
-  <div class="sidebar">
+  <div class="hamburger" onclick="toggleSidebar()">☰</div>
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+  <div class="sidebar" id="sidebarEl">
     <div class="brand">
       <h2>🤖 <span>J&D Bot</span></h2>
       <small>Panel de Control v2.0</small>
@@ -601,6 +614,13 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <select id="emDestino"><option value="">-- Opcional: agregar miembros aqui --</option></select>
         </div>
       </div>
+      <div class="form-group" style="margin-bottom:15px">
+        <label>🌍 Filtrar por codigo de pais</label>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <select id="emPais" style="flex:1;max-width:300px" onchange="filtrarMiembrosPorPais()"><option value="">-- Todos los paises --</option></select>
+          <span id="emPaisCount" style="color:var(--text2);font-size:13px"></span>
+        </div>
+      </div>
       <div class="form-group">
         <label>Mensaje DM (dejar vacio si solo quieres agregar miembros)</label>
         <textarea id="emMensaje" rows="4" placeholder="Mensaje que se enviara como DM a cada miembro..."></textarea>
@@ -622,9 +642,34 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-success" onclick="enviarAMiembros()">📤 Enviar DM a Miembros</button>
         <button class="btn btn-primary" onclick="agregarMiembrosAGrupo()">➕ Agregar Miembros al Grupo Destino</button>
-        <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Cancelar Envio</button>
+        <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Detener Envio</button>
+      </div>
+      <div id="resumeBar" style="display:none;background:var(--bg);padding:12px 15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent2);align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="color:var(--accent2);font-weight:bold">🔄 Envio pendiente:</span>
+        <span id="resumeInfo" style="color:var(--text2);font-size:13px"></span>
+        <button class="btn btn-success" onclick="reanudarEnvio()" style="padding:5px 12px;font-size:12px">▶ Reanudar</button>
+        <button class="btn btn-danger" onclick="descartarProgreso()" style="padding:5px 12px;font-size:12px">✖ Descartar</button>
       </div>
       <div id="miembrosContent" class="empty-state"><div class="icon">👥</div><p>Selecciona una cuenta y carga sus grupos</p></div>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-top:15px;border:1px solid var(--border)">
+        <h4 style="margin:0 0 10px 0">🔧 Debug: Probar envio individual</h4>
+        <p style="color:var(--text2);font-size:12px;margin-bottom:10px">Envia un mensaje de prueba a un numero especifico para verificar que el envio funciona.</p>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div class="form-group" style="margin:0">
+            <label>Numero (con codigo de pais, ej: 573001234567)</label>
+            <input type="text" id="debugNumero" placeholder="573001234567">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Mensaje de prueba</label>
+            <input type="text" id="debugMsg" placeholder="Hola test" value="Test de envio BotSpam1">
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:10px">
+          <button class="btn btn-primary" onclick="debugTestSend()">📤 Enviar Test</button>
+          <button class="btn" onclick="debugRawParticipants()">🔍 Ver Datos Crudos del Grupo</button>
+        </div>
+        <pre id="debugResult" style="background:#111;color:#0f0;padding:10px;border-radius:8px;font-size:11px;max-height:300px;overflow:auto;display:none;white-space:pre-wrap"></pre>
+      </div>
     </div>
 
     <!-- ENVIO INTERACTIVO -->
@@ -1144,6 +1189,11 @@ async function cambiarPass(){
 }
 
 // --- NAV ---
+// --- SIDEBAR MOBILE TOGGLE ---
+function toggleSidebar(){
+  const sb=$('sidebarEl'),ov=$('sidebarOverlay');
+  sb.classList.toggle('open');ov.classList.toggle('open');
+}
 document.querySelectorAll('.sidebar nav a').forEach(a=>{
   a.addEventListener('click',e=>{
     e.preventDefault();
@@ -1154,6 +1204,8 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     $('sec-'+sec).classList.add('active');
     const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:verRespuestasPromo,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
     if(loaders[sec])loaders[sec]();
+    // Close sidebar on mobile after nav click
+    if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
   });
 });
 
@@ -2032,6 +2084,40 @@ async function loadEnvioMiembros(){
   }
   $('emGrupo').innerHTML='<option value="">-- Carga grupos primero --</option>';
   $('emDestino').innerHTML='<option value="">-- Opcional: grupo destino --</option>';
+  // Check for pending resume
+  checkEnvioProgreso();
+}
+async function checkEnvioProgreso(){
+  const r=await api('/api/envio_progreso?u='+userId);
+  const bar=$('resumeBar');
+  if(r.ok&&r.tiene_progreso){
+    const restantes=r.total-r.ultimo_indice;
+    $('resumeInfo').textContent=`Grupo: ${r.grupo_nombre||r.grupo_jid} | Enviados: ${r.ultimo_indice}/${r.total} | Restantes: ${restantes} | ${r.fecha||''}`;
+    bar.style.display='flex';
+  }else{
+    bar.style.display='none';
+  }
+}
+async function reanudarEnvio(){
+  if(!requireMembresia())return;
+  const cuenta=$('emCuenta').value;
+  const batchSize=$('emBatchSize').value,delayMinutes=$('emDelayMinutes').value||5;
+  if(!confirm('Reanudar envio pendiente?'))return;
+  toast('Reanudando envio...','success');
+  const payload={u:userId};
+  if(cuenta)payload.cuenta=cuenta;
+  if(batchSize){payload.batch_size=parseInt(batchSize);payload.delay_minutes=parseInt(delayMinutes);}
+  const r=await api('/api/enviar_miembros_reanudar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r.ok){
+    toast(`Reanudado: ${r.restantes} restantes de ${r.total} (grupo: ${r.grupo_nombre||'?'})`,'success');
+    $('resumeBar').style.display='none';
+  }else{toast('Error: '+(r.error||''),'error');}
+}
+async function descartarProgreso(){
+  if(!confirm('Descartar el progreso guardado? No podras reanudar despues.'))return;
+  await api('/api/envio_progreso_cancelar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  $('resumeBar').style.display='none';
+  toast('Progreso descartado','success');
 }
 async function cargarGruposCuenta(){
   const cuenta=$('emCuenta').value;
@@ -2056,22 +2142,63 @@ async function cargarGruposCuenta(){
     toast(postables.length+' grupos cargados ('+grupos.length+' total, filtrados solo donde puedes enviar)','success');
   }else{toast('Error: '+(r.error||''),'error')}
 }
+let _miembrosCache=[];
+const COUNTRY_NAMES={1:'US/CA',7:'RU',20:'EG',27:'ZA',30:'GR',31:'NL',32:'BE',33:'FR',34:'ES',36:'HU',39:'IT',40:'RO',41:'CH',43:'AT',44:'UK',45:'DK',46:'SE',47:'NO',48:'PL',49:'DE',51:'PE',52:'MX',53:'CU',54:'AR',55:'BR',56:'CL',57:'CO',58:'VE',60:'MY',61:'AU',62:'ID',63:'PH',64:'NZ',65:'SG',66:'TH',81:'JP',82:'KR',84:'VN',86:'CN',90:'TR',91:'IN',92:'PK',93:'AF',94:'LK',95:'MM',98:'IR',212:'MA',213:'DZ',216:'TN',218:'LY',220:'GM',221:'SN',234:'NG',249:'SD',254:'KE',255:'TZ',256:'UG',260:'ZM',263:'ZW',265:'MW',267:'BW',351:'PT',352:'LU',353:'IE',354:'IS',358:'FI',370:'LT',371:'LV',372:'EE',380:'UA',381:'RS',385:'HR',386:'SI',420:'CZ',421:'SK',502:'GT',503:'SV',504:'HN',505:'NI',506:'CR',507:'PA',509:'HT',521:'MX',591:'BO',592:'GY',593:'EC',594:'GF',595:'PY',596:'MQ',597:'SR',598:'UY',880:'BD',961:'LB',962:'JO',963:'SY',964:'IQ',965:'KW',966:'SA',967:'YE',968:'OM',971:'AE',972:'IL',973:'BH',974:'QA',977:'NP',992:'TJ',993:'TM',994:'AZ',995:'GE',996:'KG',998:'UZ'};
+function detectCountryCode(num){
+  if(!num||!/^\d+$/.test(num))return null;
+  for(const len of[3,2,1]){
+    const prefix=num.substring(0,len);
+    if(COUNTRY_NAMES[prefix])return prefix;
+  }
+  return num.substring(0,2);
+}
 async function cargarMiembros(){
   const grupoJid=$('emGrupo').value;
   const cuenta=$('emCuenta').value;
-  if(!grupoJid){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>Selecciona un grupo</p></div>';return}
+  if(!grupoJid){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>Selecciona un grupo</p></div>';_miembrosCache=[];return}
   $('miembrosContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando miembros...</div>';
   let url='/api/miembros_grupo?u='+userId+'&grupo='+encodeURIComponent(grupoJid)+'&cuenta='+encodeURIComponent(cuenta);
   const r=await api(url);
-  if(!r.ok){$('miembrosContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
+  if(!r.ok){$('miembrosContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';_miembrosCache=[];return}
   const m=r.miembros||[];
+  _miembrosCache=m;
   if(!m.length){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>No se encontraron miembros</p></div>';return}
+  // Populate country filter
+  const countryCounts={};
+  m.forEach(x=>{
+    const num=x.numero||(x.id?x.id.split('@')[0]:'');
+    const cc=detectCountryCode(num);
+    if(cc){countryCounts[cc]=(countryCounts[cc]||0)+1;}
+  });
+  const sel=$('emPais');
+  sel.innerHTML='<option value="">Todos los paises ('+m.length+' miembros)</option>';
+  Object.keys(countryCounts).sort((a,b)=>countryCounts[b]-countryCounts[a]).forEach(cc=>{
+    const name=COUNTRY_NAMES[cc]||'';
+    sel.innerHTML+=`<option value="${cc}">+${cc} ${name} (${countryCounts[cc]} miembros)</option>`;
+  });
+  $('emPaisCount').textContent='';
+  renderMiembrosTable(m);
+}
+function filtrarMiembrosPorPais(){
+  const cc=$('emPais').value;
+  if(!cc){renderMiembrosTable(_miembrosCache);$('emPaisCount').textContent='';return}
+  const filtered=_miembrosCache.filter(x=>{
+    const num=x.numero||(x.id?x.id.split('@')[0]:'');
+    return num.startsWith(cc);
+  });
+  $('emPaisCount').textContent=filtered.length+' de '+_miembrosCache.length+' miembros';
+  renderMiembrosTable(filtered);
+}
+function renderMiembrosTable(m){
+  if(!m.length){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>No hay miembros con este filtro</p></div>';return}
   let h='<div class="table-wrap"><div class="table-header"><h3>👥 '+m.length+' Miembros</h3></div>';
-  h+='<table><thead><tr><th>#</th><th>Numero</th><th>ID</th><th>Admin</th></tr></thead><tbody>';
+  h+='<table><thead><tr><th>#</th><th>Numero</th><th>Pais</th><th>Admin</th></tr></thead><tbody>';
   m.forEach((x,i)=>{
     const num=x.numero||(x.id?x.id.split('@')[0]:'?');
+    const cc=detectCountryCode(num);
     const displayNum=num.match(/^\d{7,15}$/)?'+'+num:num;
-    h+=`<tr><td>${i+1}</td><td><b>${displayNum}</b></td><td style="font-size:11px;color:var(--text2)">${x.id||x}</td><td>${x.admin?'<span class="badge badge-info">Admin</span>':''}</td></tr>`;
+    const pais=cc?('+'+cc+' '+(COUNTRY_NAMES[cc]||'')):'?';
+    h+=`<tr><td>${i+1}</td><td><b>${displayNum}</b></td><td style="font-size:12px">${pais}</td><td>${x.admin?'<span class="badge badge-info">Admin</span>':''}</td></tr>`;
   });
   h+='</tbody></table></div>';
   $('miembrosContent').innerHTML=h;
@@ -2080,17 +2207,40 @@ async function enviarAMiembros(){
   if(!requireMembresia())return;
   const grupo=$('emGrupo').value,msg=$('emMensaje').value.trim(),cuenta=$('emCuenta').value;
   const batchSize=$('emBatchSize').value,delayMinutes=$('emDelayMinutes').value||5;
+  const paisFilter=$('emPais').value;
   if(!grupo){toast('Selecciona un grupo','error');return}
   if(!msg){toast('Escribe un mensaje','error');return}
+  const paisInfo=paisFilter?' (solo +'+paisFilter+')':'';
   const batchInfo=batchSize?' (en lotes de '+batchSize+', pausa '+delayMinutes+' min)':'';
-  if(!confirm('Enviar DM a todos los miembros del grupo seleccionado'+batchInfo+'?'))return;
-  toast('Iniciando envio a miembros...','success');
+  if(!confirm('Enviar DM a los miembros'+paisInfo+' del grupo seleccionado'+batchInfo+'?'))return;
+  toast('Iniciando envio a miembros'+paisInfo+'...','success');
   const payload={u:userId,grupo,mensaje:msg};
   if(cuenta)payload.cuenta=cuenta;
+  if(paisFilter)payload.country_code=paisFilter;
   if(batchSize){payload.batch_size=parseInt(batchSize);payload.delay_minutes=parseInt(delayMinutes);}
   const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.filtered?' ('+r.filtered+' filtrados)':'')+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');}
+  if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.grupo_nombre?' de '+r.grupo_nombre:'')+(r.filtered?' ('+r.filtered+' filtrados)':'')+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');}
   else{toast('Error: '+(r.error||''),'error');}
+}
+async function debugTestSend(){
+  const numero=$('debugNumero').value.trim(),msg=$('debugMsg').value.trim(),cuenta=$('emCuenta').value;
+  const pre=$('debugResult');pre.style.display='block';
+  if(!numero){pre.textContent='ERROR: Escribe un numero de telefono';return}
+  pre.textContent='Enviando test a '+numero+'...';
+  const payload={u:userId,numero,mensaje:msg||'Test'};
+  if(cuenta)payload.cuenta=cuenta;
+  const r=await api('/api/debug_test_send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  pre.textContent=JSON.stringify(r,null,2);
+}
+async function debugRawParticipants(){
+  const grupo=$('emGrupo').value,cuenta=$('emCuenta').value;
+  const pre=$('debugResult');pre.style.display='block';
+  if(!grupo){pre.textContent='ERROR: Selecciona un grupo primero';return}
+  pre.textContent='Cargando datos crudos...';
+  let url='/api/debug_miembros?u='+userId+'&grupo='+encodeURIComponent(grupo);
+  if(cuenta)url+='&cuenta='+encodeURIComponent(cuenta);
+  const r=await api(url);
+  pre.textContent=JSON.stringify(r,null,2);
 }
 async function agregarMiembrosAGrupo(){if(!requireMembresia())return;
   const origen=$('emGrupo').value,destino=$('emDestino').value,cuenta=$('emCuenta').value;
@@ -2614,8 +2764,8 @@ async function loadHistorial(){
   let h='<div class="table-wrap"><div class="table-header"><h3>📜 '+h_data.length+' registros</h3></div>';
   h+='<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Destino</th><th>Mensaje</th><th>Total</th><th>OK</th><th>Error</th><th>Estado</th></tr></thead><tbody>';
   h_data.forEach(x=>{
-    const badge=x.resultado==='exitoso'||x.resultado==='enviado'||x.resultado==='enviado_pending'?'badge-success':x.resultado==='fallido'?'badge-danger':'badge-warn';
-    h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.tipo||'?'}</td><td style="font-size:11px">${(x.destino||'').slice(0,30)}</td><td style="font-size:11px;color:var(--text2)">${(x.mensaje_preview||'').slice(0,30)}</td>`;
+    const badge=x.resultado==='exitoso'||x.resultado==='enviado'||x.resultado==='enviado_pending'||x.resultado==='enviado_personal'?'badge-success':x.resultado==='fallido'?'badge-danger':'badge-warn';
+    h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.tipo||'?'}</td><td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${(x.destino||'').slice(0,50)}</td><td style="font-size:11px;color:var(--text2)">${(x.mensaje_preview||'').slice(0,30)}</td>`;
     h+=`<td>${x.total||0}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td>`;
     h+=`<td><span class="badge ${badge}">${x.resultado||'?'}</span></td></tr>`;
   });

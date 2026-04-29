@@ -10,6 +10,10 @@ const clientSessions = {};   // { "userId_nombre": socket }
 const pendingLinks = {};     // { "userId_nombre": { qr, status, error } }
 const reporteInterval = {};  // { userId: intervalId }
 
+// Track last activity per group: { grupoJid: timestamp }
+// Updated by message listeners — used to detect if someone else posted after our spam
+const grupoUltimaActividad = {};
+
 // Limite de envios diarios por cuenta (proteccion anti-ban)
 const LIMITE_ENVIOS_DIARIOS = 500;
 
@@ -48,6 +52,15 @@ async function connectClientAccount(userId, nombre, telefono) {
             retryRequestDelayMs: 2000,
         });
         sock.ev.on("creds.update", saveCreds);
+        // Track group activity from other users for anti-duplicate spam
+        sock.ev.on("messages.upsert", ({ messages }) => {
+            for (const msg of messages) {
+                const jid = msg.key?.remoteJid;
+                if (jid && jid.endsWith("@g.us") && !msg.key.fromMe && msg.message) {
+                    registrarActividadGrupo(jid);
+                }
+            }
+        });
         return sock;
     }
 
@@ -306,6 +319,26 @@ function variarMensaje(mensaje, userId) {
 
 function escapeRegex(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Track group activity from other users (called from index_wsp.js message listener)
+function registrarActividadGrupo(grupoJid) {
+    grupoUltimaActividad[grupoJid] = Date.now();
+}
+
+// Record when campaign sends to a group (persists to DB)
+function registrarEnvioCampana(campanaId, grupoJid) {
+    db.registrarEnvioCampanaDB(campanaId, grupoJid);
+}
+
+// Check if group had activity from others since our last campaign send
+function grupoTieneActividadNueva(campanaId, grupoJid) {
+    const row = db.getUltimoEnvioCampana(campanaId, grupoJid);
+    if (!row) return true; // never sent = treat as new
+    const envioTime = new Date(row.ultimo_envio + "Z").getTime();
+    const ultimaActividad = grupoUltimaActividad[grupoJid];
+    if (ultimaActividad === undefined) return true; // no data (e.g. after restart) — allow send
+    return ultimaActividad > envioTime;
 }
 
 // ============================================================
@@ -589,6 +622,13 @@ function iniciarCampana(campanaId, userId, botSock) {
                             continue;
                         }
 
+                        // Skip group if no new activity since our last send (avoid duplicate spam)
+                        // Works even after restart because send timestamps are stored in DB
+                        if (!grupoTieneActividadNueva(campanaId, groupJid)) {
+                            console.log(`   [Anti-dup] Grupo ${grupoLink}: sin actividad nueva, saltando`);
+                            continue;
+                        }
+
                         // MEJORA 1 + 4: Variar mensaje o usar template rotativo
                         let mensajeAEnviar = campana.mensaje;
                         let imagenAEnviar = campana.imagen_path;
@@ -606,8 +646,8 @@ function iniciarCampana(campanaId, userId, botSock) {
                         const result = await sendToGroup(currentSock.sock, groupJid, mensajeAEnviar, imagenAEnviar);
 
                         if (result.sent && (result.delivered || result.reason === "pending" || result.reason === "no_id")) {
-                            // Count as success: message was sent. "pending" means delivery receipt
-                            // didn't arrive within timeout but message was delivered.
+                            // Count as success + mark for anti-duplicate tracking
+                            registrarEnvioCampana(campanaId, groupJid);
                             db.actualizarStatsCampana(campanaId, 1, 0);
                             db.registrarEnvio(userId, campanaId, grupoLink, result.delivered ? "enviado" : "enviado_pending");
                             db.actualizarGrupoStats(userId, grupoLink, "enviado");
@@ -1040,75 +1080,110 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
     return true;
 }
 
-async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes) {
+let _taskIdCounter = 0;
+async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes, grupoNombre, grupoJid, startIndex) {
     if (envioPersonalActivo[userId]) return false;
 
     let cancelled = false;
+    const taskId = ++_taskIdCounter;
     const task = {
         running: true,
+        taskId,
         cancel: () => { cancelled = true; },
     };
     envioPersonalActivo[userId] = task;
 
     batchSize = parseInt(batchSize) || 0;
     delayMinutes = parseInt(delayMinutes) || 5;
+    startIndex = parseInt(startIndex) || 0;
 
     (async () => {
         try {
             const total = jids.length;
             let enviados = 0;
             let errores = 0;
-            const DELAY_ENTRE_ENVIOS = 10000; // 10 segundos entre mensajes
+            const DELAY_ENTRE_ENVIOS = 10000;
             const DELAY_ENTRE_LOTES = batchSize ? delayMinutes * 60 * 1000 : 0;
+            const displayName = grupoNombre || grupoJid || "seleccionados";
 
             const batchInfo = batchSize ? `\n📦 Lotes: ${batchSize} por lote, pausa ${delayMinutes} min entre lotes` : "";
+            const resumeInfo = startIndex > 0 ? `\n🔄 Reanudando desde #${startIndex + 1}` : "";
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} contacto(s) seleccionados\n\u23F1 Delay: 10 segundos entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round(total * 10 / 60)} min`,
+                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 10 seg entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 10 / 60)} min`,
                 });
             } catch (e) {}
 
-            for (let i = 0; i < jids.length; i++) {
-                if (cancelled) break;
+            // Save progress at the start so we can resume if interrupted
+            if (grupoJid) {
+                db.guardarProgresoEnvio(userId, grupoJid, startIndex, total, mensaje, jids, grupoNombre);
+            }
+
+            for (let i = startIndex; i < jids.length; i++) {
+                if (cancelled) {
+                    // Save progress for resume
+                    if (grupoJid) {
+                        db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
+                    }
+                    break;
+                }
                 const jid = jids[i];
 
                 // Pausa entre lotes (anti-ban)
                 if (batchSize && enviados > 0 && enviados % batchSize === 0) {
+                    // Save progress before pause
+                    if (grupoJid) {
+                        db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
+                    }
                     try {
                         await botSock.sendMessage(userId, {
-                            text: `⏸ Lote de ${batchSize} completado (${enviados}/${total}). Pausando ${delayMinutes} minutos para evitar baneo...`,
+                            text: `⏸ Lote de ${batchSize} completado (${i}/${total}). Pausando ${delayMinutes} minutos...`,
                         });
                     } catch (e) {}
                     await delay(DELAY_ENTRE_LOTES);
-                    if (cancelled) break;
+                    if (cancelled) {
+                        if (grupoJid) {
+                            db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
+                        }
+                        break;
+                    }
                     try {
                         await botSock.sendMessage(userId, {
-                            text: `▶️ Reanudando envio... (${enviados}/${total})`,
+                            text: `▶️ Reanudando envio... (${i}/${total})`,
                         });
                     } catch (e) {}
                 }
 
                 try {
                     const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
+                    console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid}`);
+                    let result;
                     if (imagenPath && fs.existsSync(imagenPath)) {
-                        await botSock.sendMessage(jid, {
+                        result = await botSock.sendMessage(jid, {
                             image: fs.readFileSync(imagenPath),
                             caption: textoFinal,
                         });
                     } else {
-                        await botSock.sendMessage(jid, { text: textoFinal });
+                        result = await botSock.sendMessage(jid, { text: textoFinal });
                     }
+                    console.log(`[EnvioMiembros]   OK → key.id=${result?.key?.id || "?"} status=${result?.status || "?"}`);
                     enviados++;
-                    db.registrarEnvio(userId, 0, jid, "enviado_personal");
+                    db.registrarEnvio(userId, 0, jid, "enviado_personal", grupoNombre);
                 } catch (e) {
+                    console.log(`[EnvioMiembros]   ERROR → ${e.message}`);
                     errores++;
-                    db.registrarEnvio(userId, 0, jid, "error_personal");
+                    db.registrarEnvio(userId, 0, jid, "error_personal", grupoNombre);
+                }
+
+                // Save progress periodically (every 5 sends)
+                if (grupoJid && (enviados + errores) % 5 === 0) {
+                    db.guardarProgresoEnvio(userId, grupoJid, i + 1, total, mensaje, jids, grupoNombre);
                 }
 
                 if (enviados % 10 === 0 && enviados > 0 && !(batchSize && enviados % batchSize === 0)) {
                     try {
                         await botSock.sendMessage(userId, {
-                            text: `\u{1F4E8} Progreso: ${enviados}/${total} enviados (${errores} errores)...`,
+                            text: `\u{1F4E8} Progreso: ${i + 1}/${total} (${enviados} ok, ${errores} err)...`,
                         });
                     } catch (e) {}
                 }
@@ -1118,16 +1193,23 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                 }
             }
 
+            // If completed (not cancelled), remove progress
+            if (!cancelled && grupoJid) {
+                db.eliminarProgresoEnvio(userId, grupoJid);
+            }
+
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u2705 *ENVIO PERSONAL COMPLETADO*\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Cancelado por el usuario" : ""}`,
+                    text: `\u2705 *ENVIO A MIEMBROS ${cancelled ? "PAUSADO" : "COMPLETADO"}*\n📂 Grupo: ${displayName}\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Pausado — puedes reanudar desde el panel" : ""}`,
                 });
             } catch (e) {}
 
         } catch (e) {
             console.error(`Error envio personal ${userId}: ${e.message}`);
         } finally {
-            delete envioPersonalActivo[userId];
+            if (envioPersonalActivo[userId]?.taskId === taskId) {
+                delete envioPersonalActivo[userId];
+            }
         }
     })();
 
@@ -1138,7 +1220,6 @@ function detenerEnvioPersonal(userId) {
     const task = envioPersonalActivo[userId];
     if (task) {
         task.cancel();
-        delete envioPersonalActivo[userId];
         return true;
     }
     return false;
@@ -1176,4 +1257,5 @@ module.exports = {
     detenerEnvioPersonal,
     sendToGroup,
     resolveGroupJid,
+    registrarActividadGrupo,
 };

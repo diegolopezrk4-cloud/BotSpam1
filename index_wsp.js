@@ -924,29 +924,104 @@ poll();
                     const meta = await sock.groupMetadata(grupoJid);
                     const miembros = (meta.participants || []).map(p => {
                         const isAdmin = p.admin === "admin" || p.admin === "superadmin";
+                        // Prefer p.jid (phone-based JID) over p.id (may be LID)
+                        const phoneJid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : null;
                         let numero = "";
-                        if (p.id && p.id.includes("@s.whatsapp.net")) {
-                            numero = p.id.split("@")[0];
-                        } else if (p.id && p.id.includes("@lid")) {
-                            numero = p.id.split("@")[0];
+                        if (phoneJid) {
+                            numero = phoneJid.split(":")[0].split("@")[0];
+                        } else if (p.id) {
+                            numero = p.id.split(":")[0].split("@")[0];
                         }
-                        return { id: p.id, numero, admin: isAdmin };
+                        return { id: phoneJid || p.id, numero, admin: isAdmin, lid: p.lid || null };
                     });
-                    // Try to resolve @lid to phone numbers via contacts
-                    const lidMembers = miembros.filter(m => m.id.endsWith("@lid") && !m.numero.match(/^\d{7,15}$/));
-                    if (lidMembers.length > 0 && sock.store && sock.store.contacts) {
-                        for (const m of lidMembers) {
-                            const contact = sock.store.contacts[m.id];
-                            if (contact && contact.id && contact.id.includes("@s.whatsapp.net")) {
-                                m.numero = contact.id.split("@")[0];
-                            } else if (contact && contact.notify) {
-                                m.numero = contact.notify;
-                            }
-                        }
-                    }
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, miembros }));
                 } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // ─── DEBUG MIEMBROS (raw participant data) ───
+            if (url.pathname === "/api/debug_miembros" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const grupoJid = url.searchParams.get("grupo");
+                const cuenta = url.searchParams.get("cuenta");
+                if (!userId || !grupoJid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
+                try {
+                    let sock;
+                    if (cuenta) { sock = await motor.getOrConnectClient(userId, cuenta); }
+                    else if (botSock) { sock = botSock; }
+                    else { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" })); }
+                    const meta = await sock.groupMetadata(grupoJid);
+                    const raw = (meta.participants || []).map(p => ({
+                        id: p.id || null,
+                        jid: p.jid || null,
+                        lid: p.lid || null,
+                        admin: p.admin || null,
+                        all_keys: Object.keys(p),
+                    }));
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, grupo: meta.subject, total: raw.length, participants: raw }, null, 2));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // ─── DEBUG: Test single message send with delivery check ───
+            if (url.pathname === "/api/debug_test_send" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.numero) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o numero" })); }
+                try {
+                    let sock;
+                    if (body.cuenta) { sock = await motor.getOrConnectClient(body.u, body.cuenta); }
+                    else if (botSock) { sock = botSock; }
+                    else { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" })); }
+                    const targetJid = body.numero.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+                    const myJid = sock.user?.id || "unknown";
+                    const msg = body.mensaje || "Test de envio desde BotSpam1";
+                    console.log(`[DEBUG_SEND] From: ${myJid} → To: ${targetJid} Msg: ${msg.substring(0,30)}...`);
+                    const result = await sock.sendMessage(targetJid, { text: msg });
+                    const msgId = result?.key?.id;
+                    console.log(`[DEBUG_SEND] Result: key.id=${msgId} key.remoteJid=${result?.key?.remoteJid} status=${result?.status}`);
+
+                    // Wait up to 15s for delivery receipt
+                    let deliveryStatus = "pending";
+                    if (msgId) {
+                        deliveryStatus = await new Promise((resolve) => {
+                            const timeout = setTimeout(() => {
+                                sock.ev.off("messages.update", handler);
+                                resolve("timeout_15s (no delivery receipt)");
+                            }, 15000);
+                            const handler = (updates) => {
+                                for (const u of updates) {
+                                    if (u.key?.id === msgId && u.update?.status) {
+                                        clearTimeout(timeout);
+                                        sock.ev.off("messages.update", handler);
+                                        const s = u.update.status;
+                                        resolve(s >= 3 ? "delivered" : s === 2 ? "server_ack" : `status_${s}`);
+                                        return;
+                                    }
+                                }
+                            };
+                            sock.ev.on("messages.update", handler);
+                        });
+                    }
+                    console.log(`[DEBUG_SEND] Delivery: ${deliveryStatus}`);
+
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({
+                        ok: true,
+                        from: myJid,
+                        to: targetJid,
+                        key: result?.key || null,
+                        status: result?.status || null,
+                        delivery: deliveryStatus,
+                        messageTimestamp: result?.messageTimestamp || null,
+                    }, null, 2));
+                } catch (e) {
+                    console.log(`[DEBUG_SEND] ERROR: ${e.message}`);
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
                 }
@@ -968,42 +1043,48 @@ poll();
                     const meta = await sock.groupMetadata(body.grupo);
                     const rawParticipants = meta.participants || [];
 
-                    // Resolve JIDs: convert @lid to @s.whatsapp.net for DMs
+                    // Use p.jid (phone-based JID resolved by Baileys from phone_number attr)
+                    // p.id may be @lid which can't receive DMs in Baileys 6.x
+                    // p.jid is always @s.whatsapp.net (resolved from attrs.phone_number)
                     const myJid = sock.user?.id || "";
                     const myNum = jidToNumber(myJid);
+                    // Load blacklist numbers to skip
+                    const blacklist = db.getBlacklist(body.u);
+                    const blNums = new Set(blacklist.map(b => (b.grupo_link || "").replace(/[^0-9]/g, "")));
                     const seen = new Set();
                     const jids = [];
                     for (const p of rawParticipants) {
-                        let jid = p.id;
-                        // Convert @lid JIDs to @s.whatsapp.net for direct messages
-                        if (jid.endsWith("@lid")) {
-                            const num = jid.split("@")[0].replace(/:\d+$/, "");
-                            if (/^\d{7,15}$/.test(num)) {
-                                jid = num + "@s.whatsapp.net";
-                            } else {
-                                continue; // Skip unresolvable LID
-                            }
-                        }
+                        // Prefer p.jid (phone JID) over p.id (may be LID)
+                        let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
+                        if (!jid) continue;
                         // Normalize: strip device suffix (e.g. :0)
-                        if (jid.includes(":") && jid.endsWith("@s.whatsapp.net")) {
-                            jid = jid.split(":")[0] + "@s.whatsapp.net";
+                        if (jid.includes(":") && (jid.endsWith("@s.whatsapp.net") || jid.endsWith("@lid"))) {
+                            const suffix = jid.endsWith("@s.whatsapp.net") ? "@s.whatsapp.net" : "@lid";
+                            jid = jid.split(":")[0] + suffix;
                         }
+                        // Skip @lid JIDs — DMs to LID don't work in Baileys 6.x
+                        if (jid.endsWith("@lid")) continue;
                         const num = jidToNumber(jid);
-                        // Skip sender's own JID and duplicates
+                        if (!num || !/^\d{7,15}$/.test(num)) continue;
+                        // Skip sender's own JID, blacklisted numbers, country filter, and duplicates
                         if (num === myNum) continue;
+                        if (blNums.has(num)) continue;
+                        if (body.country_code && !num.startsWith(body.country_code)) continue;
                         if (seen.has(num)) continue;
                         seen.add(num);
                         jids.push(jid);
                     }
                     if (!jids.length) {
                         res.writeHead(200);
-                        return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros validos para enviar (todos filtrados o JIDs no resolubles)" }));
+                        return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros validos para enviar (todos filtrados)" }));
                     }
+                    const grupoNombre = meta.subject || body.grupo;
                     const batchSize = parseInt(body.batch_size) || 0;
                     const delayMinutes = parseInt(body.delay_minutes) || 5;
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, null, sock, batchSize, delayMinutes);
+                    const startIndex = parseInt(body.start_index) || 0;
+                    motor.enviarASeleccionados(body.u, jids, body.mensaje, null, sock, batchSize, delayMinutes, grupoNombre, body.grupo, startIndex);
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, total: jids.length, filtered: rawParticipants.length - jids.length, batch_size: batchSize || jids.length, delay_minutes: batchSize ? delayMinutes : 0 }));
+                    return res.end(JSON.stringify({ ok: true, total: jids.length, filtered: rawParticipants.length - jids.length, batch_size: batchSize || jids.length, delay_minutes: batchSize ? delayMinutes : 0, grupo_nombre: grupoNombre }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -1024,7 +1105,14 @@ poll();
                         res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
                     }
                     const meta = await sock.groupMetadata(body.origen);
-                    const jids = (meta.participants || []).map(p => p.id);
+                    // Use p.jid (phone JID) — p.id may be @lid which groupParticipantsUpdate can't handle
+                    const jids = (meta.participants || []).map(p => {
+                        let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
+                        if (jid && jid.includes(":") && jid.endsWith("@s.whatsapp.net")) {
+                            jid = jid.split(":")[0] + "@s.whatsapp.net";
+                        }
+                        return jid;
+                    }).filter(jid => jid && jid.endsWith("@s.whatsapp.net"));
                     res.writeHead(200);
                     res.end(JSON.stringify({ ok: true, total: jids.length, message: "Agregando miembros en segundo plano..." }));
                     // Run in background to avoid timeout and crash
@@ -1086,17 +1174,88 @@ poll();
                 return res.end(JSON.stringify({ ok: true }));
             }
 
+            // ─── PROGRESO ENVIO (RESUME) ───
+            if (url.pathname === "/api/envio_progreso" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const progreso = db.getProgresoEnvioPendiente(userId);
+                res.writeHead(200);
+                if (progreso) {
+                    return res.end(JSON.stringify({
+                        ok: true,
+                        tiene_progreso: true,
+                        grupo_jid: progreso.grupo_jid,
+                        grupo_nombre: progreso.grupo_nombre,
+                        ultimo_indice: progreso.ultimo_indice,
+                        total: progreso.total,
+                        fecha: progreso.fecha,
+                    }));
+                }
+                return res.end(JSON.stringify({ ok: true, tiene_progreso: false }));
+            }
+
+            if (url.pathname === "/api/envio_progreso_cancelar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const progreso = db.getProgresoEnvioPendiente(body.u);
+                if (progreso) {
+                    db.eliminarProgresoEnvio(body.u, progreso.grupo_jid);
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            if (url.pathname === "/api/enviar_miembros_reanudar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const progreso = db.getProgresoEnvioPendiente(body.u);
+                if (!progreso) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: false, error: "No hay envio pendiente para reanudar" }));
+                }
+                try {
+                    let sock;
+                    if (body.cuenta) {
+                        sock = await motor.getOrConnectClient(body.u, body.cuenta);
+                    } else if (botSock) {
+                        sock = botSock;
+                    } else {
+                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                    }
+                    const batchSize = parseInt(body.batch_size) || 0;
+                    const delayMinutes = parseInt(body.delay_minutes) || 5;
+                    motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({
+                        ok: true,
+                        total: progreso.total,
+                        desde: progreso.ultimo_indice,
+                        restantes: progreso.total - progreso.ultimo_indice,
+                        grupo_nombre: progreso.grupo_nombre,
+                    }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
             // ─── HISTORIAL PANEL ───
             if (url.pathname === "/api/historial_panel" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const envios = db.getHistorialEnvios(userId, 100);
                 const historial = envios.map(e => {
-                    const esExitoso = e.resultado === "enviado" || e.resultado === "enviado_pending";
+                    const esExitoso = e.resultado === "enviado" || e.resultado === "enviado_pending" || e.resultado === "enviado_personal";
+                    // Build display destination: show group name + JID number
+                    let destino = e.grupo_link || "";
+                    if (e.grupo_nombre) {
+                        const numPart = destino.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/@g\.us$/, "");
+                        destino = `[${e.grupo_nombre}] ${numPart}`;
+                    }
                     return {
-                        fecha: e.fecha, tipo: "envio", destino: e.grupo_link,
+                        fecha: e.fecha, tipo: "envio", destino,
                         mensaje_preview: "", total: 1, exitosos: esExitoso ? 1 : 0,
-                        fallidos: esExitoso ? 0 : 1, resultado: esExitoso ? "enviado" : e.resultado,
+                        fallidos: esExitoso ? 0 : 1, resultado: e.resultado,
                     };
                 });
                 res.writeHead(200);
@@ -1450,6 +1609,11 @@ async function startBot() {
             // Si es mensaje enviado por el bot, ignorar
             if (msg.key.id && botSentIds.has(msg.key.id)) continue;
             if (botIsSending && msg.key.fromMe) continue;
+
+            // Track group activity from OTHER users (for duplicate spam detection)
+            if (jid.endsWith("@g.us") && !msg.key.fromMe) {
+                motor.registrarActividadGrupo(jid);
+            }
 
             // Grupos: solo permitir comandos admin
             if (jid.endsWith("@g.us")) {

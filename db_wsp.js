@@ -238,7 +238,46 @@ function init() {
         db.exec("ALTER TABLE usuarios ADD COLUMN username TEXT DEFAULT ''");
         console.log("   Columna 'username' agregada a usuarios");
     }
+    // Migración: grupo_nombre en historial_envios
+    try {
+        db.prepare("SELECT grupo_nombre FROM historial_envios LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE historial_envios ADD COLUMN grupo_nombre TEXT DEFAULT NULL");
+        console.log("   Columna 'grupo_nombre' agregada a historial_envios");
+    }
+    // Tabla para progreso de envíos (resume)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS envio_progreso (
+            user_id TEXT,
+            grupo_jid TEXT,
+            ultimo_indice INTEGER DEFAULT 0,
+            total INTEGER DEFAULT 0,
+            mensaje TEXT,
+            jids_json TEXT,
+            grupo_nombre TEXT,
+            fecha TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY(user_id, grupo_jid)
+        );
+    `);
+    // Table for tracking campaign sends per group (anti-duplicate across restarts)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS campana_grupo_envio (
+            campana_id INTEGER,
+            grupo_jid TEXT,
+            ultimo_envio TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY(campana_id, grupo_jid)
+        );
+    `);
     console.log("\u2705 Base de datos WSP inicializada");
+}
+
+// --- CAMPANA GRUPO ENVIO (anti-duplicate) ---
+function registrarEnvioCampanaDB(campanaId, grupoJid) {
+    db.prepare("INSERT OR REPLACE INTO campana_grupo_envio (campana_id, grupo_jid, ultimo_envio) VALUES (?, ?, datetime('now'))").run(campanaId, grupoJid);
+}
+
+function getUltimoEnvioCampana(campanaId, grupoJid) {
+    return db.prepare("SELECT ultimo_envio FROM campana_grupo_envio WHERE campana_id = ? AND grupo_jid = ?").get(campanaId, grupoJid);
 }
 
 // --- USUARIOS ---
@@ -544,6 +583,7 @@ function eliminarCampana(campanaId) {
     db.prepare("DELETE FROM campana_sesiones WHERE campana_id = ?").run(campanaId);
     db.prepare("DELETE FROM campana_config WHERE campana_id = ?").run(campanaId);
     db.prepare("DELETE FROM campana_horario WHERE campana_id = ?").run(campanaId);
+    db.prepare("DELETE FROM campana_grupo_envio WHERE campana_id = ?").run(campanaId);
     db.prepare("DELETE FROM campanas WHERE id = ?").run(campanaId);
 }
 
@@ -644,8 +684,8 @@ function limpiarKeywords(userId) {
 }
 
 // --- HISTORIAL ---
-function registrarEnvio(userId, campanaId, grupoLink, resultado = "enviado") {
-    db.prepare("INSERT INTO historial_envios (user_id, campana_id, grupo_link, resultado) VALUES (?, ?, ?, ?)").run(userId, campanaId, grupoLink, resultado);
+function registrarEnvio(userId, campanaId, grupoLink, resultado = "enviado", grupoNombre = null) {
+    db.prepare("INSERT INTO historial_envios (user_id, campana_id, grupo_link, resultado, grupo_nombre) VALUES (?, ?, ?, ?, ?)").run(userId, campanaId, grupoLink, resultado, grupoNombre);
 }
 
 function registrarRespuesta(userId, grupoLink, keyword) {
@@ -653,7 +693,7 @@ function registrarRespuesta(userId, grupoLink, keyword) {
 }
 
 function getHistorialEnvios(userId, limite = 50) {
-    return db.prepare("SELECT grupo_link, resultado, fecha FROM historial_envios WHERE user_id = ? ORDER BY fecha DESC LIMIT ?").all(userId, limite);
+    return db.prepare("SELECT grupo_link, resultado, fecha, grupo_nombre FROM historial_envios WHERE user_id = ? ORDER BY fecha DESC LIMIT ?").all(userId, limite);
 }
 
 function getStatsPorGrupo(userId) {
@@ -1062,6 +1102,32 @@ function getTodosUsuariosAdmin() {
     }));
 }
 
+// --- PROGRESO ENVIO (RESUME) ---
+function guardarProgresoEnvio(userId, grupoJid, ultimoIndice, total, mensaje, jids, grupoNombre) {
+    db.prepare(`INSERT OR REPLACE INTO envio_progreso (user_id, grupo_jid, ultimo_indice, total, mensaje, jids_json, grupo_nombre, fecha)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`).run(userId, grupoJid, ultimoIndice, total, mensaje, JSON.stringify(jids), grupoNombre);
+}
+
+function getProgresoEnvio(userId, grupoJid) {
+    const row = db.prepare("SELECT * FROM envio_progreso WHERE user_id = ? AND grupo_jid = ?").get(userId, grupoJid);
+    if (row && row.jids_json) {
+        row.jids = JSON.parse(row.jids_json);
+    }
+    return row || null;
+}
+
+function getProgresoEnvioPendiente(userId) {
+    const row = db.prepare("SELECT * FROM envio_progreso WHERE user_id = ? ORDER BY fecha DESC LIMIT 1").get(userId);
+    if (row && row.jids_json) {
+        row.jids = JSON.parse(row.jids_json);
+    }
+    return row || null;
+}
+
+function eliminarProgresoEnvio(userId, grupoJid) {
+    db.prepare("DELETE FROM envio_progreso WHERE user_id = ? AND grupo_jid = ?").run(userId, grupoJid);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -1103,4 +1169,8 @@ module.exports = {
     getTasaEntrega,
     // Admin
     setAdmin, setTipoMembresia, getTodosUsuariosAdmin, normalizeId,
+    // Progreso envio (resume)
+    guardarProgresoEnvio, getProgresoEnvio, getProgresoEnvioPendiente, eliminarProgresoEnvio,
+    // Anti-duplicate campana
+    registrarEnvioCampanaDB, getUltimoEnvioCampana,
 };
