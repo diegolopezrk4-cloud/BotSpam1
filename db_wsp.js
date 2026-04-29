@@ -1540,6 +1540,12 @@ function limpiarLogs(userId) {
     }
 }
 
+function getPromoSentJids(userId) {
+    return db.prepare(
+        "SELECT DISTINCT grupo_link FROM historial_envios WHERE user_id = ? AND tipo_envio = 'personal' AND resultado IN ('enviado_personal', 'enviado_pending')"
+    ).all(userId).map(r => r.grupo_link);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -1591,6 +1597,8 @@ module.exports = {
     getPromoTimeout, setPromoTimeout,
     // Promo keywords (Mejora 7)
     getPromoKeywords, agregarPromoKeyword, eliminarPromoKeyword, limpiarPromoKeywords,
+    // Promo sent tracking
+    getPromoSentJids,
     // Bot logs (Mejora 6)
     agregarLog, getLogs, limpiarLogs,
 };

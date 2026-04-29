@@ -1069,6 +1069,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
                     }
                     enviados++;
                     db.registrarEnvio(userId, 0, chat.jid, "enviado_personal");
+                    if (_promoListeners[userId]) _promoListeners[userId].promoSentJids.add(chat.jid);
                 } catch (e) {
                     errores++;
                     console.error(`Error enviando a ${chat.numero}: ${e.message}`);
@@ -1401,11 +1402,17 @@ const _promoListeners = {}; // { userId: { handlers: [], cancel: fn, respondedJi
 
 function iniciarPromoEscucha(userId, sock, palabraAceptar, palabraRechazar, respAceptar, respRechazar, respAceptarImagen, respRechazarImagen) {
     if (!_promoListeners[userId]) {
-        _promoListeners[userId] = { handlers: [], cancelled: false, respondedJids: new Set(), startTime: Date.now() };
+        _promoListeners[userId] = { handlers: [], cancelled: false, respondedJids: new Set(), promoSentJids: new Set(), startTime: Date.now() };
         try {
             const existing = db.getPromoRespuestas(userId);
             for (const r of existing) {
                 if (r.jid) _promoListeners[userId].respondedJids.add(r.jid);
+            }
+        } catch (e) {}
+        try {
+            const sentJids = db.getPromoSentJids(userId);
+            for (const jid of sentJids) {
+                if (jid) _promoListeners[userId].promoSentJids.add(jid);
             }
         } catch (e) {}
     }
@@ -1424,6 +1431,7 @@ function iniciarPromoEscucha(userId, sock, palabraAceptar, palabraRechazar, resp
             const jid = msg.key.remoteJid;
             if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") continue;
             if (state.respondedJids.has(jid)) continue;
+            if (state.promoSentJids.size > 0 && !state.promoSentJids.has(jid)) continue;
 
             const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase().trim();
             const pushName = msg.pushName || "";
