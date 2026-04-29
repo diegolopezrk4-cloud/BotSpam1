@@ -4180,10 +4180,6 @@ async def recibir_nueva_password(msg: types.Message, state: FSMContext):
     else:
         await msg.answer(f"❌ {result.get('error', 'Error al cambiar contrasena')}")
 
-@dp.message(Command("miid"))
-async def cmd_miid(msg: types.Message):
-    await msg.answer(f"🆔 Tu ID de Telegram es:\n\n<code>{msg.from_user.id}</code>", parse_mode="HTML")
-
 # ╔══════════════════════════════════════╗
 # ║    MAIN                             ║
 # ╚══════════════════════════════════════╝
