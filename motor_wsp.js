@@ -49,17 +49,24 @@ async function connectClientAccount(userId, nombre, telefono) {
 
     return new Promise((resolve, reject) => {
         let resolved = false;
-        sock.ev.on("connection.update", (update) => {
+        const key = `${userId}_${nombre}`;
+        sock.ev.on("connection.update", async (update) => {
             const { connection, lastDisconnect } = update;
             if (connection === "open" && !resolved) {
                 resolved = true;
-                const key = `${userId}_${nombre}`;
                 clientSessions[key] = sock;
                 resolve(sock);
             }
-            if (connection === "close" && !resolved) {
-                resolved = true;
-                reject(new Error("Conexion cerrada"));
+            if (connection === "close") {
+                const code = lastDisconnect?.error?.output?.statusCode;
+                if (!resolved) {
+                    resolved = true;
+                    reject(new Error("Conexion cerrada" + (code ? ` (code ${code})` : "")));
+                }
+                // Clean up stale session
+                if (clientSessions[key] === sock) {
+                    delete clientSessions[key];
+                }
             }
         });
         setTimeout(() => {
@@ -190,8 +197,16 @@ async function getOrConnectClient(userId, nombre) {
     const key = `${userId}_${nombre}`;
     if (clientSessions[key]) {
         try {
-            if (clientSessions[key].user) return clientSessions[key];
-        } catch (e) {}
+            const sock = clientSessions[key];
+            if (sock.user && sock.ws && sock.ws.readyState === sock.ws.OPEN) {
+                return sock;
+            }
+            // Connection is stale, clean up and reconnect
+            try { sock.end(); } catch (e) {}
+            delete clientSessions[key];
+        } catch (e) {
+            delete clientSessions[key];
+        }
     }
     const sesiones = db.getSesiones(userId);
     const sesion = sesiones.find(s => s.nombre === nombre);

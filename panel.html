@@ -1297,7 +1297,7 @@ async function loadTgCampanas(){
     const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
     h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
     const runBtn=x.en_ejecucion?`<button class="btn btn-danger btn-sm" onclick="detenerTgCampana(${x.id})">⏹ Detener</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarTgCampana(${x.id})">🚀 Iniciar</button>`;
-    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div style="display:flex;gap:6px;align-items:center">${estado} ${runBtn} <button class="btn btn-primary btn-sm" onclick="showEditTgCampMsg(${x.id},${JSON.stringify(esc(x.mensaje||''))})">✏ Editar</button> <button class="btn btn-danger btn-sm" onclick="delTgCampanaPanel(${x.id})">🗑</button></div></div>`;
+    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div style="display:flex;gap:6px;align-items:center">${estado} ${runBtn} <button class="btn btn-primary btn-sm" onclick="showEditTgCampMsg(${x.id},${JSON.stringify(esc(x.mensaje||''))},${x.intervalo_min||30},${x.intervalo_max||60},${JSON.stringify(x.foto||'')})">✏ Editar</button> <button class="btn btn-danger btn-sm" onclick="delTgCampanaPanel(${x.id})">🗑</button></div></div>`;
     h+=`<p style="font-size:12px;color:var(--text2);margin-bottom:5px">${x.mensaje?esc(x.mensaje.slice(0,100)):'<i style="color:var(--danger)">Sin mensaje - haz click en Editar</i>'}</p>`;
     h+=`<div style="display:flex;gap:15px;font-size:12px;color:var(--text2);flex-wrap:wrap"><span>📤 Enviados: <b style="color:var(--success)">${x.enviados||0}</b></span><span>❌ Errores: <b style="color:var(--danger)">${x.errores||0}</b></span>`;
     h+=`<span>⏱ Intervalo: ${x.intervalo_min||30}s - ${x.intervalo_max||60}s</span><span>🌐 Grupos: ${x.grupos||0}</span><span>👤 Cuentas: ${x.sesiones||0}</span></div>`;
@@ -1324,16 +1324,36 @@ async function detenerTgCampana(id){
   const r=await api('/api/tg/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});
   toast(r.ok?'Campana detenida':(r.error||'Error'),r.ok?'success':'error');loadTgCampanas();
 }
-function showEditTgCampMsg(id,msg){
+function showEditTgCampMsg(id,msg,imin,imax,foto){
   if(!requireMembresia())return;
-  showModal('<h3>Editar Campana TG</h3><div class="form-group"><label>Mensaje a enviar</label><textarea id="tgCampEditMsg" rows="6" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">'+msg+'</textarea></div><div class="form-group"><label>Foto (opcional)</label><input type="file" id="tgCampEditFoto" accept="image/*" style="padding:5px"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="editTgCampMsgPanel('+id+')">Guardar</button></div>');
+  imin=imin||30;imax=imax||60;
+  let html='<h3>Editar Campana TG</h3>';
+  html+='<div class="form-group"><label>Mensaje a enviar</label><textarea id="tgCampEditMsg" rows="6" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">'+msg+'</textarea></div>';
+  html+='<div class="form-group"><label>Foto (opcional)</label><input type="file" id="tgCampEditFoto" accept="image/*" style="padding:5px">';
+  if(foto)html+='<p style="font-size:11px;color:var(--text2);margin-top:4px">Foto actual: '+esc(foto)+'</p>';
+  html+='</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:15px">';
+  html+='<div class="form-group" style="margin:0"><label>Intervalo min (seg)</label><input type="number" id="tgCampEditIMin" value="'+imin+'" min="5" placeholder="30"></div>';
+  html+='<div class="form-group" style="margin:0"><label>Intervalo max (seg)</label><input type="number" id="tgCampEditIMax" value="'+imax+'" min="5" placeholder="60"></div>';
+  html+='</div>';
+  html+='<div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="editTgCampMsgPanel('+id+')">Guardar</button></div>';
+  showModal(html);
 }
 async function editTgCampMsgPanel(id){
   const msg=$('tgCampEditMsg').value.trim();
-  if(!msg){toast('Escribe un mensaje','error');return}
+  const imin=$('tgCampEditIMin').value;
+  const imax=$('tgCampEditIMax').value;
+  const fotoInput=$('tgCampEditFoto');
   closeModal();
-  const r=await api('/api/tg/mensajes/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id,nombre:'',texto:msg})});
-  toast(r.ok?'Campana actualizada':'Error',r.ok?'success':'error');loadTgCampanas();
+  const fd=new FormData();
+  fd.append('u',userId);
+  fd.append('id',id);
+  if(msg)fd.append('texto',msg);
+  if(imin)fd.append('intervalo_min',imin);
+  if(imax)fd.append('intervalo_max',imax);
+  if(fotoInput&&fotoInput.files&&fotoInput.files[0])fd.append('foto',fotoInput.files[0]);
+  const r=await fetch('/api/tg/campanas/editar',{method:'POST',body:fd}).then(r=>r.json()).catch(e=>({ok:false,error:e.message}));
+  toast(r.ok?'Campana actualizada':'Error: '+(r.error||''),r.ok?'success':'error');loadTgCampanas();
 }
 
 async function loadTgProgramados(){

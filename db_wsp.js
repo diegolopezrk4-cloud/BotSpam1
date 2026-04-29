@@ -263,6 +263,9 @@ function findUserByNumber(phoneNumber) {
     const withWsp = phoneNumber + "@s.whatsapp.net";
     const userWsp = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(withWsp);
     if (userWsp) return userWsp;
+    const withLid = phoneNumber + "@lid";
+    const userLid = db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(withLid);
+    if (userLid) return userLid;
     return null;
 }
 
@@ -289,6 +292,7 @@ function crearUsuario(wspId, nombre) {
         const codigo = generarCodigo();
         db.prepare("UPDATE usuarios SET codigo = ? WHERE wsp_id = ?").run(codigo, id);
     }
+    return db.prepare("SELECT * FROM usuarios WHERE wsp_id = ?").get(id);
 }
 
 function getUsuarioByCodigo(codigo) {
@@ -400,7 +404,7 @@ function tieneMembresia(wspId) {
         if (user.fecha_expira) {
             const expira = new Date(user.fecha_expira);
             if (Date.now() > expira.getTime()) {
-                db.prepare("UPDATE usuarios SET activo = 0, plan = 'expirado' WHERE wsp_id = ?").run(wspId);
+                db.prepare("UPDATE usuarios SET activo = 0, plan = 'expirado' WHERE wsp_id = ?").run(user.wsp_id);
                 return false;
             }
         }
@@ -418,12 +422,13 @@ function tieneMembresia(wspId) {
             if (altUser.fecha_expira) {
                 const expira = new Date(altUser.fecha_expira);
                 if (Date.now() > expira.getTime()) {
-                    db.prepare("UPDATE usuarios SET activo = 0, plan = 'expirado' WHERE wsp_id = ?").run(altJid);
+                    db.prepare("UPDATE usuarios SET activo = 0, plan = 'expirado' WHERE wsp_id = ?").run(altUser.wsp_id);
                     return false;
                 }
             }
-            crearUsuario(wspId, user ? user.nombre : "");
-            db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(altUser.plan, altUser.fecha_expira, wspId);
+            const newUser = crearUsuario(wspId, user ? user.nombre : "");
+            const storedId = newUser ? newUser.wsp_id : normalizeId(wspId);
+            db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(altUser.plan, altUser.fecha_expira, storedId);
             return true;
         }
     }

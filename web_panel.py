@@ -479,6 +479,61 @@ async def api_tg_campanas_crear(request):
     return web.json_response({"ok": True, "id": campana_id})
 
 
+async def api_tg_campanas_editar(request):
+    try:
+        reader = await request.multipart()
+        fields = {}
+        foto_path = None
+        while True:
+            part = await reader.next()
+            if part is None:
+                break
+            if part.name == "foto" and part.filename:
+                import os
+                fotos_dir = os.path.join(os.path.dirname(__file__), "fotos_campanas")
+                os.makedirs(fotos_dir, exist_ok=True)
+                foto_path = os.path.join(fotos_dir, f"campana_{fields.get('id', 'tmp')}_{part.filename}")
+                with open(foto_path, "wb") as f:
+                    while True:
+                        chunk = await part.read_chunk()
+                        if not chunk:
+                            break
+                        f.write(chunk)
+            else:
+                data = await part.read(decode=True)
+                fields[part.name] = data.decode("utf-8", errors="replace")
+    except Exception:
+        body = await request.json()
+        fields = body
+        foto_path = None
+
+    user_id = int(fields.get("u", 0))
+    campana_id = int(fields.get("id", 0))
+    if not user_id or not campana_id:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    campana = await db.get_campana_by_id(campana_id)
+    if not campana or int(campana["user_id"]) != user_id:
+        return web.json_response({"ok": False, "error": "Sin permiso"}, status=403)
+
+    texto = fields.get("texto", "").strip()
+    if texto:
+        await db.actualizar_campana_mensaje(campana_id, texto, foto_path)
+    elif foto_path:
+        await db.actualizar_campana_mensaje(campana_id, dict(campana).get("mensaje", ""), foto_path)
+
+    intervalo_min = fields.get("intervalo_min")
+    intervalo_max = fields.get("intervalo_max")
+    if intervalo_min is not None or intervalo_max is not None:
+        config = await db.get_campana_config(campana_id)
+        imin = int(intervalo_min) if intervalo_min else (config["intervalo_min"] if config else 30)
+        imax = int(intervalo_max) if intervalo_max else (config["intervalo_max"] if config else 60)
+        if imax < imin:
+            imax = imin
+        await db.set_campana_config(campana_id, imin, imax)
+
+    return web.json_response({"ok": True})
+
+
 async def api_tg_campanas_del(request):
     body = await request.json()
     user_id = int(body.get("u", 0))
@@ -837,6 +892,7 @@ def create_app():
     app.router.add_get("/api/tg/campanas", api_tg_campanas)
     app.router.add_post("/api/tg/campanas/crear", api_tg_campanas_crear)
     app.router.add_post("/api/tg/campanas/del", api_tg_campanas_del)
+    app.router.add_post("/api/tg/campanas/editar", api_tg_campanas_editar)
 
     # Control
     app.router.add_post("/api/tg/iniciar", api_tg_iniciar)
