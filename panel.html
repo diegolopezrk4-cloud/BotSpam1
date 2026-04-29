@@ -343,6 +343,46 @@ table tr:hover { background: rgba(108,92,231,0.05); }
   </div>
 </div>
 
+<!-- AUTH: RECOVERY -->
+<div class="auth-container" id="authRecovery" style="display:none">
+  <div class="auth-card" style="max-width:500px">
+    <div class="logo">🔐</div>
+    <h1>Recuperar Contrasena</h1>
+    <!-- Step 1: Enter Telegram ID -->
+    <div id="recoverStep1">
+      <p class="subtitle">Ingresa tu ID de Telegram para recibir un codigo de recuperacion</p>
+      <div class="tg-id-help" id="recoverIdHelp">
+        <h4>📌 Como obtener tu ID de Telegram</h4>
+        <ol>
+          <li>Abre Telegram y busca el bot: <a href="https://t.me/BotSpamJM_bot" target="_blank">@BotSpamJM_bot</a></li>
+          <li>Inicia el bot con /start y usa el comando /miid para obtener tu <b>ID numerico</b></li>
+        </ol>
+      </div>
+      <input type="text" id="recoverId" placeholder="Tu ID de Telegram (numerico)" autocomplete="off">
+      <button class="btn-main" onclick="doRecoverRequest()" id="btnRecoverRequest">Enviar Codigo</button>
+      <p style="color:var(--text2);font-size:12px;margin-top:10px">Se enviara un codigo unico a tu Telegram via el bot</p>
+    </div>
+    <!-- Step 2: Enter code + new password -->
+    <div id="recoverStep2" style="display:none">
+      <p class="subtitle">Ingresa el codigo que recibiste en Telegram y tu nueva contrasena</p>
+      <p style="color:var(--accent2);font-size:13px;margin-bottom:12px">📨 Codigo enviado al ID: <b id="recoverIdDisplay"></b></p>
+      <input type="text" id="recoverCode" placeholder="Codigo de 6 digitos" autocomplete="off" maxlength="6" style="text-align:center;font-size:20px;letter-spacing:8px">
+      <input type="password" id="recoverNewPass" placeholder="Nueva contrasena">
+      <input type="password" id="recoverNewPass2" placeholder="Confirmar nueva contrasena">
+      <ul class="password-rules">
+        <li>Minimo 4 caracteres</li>
+        <li>El codigo expira en 10 minutos</li>
+      </ul>
+      <button class="btn-main" onclick="doRecoverReset()" id="btnRecoverReset">Cambiar Contrasena</button>
+      <div style="margin-top:8px"><button class="link-btn" onclick="doRecoverRequest()" style="font-size:12px">Reenviar codigo</button></div>
+    </div>
+    <div class="divider"></div>
+    <button class="link-btn" onclick="showLogin()">Volver al Login</button>
+    <div class="auth-error" id="recoverError"></div>
+    <div class="auth-success" id="recoverSuccess"></div>
+  </div>
+</div>
+
 <!-- APP -->
 <div class="app" id="app">
   <div class="hamburger" onclick="toggleSidebar()">☰</div>
@@ -1300,7 +1340,7 @@ function selectPlatform(p){
   $('authLogin').style.display='flex';
 }
 function showPlatformSelector(){
-  $('authLogin').style.display='none';$('authRegister').style.display='none';
+  $('authLogin').style.display='none';$('authRegister').style.display='none';$('authRecovery').style.display='none';
   $('platformSelector').style.display='flex';
 }
 
@@ -1340,18 +1380,43 @@ function initPlatformSwitch(){
 }
 
 // --- AUTH ---
-function showLogin(){$('authLogin').style.display='flex';$('authRegister').style.display='none';$('platformSelector').style.display='none'}
-function showRegister(){$('authLogin').style.display='none';$('authRegister').style.display='flex';$('platformSelector').style.display='none'}
+function showLogin(){$('authLogin').style.display='flex';$('authRegister').style.display='none';$('platformSelector').style.display='none';$('authRecovery').style.display='none'}
+function showRegister(){$('authLogin').style.display='none';$('authRegister').style.display='flex';$('platformSelector').style.display='none';$('authRecovery').style.display='none'}
+let _recoverId='';
 function showForgot(){
-  showModal(`<h3>🔑 Recuperar Contrasena</h3>
-    <p style="color:var(--text2);font-size:14px;line-height:1.6;margin-bottom:15px">
-      Para recuperar tu contrasena, ve al <b>bot de Telegram</b> y escribe:<br><br>
-      <code style="background:var(--bg);padding:6px 12px;border-radius:6px;font-size:15px;color:var(--accent2)">/recuperpass</code><br><br>
-      El bot te dara un <b>codigo unico de un solo uso</b>.<br>
-      Luego escribe: <code style="background:var(--bg);padding:4px 8px;border-radius:4px;font-size:13px">/recuperpass CODIGO</code><br>
-      y podras poner tu nueva contrasena.
-    </p>
-    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Entendido</button></div>`);
+  $('authLogin').style.display='none';$('authRegister').style.display='none';$('platformSelector').style.display='none';
+  $('authRecovery').style.display='flex';
+  $('recoverStep1').style.display='block';$('recoverStep2').style.display='none';
+  hideMsg('recoverError');hideMsg('recoverSuccess');
+  if($('loginId').value.trim())$('recoverId').value=$('loginId').value.trim();
+}
+async function doRecoverRequest(){
+  const id=($('recoverId').value||'').trim();
+  hideMsg('recoverError');hideMsg('recoverSuccess');
+  if(!id){showErr('recoverError','Ingresa tu ID de Telegram');return}
+  _recoverId=id;
+  $('btnRecoverRequest').disabled=true;$('btnRecoverRequest').textContent='Enviando...';
+  const r=await api('/api/panel_recuperar_solicitar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id})});
+  $('btnRecoverRequest').disabled=false;$('btnRecoverRequest').textContent='Enviar Codigo';
+  if(!r.ok){showErr('recoverError',r.error||'Error al enviar codigo');return}
+  $('recoverStep1').style.display='none';$('recoverStep2').style.display='block';
+  $('recoverIdDisplay').textContent=id;
+  toast('Codigo enviado a tu Telegram!','success');
+}
+async function doRecoverReset(){
+  const code=($('recoverCode').value||'').trim();
+  const p1=$('recoverNewPass').value,p2=$('recoverNewPass2').value;
+  hideMsg('recoverError');hideMsg('recoverSuccess');
+  if(!code){showErr('recoverError','Ingresa el codigo');return}
+  if(!p1){showErr('recoverError','Ingresa tu nueva contrasena');return}
+  if(p1.length<4){showErr('recoverError','La contrasena debe tener minimo 4 caracteres');return}
+  if(p1!==p2){showErr('recoverError','Las contrasenas no coinciden');return}
+  $('btnRecoverReset').disabled=true;$('btnRecoverReset').textContent='Cambiando...';
+  const r=await api('/api/panel_recuperar_reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:_recoverId,code,new_password:p1})});
+  $('btnRecoverReset').disabled=false;$('btnRecoverReset').textContent='Cambiar Contrasena';
+  if(!r.ok){showErr('recoverError',r.error||'Error');return}
+  showMsg('recoverSuccess','Contrasena cambiada! Ahora inicia sesion.');
+  setTimeout(()=>{showLogin();$('loginId').value=_recoverId},2500);
 }
 
 let esAdmin=false;
@@ -1398,7 +1463,7 @@ function showMsg(id,msg){const el=$(id);el.style.display='block';el.textContent=
 function hideMsg(id){$(id).style.display='none'}
 
 async function showApp(){
-  $('authLogin').style.display='none';$('authRegister').style.display='none';$('platformSelector').style.display='none';
+  $('authLogin').style.display='none';$('authRegister').style.display='none';$('platformSelector').style.display='none';$('authRecovery').style.display='none';
   $('app').style.display='block';
   $('sideUserId').textContent=userId;
   if($('tgIdDisplay'))$('tgIdDisplay').textContent=userId;

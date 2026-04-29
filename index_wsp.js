@@ -663,6 +663,46 @@ poll();
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
             }
+            if (url.pathname === "/api/panel_recuperar_solicitar" && req.method === "POST") {
+                const body = await readBody();
+                const tid = String(body.telegram_id || "").trim();
+                if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Ingresa tu ID de Telegram" })); }
+                const panelUser = db.getPanelUser(tid);
+                if (!panelUser) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "No existe una cuenta con ese ID. Registrate primero." })); }
+                const code = db.crearRecoveryCode(tid);
+                // Send code via TG bot (port 3002)
+                try {
+                    const http = require("http");
+                    const payload = JSON.stringify({ telegram_id: tid, code });
+                    const tgReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/send_recovery", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } }, (tgRes) => {
+                        let d = "";
+                        tgRes.on("data", c => d += c);
+                        tgRes.on("end", () => {
+                            try {
+                                const r = JSON.parse(d);
+                                if (r.ok) { res.writeHead(200); res.end(JSON.stringify({ ok: true, msg: "Codigo enviado a tu Telegram" })); }
+                                else { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: r.error || "No se pudo enviar el codigo. Inicia el bot primero." })); }
+                            } catch(_) { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Error al enviar codigo" })); }
+                        });
+                    });
+                    tgReq.on("error", () => { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Bot de Telegram no disponible" })); });
+                    tgReq.setTimeout(10000, () => { tgReq.destroy(); res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Bot de Telegram no responde" })); });
+                    tgReq.write(payload);
+                    tgReq.end();
+                } catch(e) { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: "Error interno: " + e.message })); }
+                return;
+            }
+            if (url.pathname === "/api/panel_recuperar_reset" && req.method === "POST") {
+                const body = await readBody();
+                const tid = String(body.telegram_id || "").trim();
+                const code = String(body.code || "").trim();
+                const newPass = body.new_password || "";
+                if (!tid || !code || !newPass) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan datos" })); }
+                if (newPass.length < 4) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "La contrasena debe tener minimo 4 caracteres" })); }
+                const r = db.panelResetPassword(tid, code, newPass);
+                res.writeHead(200);
+                return res.end(JSON.stringify(r));
+            }
             if (url.pathname === "/api/check_membresia" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }

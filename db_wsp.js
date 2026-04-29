@@ -173,6 +173,12 @@ function init() {
             password TEXT,
             fecha_registro TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS recovery_codes (
+            telegram_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            used INTEGER DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS user_envio_config (
             user_id TEXT PRIMARY KEY,
             delay_seg INTEGER DEFAULT 10,
@@ -1202,6 +1208,43 @@ function panelCambiarPassword(telegramId, oldPass, newPass) {
     return { ok: true };
 }
 
+function getPanelUser(telegramId) {
+    return db.prepare("SELECT * FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+}
+
+function crearRecoveryCode(telegramId) {
+    const crypto = require("crypto");
+    db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(String(telegramId));
+    const code = crypto.randomInt(100000, 999999).toString();
+    db.prepare("INSERT INTO recovery_codes (telegram_id, code) VALUES (?, ?)").run(String(telegramId), code);
+    return code;
+}
+
+function verificarRecoveryCode(telegramId, code) {
+    const row = db.prepare(
+        "SELECT * FROM recovery_codes WHERE telegram_id = ? AND code = ? AND used = 0"
+    ).get(String(telegramId), String(code));
+    if (!row) return { ok: false, error: "Codigo invalido o expirado" };
+    const created = new Date(row.created_at + "Z");
+    if (Date.now() - created.getTime() > 10 * 60 * 1000) {
+        db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ? AND code = ?").run(String(telegramId), String(code));
+        return { ok: false, error: "Codigo expirado (max 10 min)" };
+    }
+    return { ok: true };
+}
+
+function panelResetPassword(telegramId, code, newPass) {
+    const bcrypt = require("bcryptjs");
+    const v = verificarRecoveryCode(telegramId, code);
+    if (!v.ok) return v;
+    const user = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+    if (!user) return { ok: false, error: "Usuario no registrado" };
+    const hashed = bcrypt.hashSync(newPass, 10);
+    db.prepare("UPDATE panel_users SET password = ? WHERE telegram_id = ?").run(hashed, String(telegramId));
+    db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(String(telegramId));
+    return { ok: true };
+}
+
 function checkMembresia(userId) {
     const user = getUsuario(userId);
     const usu = user;
@@ -1611,6 +1654,7 @@ module.exports = {
     getReporteDiario,
     exportarGrupos, importarGrupos, exportarCampanas,
     panelLogin, panelRegistro, panelCambiarPassword, checkMembresia,
+    getPanelUser, crearRecoveryCode, verificarRecoveryCode, panelResetPassword,
     editarTemplate, duplicarTemplate,
     getUserEnvioConfig, setUserEnvioConfig,
     getProgramados, crearProgramado, toggleProgramado, eliminarProgramado,

@@ -940,6 +940,35 @@ async def api_tg_detectar_carpeta_grupos(request):
 
 
 # ─────────────────────────────────────────
+#   RECOVERY: enviar codigo al usuario via bot
+# ─────────────────────────────────────────
+
+async def api_tg_send_recovery(request):
+    body = await request.json()
+    telegram_id = body.get("telegram_id")
+    code = body.get("code")
+    if not telegram_id or not code:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    if not aiogram_bot:
+        return web.json_response({"ok": False, "error": "Bot no disponible"}, status=503)
+    try:
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        await aiogram_bot.send_message(
+            int(telegram_id),
+            f"🔐 <b>Recuperacion de Contrasena</b>\n\n"
+            f"Tu codigo de recuperacion es:\n\n"
+            f"<code>{code}</code>\n\n"
+            f"⏰ Este codigo expira en <b>10 minutos</b>.\n"
+            f"No compartas este codigo con nadie.",
+            parse_mode="HTML"
+        )
+        return web.json_response({"ok": True})
+    except Exception as e:
+        logger.error(f"Error enviando codigo de recuperacion a {telegram_id}: {e}")
+        return web.json_response({"ok": False, "error": f"No se pudo enviar el mensaje. Asegurate de haber iniciado el bot (@BotSpamJM_bot) primero."})
+
+
+# ─────────────────────────────────────────
 #   SERVIDOR WEB
 # ─────────────────────────────────────────
 
@@ -1012,6 +1041,9 @@ def create_app():
 
     # Sync membresia
     app.router.add_post("/api/tg/sync_membresia", api_tg_sync_membresia)
+
+    # Recovery
+    app.router.add_post("/api/tg/send_recovery", api_tg_send_recovery)
 
     # Detectar
     app.router.add_get("/api/tg/detectar", api_tg_detectar)
