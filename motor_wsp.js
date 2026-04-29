@@ -600,9 +600,13 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                     const gruposActuales = [...gruposLinks];
 
+                    let consecutiveErrors = 0;
+                    const MAX_CONSECUTIVE_ERRORS = 5;
+
                     for (const grupoLink of gruposActuales) {
                         if (cancelled) break;
 
+                        try {
                         // Verificar limite diario en cada iteracion
                         const enviosActuales = db.getEnviosDiarios(userId, currentSock.nombre);
                         if (enviosActuales >= LIMITE_ENVIOS_DIARIOS) {
@@ -623,7 +627,6 @@ function iniciarCampana(campanaId, userId, botSock) {
                         }
 
                         // Skip group if no new activity since our last send (avoid duplicate spam)
-                        // Works even after restart because send timestamps are stored in DB
                         if (!grupoTieneActividadNueva(campanaId, groupJid)) {
                             console.log(`   [Anti-dup] Grupo ${grupoLink}: sin actividad nueva, saltando`);
                             continue;
@@ -634,31 +637,28 @@ function iniciarCampana(campanaId, userId, botSock) {
                         let imagenAEnviar = campana.imagen_path;
 
                         if (templates.length > 0) {
-                            // Rotar templates aleatoriamente
                             const tmpl = templates[Math.floor(Math.random() * templates.length)];
                             mensajeAEnviar = tmpl.mensaje;
                             if (tmpl.imagen_path) imagenAEnviar = tmpl.imagen_path;
                         }
 
-                        // Aplicar variacion de sinonimos
                         mensajeAEnviar = variarMensaje(mensajeAEnviar, userId);
 
                         const result = await sendToGroup(currentSock.sock, groupJid, mensajeAEnviar, imagenAEnviar);
 
                         if (result.sent && (result.delivered || result.reason === "pending" || result.reason === "no_id")) {
-                            // Count as success + mark for anti-duplicate tracking
                             registrarEnvioCampana(campanaId, groupJid);
                             db.actualizarStatsCampana(campanaId, 1, 0);
                             db.registrarEnvio(userId, campanaId, grupoLink, result.delivered ? "enviado" : "enviado_pending");
                             db.actualizarGrupoStats(userId, grupoLink, "enviado");
                             db.incrementarEnvioDiario(userId, currentSock.nombre);
+                            consecutiveErrors = 0;
                             if (result.delivered) {
                                 consecutivePending = 0;
                                 if (delayMultiplier > 1.0) {
                                     delayMultiplier = Math.max(1.0, delayMultiplier - 0.2);
                                 }
                             } else {
-                                // Still track pending for rate-limit detection
                                 consecutivePending++;
                                 if (consecutivePending >= MAX_CONSECUTIVE_PENDING) {
                                     delayMultiplier = Math.min(2.0, delayMultiplier + 0.3);
@@ -666,7 +666,6 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 }
                             }
                         } else if (!result.sent) {
-                            // MEJORA 8: Deteccion de ban
                             if (result.reason === "ban_detected") {
                                 console.log(`   \u{1F6A8} BAN DETECTADO en cuenta '${currentSock.nombre}'`);
                                 db.marcarCuentaBaneada(userId, currentSock.nombre);
@@ -675,10 +674,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                                         text: `\u{1F6A8} *BAN DETECTADO*\n\nLa cuenta *${currentSock.nombre}* ha sido baneada/desconectada por WhatsApp.\n\nSe ha marcado como baneada y no se usara mas.\n\nSigue con las demas cuentas si hay.`,
                                     });
                                 } catch (e) {}
-                                break; // Salir del loop de grupos para esta cuenta
+                                break;
                             }
 
-                            // MEJORA 6: Auto-reconexion si se desconecto
                             if (result.reason === "disconnected") {
                                 console.log(`   [Reconexion] Intentando reconectar '${currentSock.nombre}'...`);
                                 try {
@@ -695,7 +693,8 @@ function iniciarCampana(campanaId, userId, botSock) {
                                             text: `\u2705 Cuenta '${currentSock.nombre}' reconectada. Continuando...`,
                                         });
                                     } catch (e) {}
-                                    continue; // Reintentar este grupo
+                                    consecutiveErrors = 0;
+                                    continue;
                                 } else {
                                     try {
                                         await botSock.sendMessage(userId, {
@@ -706,7 +705,6 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 }
                             }
 
-                            // Eliminar grupo si es error permanente
                             if (result.reason === "readonly" || result.reason === "not_member" || result.reason === "forbidden") {
                                 db.eliminarGrupoPorLink(userId, grupoLink);
                                 db.eliminarGrupoCampana(campanaId, grupoLink);
@@ -717,16 +715,48 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 if (idx !== -1) gruposLinks.splice(idx, 1);
                             }
                             db.actualizarStatsCampana(campanaId, 0, 1);
+                            consecutiveErrors++;
                         } else {
                             db.actualizarStatsCampana(campanaId, 0, 1);
                             db.registrarEnvio(userId, campanaId, grupoLink, result.reason || "error");
                             db.actualizarGrupoStats(userId, grupoLink, "fallido");
+                            consecutiveErrors++;
+                        }
+
+                        // Too many consecutive errors: pause and try to reconnect
+                        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                            console.log(`   [ErrorRecovery] ${consecutiveErrors} errores consecutivos, pausando 60s...`);
+                            try {
+                                await botSock.sendMessage(userId, {
+                                    text: `\u26A0 *${campana.nombre}*: ${consecutiveErrors} errores seguidos. Pausando 60s para recuperarse...`,
+                                });
+                            } catch (e) {}
+                            await delay(60000);
+                            const newSock = await reconectarCuenta(userId, currentSock.nombre);
+                            if (newSock) {
+                                currentSock.sock = newSock;
+                                socks[si].sock = newSock;
+                            }
+                            consecutiveErrors = 0;
                         }
 
                         // Espera entre grupos (adaptativa)
                         const baseWait = randomDelay(conf.intervalo_min, conf.intervalo_max);
                         const actualWait = Math.round(baseWait * delayMultiplier);
                         await delay(actualWait * 1000);
+
+                        } catch (groupErr) {
+                            console.error(`   [Campana] Error inesperado en grupo ${grupoLink}: ${groupErr.message}`);
+                            db.actualizarStatsCampana(campanaId, 0, 1);
+                            db.registrarEnvio(userId, campanaId, grupoLink, "error_inesperado");
+                            consecutiveErrors++;
+                            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                                console.log(`   [ErrorRecovery] Demasiados errores, pausando 60s...`);
+                                await delay(60000);
+                                consecutiveErrors = 0;
+                            }
+                            await delay(5000);
+                        }
                     }
 
                     // Espera entre cuentas (2+)
@@ -1014,11 +1044,13 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
             const total = chats.length;
             let enviados = 0;
             let errores = 0;
-            const DELAY_ENTRE_ENVIOS = 10000; // 10 segundos
+            // Random cooldown between 3-8 seconds
+            const DELAY_MIN_P = 3000;
+            const DELAY_MAX_P = 8000;
 
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 10 segundos entre cada envio\n\u23F3 Tiempo estimado: ~${Math.round(total * 10 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`,
+                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio\n\u23F3 Tiempo estimado: ~${Math.round(total * 5.5 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`,
                 });
             } catch (e) {}
 
@@ -1054,7 +1086,8 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
 
                 // Esperar 10 segundos entre cada envio
                 if (!cancelled) {
-                    await delay(DELAY_ENTRE_ENVIOS);
+                    const cooldownP = DELAY_MIN_P + Math.floor(Math.random() * (DELAY_MAX_P - DELAY_MIN_P));
+                    await delay(cooldownP);
                 }
             }
 
@@ -1102,7 +1135,9 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             const total = jids.length;
             let enviados = 0;
             let errores = 0;
-            const DELAY_ENTRE_ENVIOS = 10000;
+            // Random cooldown between 3-8 seconds (more human-like)
+            const DELAY_MIN = 3000;
+            const DELAY_MAX = 8000;
             const DELAY_ENTRE_LOTES = batchSize ? delayMinutes * 60 * 1000 : 0;
             const displayName = grupoNombre || grupoJid || "seleccionados";
 
@@ -1110,7 +1145,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             const resumeInfo = startIndex > 0 ? `\n🔄 Reanudando desde #${startIndex + 1}` : "";
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 10 seg entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 10 / 60)} min`,
+                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 5.5 / 60)} min`,
                 });
             } catch (e) {}
 
@@ -1155,6 +1190,27 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                 }
 
                 try {
+                    // Verify number has WhatsApp before sending
+                    const numToCheck = jid.replace(/@s\.whatsapp\.net$/, "");
+                    try {
+                        const [onWa] = await botSock.onWhatsApp(jid);
+                        if (!onWa || !onWa.exists) {
+                            console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid} NO TIENE WSP, saltando`);
+                            errores++;
+                            db.registrarEnvio(userId, 0, jid, "sin_whatsapp", grupoNombre, "personal");
+                            continue;
+                        }
+                    } catch (verifyErr) {
+                        // If verification fails, continue sending anyway
+                        console.log(`[EnvioMiembros] Verificacion WSP fallo para ${jid}: ${verifyErr.message}, enviando igual...`);
+                    }
+
+                    // Check if number is in individual blacklist
+                    if (db.estaEnBlacklistNumero(userId, numToCheck)) {
+                        console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid} en blacklist, saltando`);
+                        continue;
+                    }
+
                     const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
                     console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid}`);
                     let result;
@@ -1166,13 +1222,41 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                     } else {
                         result = await botSock.sendMessage(jid, { text: textoFinal });
                     }
-                    console.log(`[EnvioMiembros]   OK → key.id=${result?.key?.id || "?"} status=${result?.status || "?"}`);
+
+                    // Track delivery status
+                    const msgId = result?.key?.id;
+                    let estadoEntrega = null;
+                    if (msgId) {
+                        try {
+                            const deliveryResult = await new Promise((resolve) => {
+                                let done = false;
+                                const handler = (updates) => {
+                                    for (const upd of updates) {
+                                        if (upd.key?.id === msgId) {
+                                            const status = upd.update?.status;
+                                            if (status >= 3) { if (!done) { done = true; resolve("leido"); } }
+                                            else if (status >= 2) { if (!done) { done = true; resolve("entregado"); } }
+                                            else if (status === 0) { if (!done) { done = true; resolve("rechazado"); } }
+                                        }
+                                    }
+                                };
+                                botSock.ev.on("messages.update", handler);
+                                setTimeout(() => {
+                                    try { botSock.ev.off("messages.update", handler); } catch (e) {}
+                                    if (!done) { done = true; resolve("pendiente"); }
+                                }, 8000);
+                            });
+                            estadoEntrega = deliveryResult;
+                        } catch (e) {}
+                    }
+
+                    console.log(`[EnvioMiembros]   OK → key.id=${msgId || "?"} entrega=${estadoEntrega || "?"}`);
                     enviados++;
-                    db.registrarEnvio(userId, 0, jid, "enviado_personal", grupoNombre);
+                    db.registrarEnvio(userId, 0, jid, "enviado_personal", grupoNombre, "personal", estadoEntrega, (mensaje || "").substring(0, 50));
                 } catch (e) {
                     console.log(`[EnvioMiembros]   ERROR → ${e.message}`);
                     errores++;
-                    db.registrarEnvio(userId, 0, jid, "error_personal", grupoNombre);
+                    db.registrarEnvio(userId, 0, jid, "error_personal", grupoNombre, "personal");
                 }
 
                 // Save progress periodically (every 5 sends)
@@ -1189,7 +1273,9 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                 }
 
                 if (!cancelled) {
-                    await delay(DELAY_ENTRE_ENVIOS);
+                    // Random cooldown between 3-8 seconds (human-like)
+                    const cooldown = DELAY_MIN + Math.floor(Math.random() * (DELAY_MAX - DELAY_MIN));
+                    await delay(cooldown);
                 }
             }
 
@@ -1225,6 +1311,86 @@ function detenerEnvioPersonal(userId) {
     return false;
 }
 
+// ============================================================
+// Scheduled member sends checker
+// ============================================================
+let _schedulerInterval = null;
+
+function iniciarSchedulerMiembros(botSock) {
+    if (_schedulerInterval) return;
+    // Check every minute for scheduled sends
+    _schedulerInterval = setInterval(async () => {
+        try {
+            const now = new Date();
+            const peruTime = new Date(now.toLocaleString("en-US", { timeZone: "America/Lima" }));
+            const horaActual = String(peruTime.getHours()).padStart(2, "0") + ":" + String(peruTime.getMinutes()).padStart(2, "0");
+            const diaActual = peruTime.getDay();
+
+            // Get all active scheduled sends from all users
+            const allUsers = db.getTodosUsuarios();
+            for (const user of allUsers) {
+                const programados = db.getProgramadosMiembros(user.wsp_id);
+                for (const prog of programados) {
+                    if (!prog.activo) continue;
+                    const diasPermitidos = (prog.dias_semana || "0,1,2,3,4,5,6").split(",").map(Number);
+                    if (!diasPermitidos.includes(diaActual)) continue;
+                    if (prog.hora_envio !== horaActual) continue;
+                    // Check if already sent today
+                    if (prog.ultimo_envio) {
+                        const lastSend = new Date(prog.ultimo_envio + "Z");
+                        const hoyPeru = peruTime.toISOString().split("T")[0];
+                        const lastSendDate = lastSend.toISOString().split("T")[0];
+                        if (lastSendDate === hoyPeru) continue;
+                    }
+                    // Execute the scheduled send
+                    console.log(`[Scheduler] Ejecutando envio programado #${prog.id} para ${user.wsp_id}`);
+                    db.actualizarUltimoEnvioProgramado(prog.id);
+                    try {
+                        let sock;
+                        if (prog.cuenta) {
+                            sock = await getOrConnectClient(user.wsp_id, prog.cuenta);
+                        } else if (botSock) {
+                            sock = botSock;
+                        } else continue;
+
+                        const meta = await sock.groupMetadata(prog.grupo_jid);
+                        const rawParticipants = meta.participants || [];
+                        const myJid = sock.user?.id || "";
+                        const myNum = myJid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+                        const blNumeros = db.getBlacklistNumeros(user.wsp_id);
+                        const blSet = new Set(blNumeros.map(b => b.numero));
+                        const seen = new Set();
+                        const jids = [];
+                        for (const p of rawParticipants) {
+                            let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
+                            if (!jid || jid.endsWith("@lid")) continue;
+                            if (jid.includes(":")) {
+                                const suffix = jid.endsWith("@s.whatsapp.net") ? "@s.whatsapp.net" : "@lid";
+                                jid = jid.split(":")[0] + suffix;
+                            }
+                            const num = jid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+                            if (!num || !/^\d{7,15}$/.test(num) || num === myNum || blSet.has(num) || seen.has(num)) continue;
+                            if (prog.country_code && !num.startsWith(prog.country_code)) continue;
+                            if (prog.admin_filter === "admin" && p.admin !== "admin" && p.admin !== "superadmin") continue;
+                            if (prog.admin_filter === "noadmin" && (p.admin === "admin" || p.admin === "superadmin")) continue;
+                            seen.add(num);
+                            jids.push(jid);
+                        }
+                        if (jids.length) {
+                            const grupoNombre = meta.subject || prog.grupo_nombre || prog.grupo_jid;
+                            enviarASeleccionados(user.wsp_id, jids, prog.mensaje, prog.imagen_path, sock, prog.batch_size || 0, prog.delay_minutes || 5, grupoNombre, prog.grupo_jid, 0);
+                        }
+                    } catch (e) {
+                        console.error(`[Scheduler] Error envio programado #${prog.id}: ${e.message}`);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error(`[Scheduler] Error general: ${e.message}`);
+        }
+    }, 60000);
+}
+
 module.exports = {
     tareasActivas,
     getCampanasActivas,
@@ -1258,4 +1424,5 @@ module.exports = {
     sendToGroup,
     resolveGroupJid,
     registrarActividadGrupo,
+    iniciarSchedulerMiembros,
 };

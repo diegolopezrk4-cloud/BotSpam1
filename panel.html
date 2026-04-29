@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bot de Spam J&D - Panel de Control</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#7c3aed">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="J&D Bot">
 <style>
 :root {
   --bg: #0a0a1a;
@@ -380,9 +385,11 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div class="nav-group">Herramientas</div>
       <a href="#" data-section="plantillas"><span class="icon">📋</span><span>Plantillas</span></a>
       <a href="#" data-section="historial" data-plat="wsp"><span class="icon">📜</span><span>Historial WSP</span></a>
+      <a href="#" data-section="dmdashboard" data-plat="wsp"><span class="icon">📊</span><span>Dashboard DMs</span></a>
       <div class="nav-group" data-plat="wsp">Config WSP</div>
       <a href="#" data-section="config" data-plat="wsp"><span class="icon">⚙</span><span>Config Envio</span></a>
-      <a href="#" data-section="listanegra" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra</span></a>
+      <a href="#" data-section="listanegra" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra Grupos</span></a>
+      <a href="#" data-section="listanegranumeros" data-plat="wsp"><span class="icon">🚫</span><span>Lista Negra Numeros</span></a>
       <a href="#" data-section="autoresp" data-plat="wsp"><span class="icon">🤖</span><span>Auto-Responder</span></a>
       <div class="nav-group" data-plat="tg">Config TG</div>
       <a href="#" data-section="tgautoresp" data-plat="tg"><span class="icon">🤖</span><span>Auto-Responder TG</span></a>
@@ -614,12 +621,21 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <select id="emDestino"><option value="">-- Opcional: agregar miembros aqui --</option></select>
         </div>
       </div>
-      <div class="form-group" style="margin-bottom:15px">
-        <label>🌍 Filtrar por codigo de pais</label>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <select id="emPais" style="flex:1;max-width:300px" onchange="filtrarMiembrosPorPais()"><option value="">-- Todos los paises --</option></select>
-          <span id="emPaisCount" style="color:var(--text2);font-size:13px"></span>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:15px;align-items:flex-end">
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+          <label>🌍 Filtrar por codigo de pais</label>
+          <select id="emPais" onchange="filtrarMiembrosPorPais()"><option value="">-- Todos los paises --</option></select>
         </div>
+        <div class="form-group" style="margin-bottom:0;min-width:150px">
+          <label>👤 Filtrar por rol</label>
+          <select id="emAdminFilter">
+            <option value="">Todos</option>
+            <option value="admin">Solo Admins</option>
+            <option value="noadmin">Solo No-Admins</option>
+          </select>
+        </div>
+        <span id="emPaisCount" style="color:var(--text2);font-size:13px"></span>
+        <button class="btn btn-success" onclick="exportarMiembrosCSV()">📥 Exportar CSV</button>
       </div>
       <div class="form-group">
         <label>Mensaje DM (dejar vacio si solo quieres agregar miembros)</label>
@@ -669,6 +685,31 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <button class="btn" onclick="debugRawParticipants()">🔍 Ver Datos Crudos del Grupo</button>
         </div>
         <pre id="debugResult" style="background:#111;color:#0f0;padding:10px;border-radius:8px;font-size:11px;max-height:300px;overflow:auto;display:none;white-space:pre-wrap"></pre>
+      </div>
+      <!-- Scheduled member sends -->
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-top:15px;border:1px solid var(--border)">
+        <h4 style="margin:0 0 10px 0">⏰ Programar Envio a Miembros</h4>
+        <p style="color:var(--text2);font-size:12px;margin-bottom:10px">Programa un envio automatico de DMs a miembros de un grupo a una hora especifica.</p>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div class="form-group" style="margin:0">
+            <label>Hora de envio (HH:MM, hora Peru)</label>
+            <input type="time" id="emSchedHora" value="09:00">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Dias de la semana</label>
+            <select id="emSchedDias" multiple style="min-height:60px">
+              <option value="1" selected>Lunes</option>
+              <option value="2" selected>Martes</option>
+              <option value="3" selected>Miercoles</option>
+              <option value="4" selected>Jueves</option>
+              <option value="5" selected>Viernes</option>
+              <option value="6">Sabado</option>
+              <option value="0">Domingo</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="crearProgramadoMiembros()">⏰ Programar Envio</button>
+        <div id="programadosMiembrosContent" style="margin-top:15px"></div>
       </div>
     </div>
 
@@ -931,22 +972,19 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- HISTORIAL -->
     <div class="section" id="sec-historial">
       <h2>📜 Historial de Envios</h2>
+      <!-- Stats summary -->
+      <div id="historialStats" style="display:flex;gap:15px;flex-wrap:wrap;margin-bottom:15px"></div>
+      <!-- Tab buttons -->
+      <div style="margin-bottom:15px;display:flex;gap:5px">
+        <button class="btn btn-primary" onclick="loadHistorial('')" id="histTabAll" style="opacity:1">📋 Todos</button>
+        <button class="btn" onclick="loadHistorial('personal')" id="histTabPersonal" style="opacity:0.6">💬 Mensajes DM</button>
+        <button class="btn" onclick="loadHistorial('grupo')" id="histTabGrupo" style="opacity:0.6">👥 Grupos</button>
+      </div>
       <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-        <div class="form-group" style="margin-bottom:0;min-width:120px">
-          <label>Tipo</label>
-          <select id="histFiltroTipo" style="padding:6px 10px;font-size:13px">
-            <option value="">Todos</option>
-            <option value="grupo">Grupo</option>
-            <option value="personal">Personal</option>
-            <option value="miembros">Miembros</option>
-            <option value="campana">Campana</option>
-          </select>
-        </div>
         <div class="form-group" style="margin-bottom:0;min-width:120px">
           <label>Resultado</label>
           <select id="histFiltroRes" style="padding:6px 10px;font-size:13px">
             <option value="">Todos</option>
-            <option value="enviado">Enviado</option>
             <option value="exitoso">Exitoso</option>
             <option value="fallido">Fallido</option>
           </select>
@@ -963,6 +1001,34 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-success" onclick="exportarHistorialCSV()">📥 CSV</button>
       </div>
       <div id="historialContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- DM DASHBOARD -->
+    <div class="section" id="sec-dmdashboard">
+      <h2>📊 Dashboard de DMs</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Estadisticas de envios a miembros (DMs directos).</p>
+      <div id="dmDashboardContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- BLACKLIST NUMEROS -->
+    <div class="section" id="sec-listanegranumeros">
+      <h2>🚫 Lista Negra de Numeros</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Bloquea numeros individuales para que no reciban DMs.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:15px">
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+          <label>Numero (ej: 51987654321)</label>
+          <input type="text" id="inputBlacklistNumero" placeholder="Numero sin + ni espacios">
+        </div>
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
+          <label>Razon (opcional)</label>
+          <input type="text" id="inputBlacklistNumeroRazon" placeholder="Razon">
+        </div>
+        <button class="btn btn-danger" onclick="agregarBlacklistNumero()">🚫 Bloquear</button>
+        <button class="btn btn-primary" onclick="verificarNumeroWsp()">🔍 Verificar WSP</button>
+      </div>
+      <div id="verificarResult" style="display:none;padding:10px;background:var(--bg3);border-radius:8px;margin-bottom:15px;font-size:13px"></div>
+      <div style="margin-bottom:10px"><button class="btn btn-danger" onclick="showModal('Limpiar toda la lista negra de numeros?','confLimpBLNum()')">🗑 Limpiar Todo</button></div>
+      <div id="blacklistNumerosContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
     <!-- ACTIVIDAD -->
@@ -1202,7 +1268,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:verRespuestasPromo,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
+    const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:verRespuestasPromo,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,listanegranumeros:loadListaNegraNumeros,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,dmdashboard:loadDmDashboard,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -2086,6 +2152,8 @@ async function loadEnvioMiembros(){
   $('emDestino').innerHTML='<option value="">-- Opcional: grupo destino --</option>';
   // Check for pending resume
   checkEnvioProgreso();
+  // Load scheduled member sends
+  loadProgramadosMiembros();
 }
 async function checkEnvioProgreso(){
   const r=await api('/api/envio_progreso?u='+userId);
@@ -2208,17 +2276,20 @@ async function enviarAMiembros(){
   const grupo=$('emGrupo').value,msg=$('emMensaje').value.trim(),cuenta=$('emCuenta').value;
   const batchSize=$('emBatchSize').value,delayMinutes=$('emDelayMinutes').value||5;
   const paisFilter=$('emPais').value;
+  const adminFilter=$('emAdminFilter')?.value||'';
   if(!grupo){toast('Selecciona un grupo','error');return}
   if(!msg){toast('Escribe un mensaje','error');return}
   const paisInfo=paisFilter?' (solo +'+paisFilter+')':'';
+  const adminInfo=adminFilter==='admin'?' (solo admins)':adminFilter==='noadmin'?' (solo no-admins)':'';
   const batchInfo=batchSize?' (en lotes de '+batchSize+', pausa '+delayMinutes+' min)':'';
-  if(!confirm('Enviar DM a los miembros'+paisInfo+' del grupo seleccionado'+batchInfo+'?'))return;
-  toast('Iniciando envio a miembros'+paisInfo+'...','success');
+  if(!confirm('Enviar DM a los miembros'+paisInfo+adminInfo+' del grupo seleccionado'+batchInfo+'?'))return;
+  toast('Iniciando envio a miembros'+paisInfo+adminInfo+'...','success');
   const payload={u:userId,grupo,mensaje:msg};
   if(cuenta)payload.cuenta=cuenta;
   if(paisFilter)payload.country_code=paisFilter;
+  if(adminFilter)payload.admin_filter=adminFilter;
   if(batchSize){payload.batch_size=parseInt(batchSize);payload.delay_minutes=parseInt(delayMinutes);}
-  const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const r=await api('/api/enviar_miembros',payload);
   if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.grupo_nombre?' de '+r.grupo_nombre:'')+(r.filtered?' ('+r.filtered+' filtrados)':'')+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');}
   else{toast('Error: '+(r.error||''),'error');}
 }
@@ -2746,28 +2817,52 @@ async function usarPlantilla(id){
 }
 function copyPlantilla(){try{navigator.clipboard.writeText(_plantillaClipboard);toast('Copiado!','success')}catch(e){toast('Error al copiar','error')}closeModal()}
 
-// --- HISTORIAL ---
-async function loadHistorial(){
+// --- HISTORIAL (with tabs: All / DMs / Groups) ---
+let _historialTipoActual='';
+async function loadHistorial(tipo){
+  if(typeof tipo==='string') _historialTipoActual=tipo;
   let url='/api/historial_panel?u='+userId;
-  const tipo=$('histFiltroTipo')?.value;
+  if(_historialTipoActual)url+='&tipo='+_historialTipoActual;
   const res=$('histFiltroRes')?.value;
   const desde=$('histDesde')?.value;
   const hasta=$('histHasta')?.value;
-  if(tipo)url+='&tipo='+tipo;
   if(res)url+='&resultado='+res;
   if(desde)url+='&desde='+desde;
   if(hasta)url+='&hasta='+hasta;
+  // Update tab buttons
+  ['histTabAll','histTabPersonal','histTabGrupo'].forEach(id=>{
+    const el=$(id);if(el)el.style.opacity='0.6';
+  });
+  if(_historialTipoActual==='personal')$('histTabPersonal').style.opacity='1';
+  else if(_historialTipoActual==='grupo')$('histTabGrupo').style.opacity='1';
+  else $('histTabAll').style.opacity='1';
+
   const r=await api(url);
   if(!r.ok){$('historialContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  // Show stats
+  const st=r.stats||{};
+  $('historialStats').innerHTML=`
+    <div class="stat-card" style="flex:1;min-width:100px"><div class="stat-number">${st.total||0}</div><div class="stat-label">Total</div></div>
+    <div class="stat-card" style="flex:1;min-width:100px"><div class="stat-number" style="color:var(--accent)">${st.grupos||0}</div><div class="stat-label">Grupos</div></div>
+    <div class="stat-card" style="flex:1;min-width:100px"><div class="stat-number" style="color:#7c3aed">${st.personales||0}</div><div class="stat-label">DMs</div></div>
+    <div class="stat-card" style="flex:1;min-width:100px"><div class="stat-number" style="color:var(--success)">${st.exitosos||0}</div><div class="stat-label">Exitosos</div></div>
+    <div class="stat-card" style="flex:1;min-width:100px"><div class="stat-number" style="color:var(--danger)">${st.fallidos||0}</div><div class="stat-label">Fallidos</div></div>
+    <div class="stat-card" style="flex:1;min-width:100px"><div class="stat-number" style="color:#00b4d8">${st.entregados||0}</div><div class="stat-label">Entregados</div></div>
+    <div class="stat-card" style="flex:1;min-width:100px"><div class="stat-number" style="color:#06d6a0">${st.leidos||0}</div><div class="stat-label">Leidos</div></div>`;
+
   const h_data=r.historial||[];
   if(!h_data.length){$('historialContent').innerHTML='<div class="empty-state"><div class="icon">📜</div><p>Sin historial de envios</p></div>';return}
   let h='<div class="table-wrap"><div class="table-header"><h3>📜 '+h_data.length+' registros</h3></div>';
-  h+='<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Destino</th><th>Mensaje</th><th>Total</th><th>OK</th><th>Error</th><th>Estado</th></tr></thead><tbody>';
+  h+='<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Destino</th><th>Mensaje</th><th>OK</th><th>Error</th><th>Estado</th><th>Entrega</th></tr></thead><tbody>';
   h_data.forEach(x=>{
-    const badge=x.resultado==='exitoso'||x.resultado==='enviado'||x.resultado==='enviado_pending'||x.resultado==='enviado_personal'?'badge-success':x.resultado==='fallido'?'badge-danger':'badge-warn';
-    h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.tipo||'?'}</td><td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${(x.destino||'').slice(0,50)}</td><td style="font-size:11px;color:var(--text2)">${(x.mensaje_preview||'').slice(0,30)}</td>`;
-    h+=`<td>${x.total||0}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td>`;
-    h+=`<td><span class="badge ${badge}">${x.resultado||'?'}</span></td></tr>`;
+    const badge=x.resultado==='enviado'||x.resultado==='enviado_pending'||x.resultado==='enviado_personal'?'badge-success':x.resultado==='sin_whatsapp'?'badge-warn':'badge-danger';
+    const entregaBadge=x.estado_entrega==='leido'?'badge-success':x.estado_entrega==='entregado'?'badge-info':x.estado_entrega==='rechazado'?'badge-danger':'';
+    h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td><span class="badge ${x.tipo==='personal'?'badge-info':'badge-warn'}">${x.tipo==='personal'?'DM':'Grupo'}</span></td>`;
+    h+=`<td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${(x.destino||'').slice(0,50)}</td>`;
+    h+=`<td style="font-size:11px;color:var(--text2)">${(x.mensaje_preview||'').slice(0,30)}</td>`;
+    h+=`<td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td>`;
+    h+=`<td><span class="badge ${badge}">${x.resultado||'?'}</span></td>`;
+    h+=`<td>${x.estado_entrega?'<span class="badge '+entregaBadge+'">'+x.estado_entrega+'</span>':'-'}</td></tr>`;
   });
   h+='</tbody></table></div>';
   $('historialContent').innerHTML=h;
@@ -2778,6 +2873,156 @@ function exportarHistorialCSV(){
   if(!data.length){toast('Carga historial primero','error');return}
   downloadCSV('historial_envios_'+userId+'.csv',data);
 }
+
+// --- BLACKLIST NUMEROS ---
+async function loadListaNegraNumeros(){
+  const r=await api('/api/blacklist_numeros?u='+userId);
+  if(!r.ok){$('blacklistNumerosContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  const nums=r.numeros||[];
+  if(!nums.length){$('blacklistNumerosContent').innerHTML='<div class="empty-state"><div class="icon">🚫</div><p>Sin numeros bloqueados</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>🚫 '+nums.length+' numeros bloqueados</h3></div>';
+  h+='<table><thead><tr><th>Numero</th><th>Razon</th><th>Fecha</th><th>Accion</th></tr></thead><tbody>';
+  nums.forEach(n=>{
+    h+=`<tr><td>${esc(n.numero)}</td><td style="color:var(--text2);font-size:12px">${esc(n.razon||'-')}</td><td style="font-size:11px">${n.fecha||'?'}</td>`;
+    h+=`<td><button class="btn btn-danger" style="padding:3px 8px;font-size:11px" onclick="elimBlNum(${n.id})">🗑</button></td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  $('blacklistNumerosContent').innerHTML=h;
+}
+async function agregarBlacklistNumero(){
+  const num=$('inputBlacklistNumero')?.value?.trim();
+  const razon=$('inputBlacklistNumeroRazon')?.value?.trim();
+  if(!num){toast('Escribe un numero','error');return}
+  await api('/api/blacklist_numeros',{u:userId,accion:'agregar',numero:num,razon});
+  $('inputBlacklistNumero').value='';
+  $('inputBlacklistNumeroRazon').value='';
+  toast('Numero bloqueado');
+  loadListaNegraNumeros();
+}
+async function elimBlNum(id){
+  await api('/api/blacklist_numeros',{u:userId,accion:'eliminar',id});
+  toast('Numero desbloqueado');
+  loadListaNegraNumeros();
+}
+async function confLimpBLNum(){
+  await api('/api/blacklist_numeros',{u:userId,accion:'limpiar'});
+  toast('Lista negra limpiada');
+  loadListaNegraNumeros();
+}
+async function verificarNumeroWsp(){
+  const num=$('inputBlacklistNumero')?.value?.trim();
+  if(!num){toast('Escribe un numero para verificar','error');return}
+  $('verificarResult').style.display='block';
+  $('verificarResult').innerHTML='<span class="spinner" style="display:inline-block"></span> Verificando...';
+  try{
+    const r=await api('/api/verificar_whatsapp',{u:userId,numero:num});
+    if(r.ok){
+      $('verificarResult').innerHTML=r.existe?
+        '<span style="color:var(--success)">✅ El numero <b>'+esc(num)+'</b> TIENE WhatsApp (JID: '+esc(r.jid||'')+')</span>':
+        '<span style="color:var(--danger)">❌ El numero <b>'+esc(num)+'</b> NO tiene WhatsApp</span>';
+    }else{
+      $('verificarResult').innerHTML='<span style="color:var(--danger)">Error: '+(r.error||'')+'</span>';
+    }
+  }catch(e){$('verificarResult').innerHTML='<span style="color:var(--danger)">Error de conexion</span>'}
+}
+
+// --- DM DASHBOARD ---
+async function loadDmDashboard(){
+  const r=await api('/api/dm_stats?u='+userId);
+  if(!r.ok){$('dmDashboardContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  let h='<div style="display:flex;gap:15px;flex-wrap:wrap;margin-bottom:20px">';
+  h+=`<div class="stat-card" style="flex:1;min-width:120px"><div class="stat-number">${r.total||0}</div><div class="stat-label">Total DMs</div></div>`;
+  h+=`<div class="stat-card" style="flex:1;min-width:120px"><div class="stat-number" style="color:var(--success)">${r.exitosos||0}</div><div class="stat-label">Exitosos</div></div>`;
+  h+=`<div class="stat-card" style="flex:1;min-width:120px"><div class="stat-number" style="color:var(--danger)">${r.fallidos||0}</div><div class="stat-label">Fallidos</div></div>`;
+  h+=`<div class="stat-card" style="flex:1;min-width:120px"><div class="stat-number" style="color:#00b4d8">${r.entregados||0}</div><div class="stat-label">Entregados</div></div>`;
+  h+=`<div class="stat-card" style="flex:1;min-width:120px"><div class="stat-number" style="color:#06d6a0">${r.leidos||0}</div><div class="stat-label">Leidos</div></div>`;
+  const tasaExito=r.total?(r.exitosos/r.total*100).toFixed(1):0;
+  const tasaEntrega=r.exitosos?(r.entregados/r.exitosos*100).toFixed(1):0;
+  const tasaLectura=r.exitosos?(r.leidos/r.exitosos*100).toFixed(1):0;
+  h+=`<div class="stat-card" style="flex:1;min-width:120px"><div class="stat-number" style="color:var(--accent2)">${tasaExito}%</div><div class="stat-label">Tasa Exito</div></div>`;
+  h+=`<div class="stat-card" style="flex:1;min-width:120px"><div class="stat-number" style="color:#e0aaff">${tasaEntrega}%</div><div class="stat-label">Tasa Entrega</div></div>`;
+  h+=`<div class="stat-card" style="flex:1;min-width:120px"><div class="stat-number" style="color:#b8c0ff">${tasaLectura}%</div><div class="stat-label">Tasa Lectura</div></div>`;
+  h+='</div>';
+  // Last 7 days chart
+  const dias=r.ultimosDias||[];
+  if(dias.length){
+    const maxVal=Math.max(...dias.map(d=>d.total||1));
+    h+='<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:20px;border:1px solid var(--border)">';
+    h+='<h4 style="margin:0 0 10px 0">📈 Ultimos 7 dias</h4>';
+    h+='<div style="display:flex;align-items:flex-end;gap:8px;height:120px">';
+    dias.forEach(d=>{
+      const pct=Math.max((d.total/maxVal)*100,5);
+      const okPct=d.total?(d.ok/d.total)*pct:0;
+      h+=`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">`;
+      h+=`<div style="font-size:10px;color:var(--text2)">${d.total}</div>`;
+      h+=`<div style="width:100%;height:${pct}px;background:var(--danger);border-radius:4px;position:relative;overflow:hidden">`;
+      h+=`<div style="width:100%;height:${okPct}px;background:var(--success);position:absolute;bottom:0;border-radius:0 0 4px 4px"></div></div>`;
+      h+=`<div style="font-size:9px;color:var(--text2)">${d.dia?.slice(5)||'?'}</div></div>`;
+    });
+    h+='</div></div>';
+  }
+  // Top groups
+  const porGrupo=r.porGrupo||[];
+  if(porGrupo.length){
+    h+='<div class="table-wrap"><div class="table-header"><h3>📊 Top Grupos (por envios DM)</h3></div>';
+    h+='<table><thead><tr><th>Grupo</th><th>Total</th><th>OK</th><th>Error</th><th>Tasa</th></tr></thead><tbody>';
+    porGrupo.forEach(g=>{
+      const tasa=g.total?(g.ok/g.total*100).toFixed(0):0;
+      h+=`<tr><td style="font-size:12px">${esc(g.grupo_nombre||'?')}</td><td>${g.total}</td><td style="color:var(--success)">${g.ok}</td><td style="color:var(--danger)">${g.err}</td><td>${tasa}%</td></tr>`;
+    });
+    h+='</tbody></table></div>';
+  }
+  $('dmDashboardContent').innerHTML=h;
+}
+
+// --- EXPORT MIEMBROS CSV ---
+function exportarMiembrosCSV(){
+  const grupo=$('emGrupo')?.value;
+  const cuenta=$('emCuenta')?.value;
+  if(!grupo){toast('Selecciona un grupo primero','error');return}
+  const url='/api/exportar_miembros?u='+userId+'&grupo='+encodeURIComponent(grupo)+(cuenta?'&cuenta='+encodeURIComponent(cuenta):'');
+  const a=document.createElement('a');a.href=url;a.download='miembros.csv';document.body.appendChild(a);a.click();a.remove();
+  toast('Descargando CSV...');
+}
+
+// --- PROGRAMADOS MIEMBROS ---
+async function crearProgramadoMiembros(){
+  const grupo=$('emGrupo')?.value;
+  const msg=$('emMensaje')?.value?.trim();
+  const cuenta=$('emCuenta')?.value;
+  const hora=$('emSchedHora')?.value;
+  if(!grupo||!msg){toast('Selecciona grupo y escribe mensaje','error');return}
+  if(!hora){toast('Selecciona la hora de envio','error');return}
+  const diasSel=Array.from($('emSchedDias').selectedOptions).map(o=>o.value).join(',');
+  const cc=$('emPais')?.value||null;
+  const af=$('emAdminFilter')?.value||null;
+  const bs=parseInt($('emBatchSize')?.value)||0;
+  const dm=parseInt($('emDelayMinutes')?.value)||5;
+  const grupoNombre=$('emGrupo')?.selectedOptions[0]?.text||grupo;
+  await api('/api/programados_miembros',{u:userId,accion:'crear',grupo,grupo_nombre:grupoNombre,mensaje:msg,cuenta,hora_envio:hora,dias_semana:diasSel,country_code:cc,admin_filter:af,batch_size:bs,delay_minutes:dm});
+  toast('Envio programado creado');
+  loadProgramadosMiembros();
+}
+async function loadProgramadosMiembros(){
+  const r=await api('/api/programados_miembros?u='+userId);
+  if(!r.ok)return;
+  const progs=r.programados||[];
+  if(!progs.length){$('programadosMiembrosContent').innerHTML='<p style="color:var(--text2);font-size:12px">Sin envios programados</p>';return}
+  let h='<div class="table-wrap"><table><thead><tr><th>Grupo</th><th>Hora</th><th>Dias</th><th>Estado</th><th>Ultimo</th><th>Acciones</th></tr></thead><tbody>';
+  const diasNom=['Dom','Lun','Mar','Mie','Jue','Vie','Sab'];
+  progs.forEach(p=>{
+    const dias=(p.dias_semana||'').split(',').map(d=>diasNom[parseInt(d)]||d).join(', ');
+    h+=`<tr><td style="font-size:12px">${esc(p.grupo_nombre||p.grupo_jid)}</td><td>${p.hora_envio||'?'}</td><td style="font-size:11px">${dias}</td>`;
+    h+=`<td><span class="badge ${p.activo?'badge-success':'badge-danger'}">${p.activo?'Activo':'Pausado'}</span></td>`;
+    h+=`<td style="font-size:11px">${p.ultimo_envio||'Nunca'}</td>`;
+    h+=`<td><button class="btn" style="padding:2px 6px;font-size:11px" onclick="toggleProgMiembros(${p.id})">${p.activo?'⏸':'▶'}</button> `;
+    h+=`<button class="btn btn-danger" style="padding:2px 6px;font-size:11px" onclick="elimProgMiembros(${p.id})">🗑</button></td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  $('programadosMiembrosContent').innerHTML=h;
+}
+async function toggleProgMiembros(id){await api('/api/programados_miembros',{u:userId,accion:'toggle',id});loadProgramadosMiembros();}
+async function elimProgMiembros(id){await api('/api/programados_miembros',{u:userId,accion:'eliminar',id});toast('Eliminado');loadProgramadosMiembros();}
 
 // --- ACTIVIDAD ---
 async function loadActividad(){
@@ -2838,6 +3083,8 @@ window.addEventListener('load',()=>{
     $('loginId').value=urlId;
   }
 });
+// PWA Service Worker Registration
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}
 </script>
 </body>
 </html>

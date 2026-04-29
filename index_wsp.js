@@ -1048,28 +1048,29 @@ poll();
                     // p.jid is always @s.whatsapp.net (resolved from attrs.phone_number)
                     const myJid = sock.user?.id || "";
                     const myNum = jidToNumber(myJid);
-                    // Load blacklist numbers to skip
+                    // Load blacklist (groups + individual numbers) to skip
                     const blacklist = db.getBlacklist(body.u);
                     const blNums = new Set(blacklist.map(b => (b.grupo_link || "").replace(/[^0-9]/g, "")));
+                    const blNumeros = db.getBlacklistNumeros(body.u);
+                    blNumeros.forEach(b => blNums.add(b.numero));
                     const seen = new Set();
                     const jids = [];
                     for (const p of rawParticipants) {
-                        // Prefer p.jid (phone JID) over p.id (may be LID)
                         let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
                         if (!jid) continue;
-                        // Normalize: strip device suffix (e.g. :0)
                         if (jid.includes(":") && (jid.endsWith("@s.whatsapp.net") || jid.endsWith("@lid"))) {
                             const suffix = jid.endsWith("@s.whatsapp.net") ? "@s.whatsapp.net" : "@lid";
                             jid = jid.split(":")[0] + suffix;
                         }
-                        // Skip @lid JIDs — DMs to LID don't work in Baileys 6.x
                         if (jid.endsWith("@lid")) continue;
                         const num = jidToNumber(jid);
                         if (!num || !/^\d{7,15}$/.test(num)) continue;
-                        // Skip sender's own JID, blacklisted numbers, country filter, and duplicates
                         if (num === myNum) continue;
                         if (blNums.has(num)) continue;
                         if (body.country_code && !num.startsWith(body.country_code)) continue;
+                        // Admin filter: 'admin' = solo admins, 'noadmin' = solo no-admins
+                        if (body.admin_filter === "admin" && p.admin !== "admin" && p.admin !== "superadmin") continue;
+                        if (body.admin_filter === "noadmin" && (p.admin === "admin" || p.admin === "superadmin")) continue;
                         if (seen.has(num)) continue;
                         seen.add(num);
                         jids.push(jid);
@@ -1243,23 +1244,144 @@ poll();
             if (url.pathname === "/api/historial_panel" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
-                const envios = db.getHistorialEnvios(userId, 100);
+                const tipoFiltro = url.searchParams.get("tipo") || null;
+                const resultadoFiltro = url.searchParams.get("resultado") || null;
+                const desde = url.searchParams.get("desde") || null;
+                const hasta = url.searchParams.get("hasta") || null;
+                const envios = db.getHistorialEnvios(userId, 200, tipoFiltro, resultadoFiltro, desde, hasta);
+                const stats = db.getHistorialStats(userId);
                 const historial = envios.map(e => {
                     const esExitoso = e.resultado === "enviado" || e.resultado === "enviado_pending" || e.resultado === "enviado_personal";
-                    // Build display destination: show group name + JID number
                     let destino = e.grupo_link || "";
                     if (e.grupo_nombre) {
                         const numPart = destino.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/@g\.us$/, "");
                         destino = `[${e.grupo_nombre}] ${numPart}`;
                     }
                     return {
-                        fecha: e.fecha, tipo: "envio", destino,
-                        mensaje_preview: "", total: 1, exitosos: esExitoso ? 1 : 0,
+                        fecha: e.fecha, tipo: e.tipo_envio || "envio", destino,
+                        mensaje_preview: e.mensaje_preview || "", total: 1, exitosos: esExitoso ? 1 : 0,
                         fallidos: esExitoso ? 0 : 1, resultado: e.resultado,
+                        estado_entrega: e.estado_entrega || null,
                     };
                 });
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, historial }));
+                return res.end(JSON.stringify({ ok: true, historial, stats }));
+            }
+
+            // ─── DM DASHBOARD STATS ───
+            if (url.pathname === "/api/dm_stats" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const stats = db.getDmStats(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...stats }));
+            }
+
+            // ─── BLACKLIST NUMEROS ───
+            if (url.pathname === "/api/blacklist_numeros" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const lista = db.getBlacklistNumeros(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, numeros: lista }));
+            }
+            if (url.pathname === "/api/blacklist_numeros" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                if (body.accion === "agregar") {
+                    if (!body.numero) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta numero" })); }
+                    db.agregarBlacklistNumero(body.u, body.numero, body.razon || "");
+                } else if (body.accion === "eliminar") {
+                    if (body.id) db.eliminarBlacklistNumeroById(body.id);
+                    else if (body.numero) db.eliminarBlacklistNumero(body.u, body.numero);
+                } else if (body.accion === "limpiar") {
+                    db.limpiarBlacklistNumeros(body.u);
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ─── VERIFICAR WHATSAPP ───
+            if (url.pathname === "/api/verificar_whatsapp" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.numero) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o numero" })); }
+                try {
+                    let sock;
+                    if (body.cuenta) {
+                        sock = await motor.getOrConnectClient(body.u, body.cuenta);
+                    } else if (botSock) {
+                        sock = botSock;
+                    } else {
+                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                    }
+                    const num = body.numero.replace(/[^0-9]/g, "");
+                    const jid = num + "@s.whatsapp.net";
+                    const [result] = await sock.onWhatsApp(jid);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, existe: !!(result && result.exists), jid: result?.jid || jid }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // ─── EXPORTAR MIEMBROS CSV ───
+            if (url.pathname === "/api/exportar_miembros" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const grupoJid = url.searchParams.get("grupo");
+                const cuenta = url.searchParams.get("cuenta");
+                if (!userId || !grupoJid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
+                try {
+                    let sock;
+                    if (cuenta) {
+                        sock = await motor.getOrConnectClient(userId, cuenta);
+                    } else if (botSock) {
+                        sock = botSock;
+                    } else {
+                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                    }
+                    const metadata = await sock.groupMetadata(grupoJid);
+                    const participants = (metadata.participants || []).map(p => {
+                        const num = (p.jid || p.id || "").replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+                        return { numero: num, admin: p.admin === "admin" || p.admin === "superadmin" ? "si" : "no" };
+                    });
+                    let csv = "Numero,Admin,Pais\n";
+                    participants.forEach(p => {
+                        csv += `${p.numero},${p.admin},\n`;
+                    });
+                    res.writeHead(200, { "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="miembros_${grupoJid}.csv"` });
+                    return res.end(csv);
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // ─── PROGRAMADOS MIEMBROS ───
+            if (url.pathname === "/api/programados_miembros" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const programados = db.getProgramadosMiembros(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, programados }));
+            }
+            if (url.pathname === "/api/programados_miembros" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                if (body.accion === "crear") {
+                    if (!body.grupo || !body.mensaje || !body.hora_envio) {
+                        res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta grupo, mensaje o hora_envio" }));
+                    }
+                    db.crearProgramadoMiembros(body.u, body.grupo, body.grupo_nombre || "", body.mensaje, body.cuenta || "", body.hora_envio, body.dias_semana, body.country_code, body.admin_filter, body.batch_size, body.delay_minutes);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true }));
+                } else if (body.accion === "toggle") {
+                    db.toggleProgramadoMiembros(body.id);
+                } else if (body.accion === "eliminar") {
+                    db.eliminarProgramadoMiembros(body.id);
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
             }
 
             // ─── ACTIVIDAD ───
@@ -1563,6 +1685,7 @@ async function startBot() {
             console.log("\n\u2705 Bot de WhatsApp J&D conectado exitosamente!");
 
             motor.setBotSocket(botSock);
+            motor.iniciarSchedulerMiembros(botSock);
             console.log(`\u{1F4F1} Bot disponible como cuenta de spam: '${motor.BOT_NOMBRE}'`);
             console.log("\u{1F4F1} Listo para recibir mensajes.\n");
 
