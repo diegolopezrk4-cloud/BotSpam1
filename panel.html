@@ -1287,18 +1287,22 @@ async function editTgMsgPanel(id){
 async function delTgMsg(id){if(!requireMembresia())return;const r=await api('/api/tg/mensajes/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadTgMensajes()}
 async function dupTgMsg(id){if(!requireMembresia())return;const r=await api('/api/tg/mensajes/duplicar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Duplicado':'Error',r.ok?'success':'error');loadTgMensajes()}
 
+let _tgCampanasData={};
 async function loadTgCampanas(){
   const r=await api('/api/tg/campanas?u='+userId);
   if(!r.ok){$('tgCampanasContent').innerHTML='<div class="empty-state"><p>Error al cargar campanas</p></div>';return}
   const c=r.campanas||[];
   if(!c.length){$('tgCampanasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay campanas creadas.<br>Crea una con el boton de arriba.</p></div>';return}
+  _tgCampanasData={};
   let h='';
   c.forEach(x=>{
+    _tgCampanasData[x.id]=x;
     const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
     h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
     const runBtn=x.en_ejecucion?`<button class="btn btn-danger btn-sm" onclick="detenerTgCampana(${x.id})">⏹ Detener</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarTgCampana(${x.id})">🚀 Iniciar</button>`;
-    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div style="display:flex;gap:6px;align-items:center">${estado} ${runBtn} <button class="btn btn-primary btn-sm" onclick="showEditTgCampMsg(${x.id},${JSON.stringify(esc(x.mensaje||''))},${x.intervalo_min||30},${x.intervalo_max||60},${JSON.stringify(x.foto||'')})">✏ Editar</button> <button class="btn btn-danger btn-sm" onclick="delTgCampanaPanel(${x.id})">🗑</button></div></div>`;
+    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div style="display:flex;gap:6px;align-items:center">${estado} ${runBtn} <button class="btn btn-primary btn-sm" onclick="showEditTgCampMsg(${x.id})">✏ Editar</button> <button class="btn btn-danger btn-sm" onclick="delTgCampanaPanel(${x.id})">🗑</button></div></div>`;
     h+=`<p style="font-size:12px;color:var(--text2);margin-bottom:5px">${x.mensaje?esc(x.mensaje.slice(0,100)):'<i style="color:var(--danger)">Sin mensaje - haz click en Editar</i>'}</p>`;
+    if(x.foto)h+=`<p style="font-size:11px;color:var(--accent);margin-bottom:5px">📷 Foto adjunta</p>`;
     h+=`<div style="display:flex;gap:15px;font-size:12px;color:var(--text2);flex-wrap:wrap"><span>📤 Enviados: <b style="color:var(--success)">${x.enviados||0}</b></span><span>❌ Errores: <b style="color:var(--danger)">${x.errores||0}</b></span>`;
     h+=`<span>⏱ Intervalo: ${x.intervalo_min||30}s - ${x.intervalo_max||60}s</span><span>🌐 Grupos: ${x.grupos||0}</span><span>👤 Cuentas: ${x.sesiones||0}</span></div>`;
     h+=`</div>`;
@@ -1324,13 +1328,17 @@ async function detenerTgCampana(id){
   const r=await api('/api/tg/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});
   toast(r.ok?'Campana detenida':(r.error||'Error'),r.ok?'success':'error');loadTgCampanas();
 }
-function showEditTgCampMsg(id,msg,imin,imax,foto){
+function showEditTgCampMsg(id){
   if(!requireMembresia())return;
-  imin=imin||30;imax=imax||60;
-  let html='<h3>Editar Campana TG</h3>';
-  html+='<div class="form-group"><label>Mensaje a enviar</label><textarea id="tgCampEditMsg" rows="6" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">'+msg+'</textarea></div>';
+  const d=_tgCampanasData[id]||{};
+  const msg=d.mensaje||'';
+  const imin=d.intervalo_min||30;
+  const imax=d.intervalo_max||60;
+  const foto=d.foto||'';
+  let html='<h3>Editar Campana TG: '+esc(d.nombre||'')+'</h3>';
+  html+='<div class="form-group"><label>Mensaje a enviar</label><textarea id="tgCampEditMsg" rows="6" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">'+esc(msg)+'</textarea></div>';
   html+='<div class="form-group"><label>Foto (opcional)</label><input type="file" id="tgCampEditFoto" accept="image/*" style="padding:5px">';
-  if(foto)html+='<p style="font-size:11px;color:var(--text2);margin-top:4px">Foto actual: '+esc(foto)+'</p>';
+  if(foto)html+='<p style="font-size:11px;color:var(--text2);margin-top:4px">📷 Foto actual: '+esc(foto.split('/').pop())+'</p>';
   html+='</div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:15px">';
   html+='<div class="form-group" style="margin:0"><label>Intervalo min (seg)</label><input type="number" id="tgCampEditIMin" value="'+imin+'" min="5" placeholder="30"></div>';
@@ -1689,20 +1697,83 @@ async function toggleProg(id){await api('/api/programados/toggle',{method:'POST'
 async function elimProg(id){await api('/api/programados/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminado','success');loadProgramados()}
 
 // --- CAMPANAS ---
+let _wspCampanasData={};
 async function loadCampanas(){
   const r=await api('/api/campanas?u='+userId);
   if(!r.ok){$('campanasContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
   const c=r.campanas||[];
   if(!c.length){$('campanasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay campanas.</p></div>';return}
-  let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre</th><th>Estado</th><th>Enviados</th><th>Acciones</th></tr></thead><tbody>';
-  c.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td><span class="badge ${x.activa?'badge-success':'badge-warn'}">${x.activa?'Activa':'Inactiva'}</span></td><td>${x.enviados||0}</td><td><button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})">▶</button> <button class="btn btn-outline btn-sm" onclick="detenerCamp(${x.id})">⏸</button> <button class="btn btn-danger btn-sm" onclick="elimCamp(${x.id})">🗑</button></td></tr>`});
-  h+='</tbody></table></div>';$('campanasContent').innerHTML=h;
+  _wspCampanasData={};
+  let h='';
+  c.forEach(x=>{
+    _wspCampanasData[x.id]=x;
+    const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
+    h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
+    const runBtn=x.activa?`<button class="btn btn-danger btn-sm" onclick="detenerCamp(${x.id})">⏹ Detener</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})">🚀 Iniciar</button>`;
+    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div style="display:flex;gap:6px;align-items:center">${estado} ${runBtn} <button class="btn btn-primary btn-sm" onclick="showEditWspCamp(${x.id})">✏ Editar</button> <button class="btn btn-danger btn-sm" onclick="elimCamp(${x.id})">🗑</button></div></div>`;
+    h+=`<p style="font-size:12px;color:var(--text2);margin-bottom:5px">${x.mensaje?esc(x.mensaje.slice(0,100)):'<i style="color:var(--danger)">Sin mensaje</i>'}</p>`;
+    if(x.imagen_path)h+=`<p style="font-size:11px;color:var(--accent);margin-bottom:5px">📷 Foto adjunta</p>`;
+    h+=`<div style="display:flex;gap:15px;font-size:12px;color:var(--text2);flex-wrap:wrap"><span>📤 Enviados: <b style="color:var(--success)">${x.enviados||0}</b></span><span>❌ Errores: <b style="color:var(--danger)">${x.errores||0}</b></span>`;
+    h+=`<span>⏱ Intervalo: ${x.intervalo_min||30}s - ${x.intervalo_max||60}s</span><span>⏸ Pausa entre rondas: ${Math.round((x.espera_ciclo||600)/60)} min</span>`;
+    h+=`<span>🌐 Grupos: ${x.grupos_count||0}</span><span>👤 Cuentas: ${x.sesiones_count||0}</span></div>`;
+    h+=`</div>`;
+  });
+  $('campanasContent').innerHTML=h;
 }
-function showCrearCampana(){showModal(`<h3>➕ Crear Campana</h3><div class="form-group"><label>Nombre</label><input id="cN" placeholder="Nombre"></div><div class="form-group"><label>Mensaje</label><textarea id="cM" rows="4" placeholder="Texto"></textarea></div><div class="form-group"><label>Intervalo (seg)</label><input id="cI" type="number" value="60" min="10"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearCamp()">Crear</button></div>`)}
+function showCrearCampana(){showModal(`<h3>➕ Crear Campana WSP</h3><div class="form-group"><label>Nombre</label><input id="cN" placeholder="Nombre"></div><div class="form-group"><label>Mensaje</label><textarea id="cM" rows="4" placeholder="Texto a enviar a los grupos"></textarea></div><div class="form-group"><label>Intervalo entre grupos (seg)</label><input id="cI" type="number" value="20" min="5"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearCamp()">Crear</button></div>`)}
 async function crearCamp(){const n=$('cN').value.trim(),m=$('cM').value.trim(),iv=parseInt($('cI').value)||60;if(!n||!m){toast('Completa','error');return}closeModal();const r=await api('/api/campanas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,mensaje:m,intervalo:iv})});toast(r.ok?'Creada':'Error',r.ok?'success':'error');loadCampanas()}
 async function iniciarCamp(id){const r=await api('/api/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast(r.ok?'Iniciada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas()}
 async function detenerCamp(id){await api('/api/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast('Detenida','success');loadCampanas()}
 async function elimCamp(id){await api('/api/campanas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminada','success');loadCampanas()}
+function showEditWspCamp(id){
+  if(!requireMembresia())return;
+  const d=_wspCampanasData[id]||{};
+  const msg=d.mensaje||'';
+  const imin=d.intervalo_min||30;
+  const imax=d.intervalo_max||60;
+  const eciclo=Math.round((d.espera_ciclo||600)/60);
+  const foto=d.imagen_path||'';
+  let html='<h3>Editar Campana WSP: '+esc(d.nombre||'')+'</h3>';
+  html+='<div class="form-group"><label>Mensaje a enviar</label><textarea id="wspCampEditMsg" rows="6" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">'+esc(msg)+'</textarea></div>';
+  html+='<div class="form-group"><label>Foto (opcional)</label><input type="file" id="wspCampEditFoto" accept="image/*" style="padding:5px">';
+  if(foto)html+='<p style="font-size:11px;color:var(--text2);margin-top:4px">📷 Foto actual: '+esc(foto.split('/').pop())+'</p>';
+  html+='</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:15px">';
+  html+='<div class="form-group" style="margin:0"><label>Intervalo min (seg)</label><input type="number" id="wspCampEditIMin" value="'+imin+'" min="5" placeholder="20"></div>';
+  html+='<div class="form-group" style="margin:0"><label>Intervalo max (seg)</label><input type="number" id="wspCampEditIMax" value="'+imax+'" min="5" placeholder="60"></div>';
+  html+='<div class="form-group" style="margin:0"><label>Pausa entre rondas (min)</label><input type="number" id="wspCampEditPausa" value="'+eciclo+'" min="1" placeholder="15"></div>';
+  html+='</div>';
+  html+='<p style="font-size:11px;color:var(--text2);margin-bottom:10px">Envia a cada grupo dejando entre <b>intervalo min</b> y <b>max</b> segundos. Al terminar todos los grupos, pausa <b>X minutos</b> y repite.</p>';
+  html+='<div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="editWspCampPanel('+id+')">Guardar</button></div>';
+  showModal(html);
+}
+async function editWspCampPanel(id){
+  const msg=$('wspCampEditMsg').value.trim();
+  const imin=$('wspCampEditIMin').value;
+  const imax=$('wspCampEditIMax').value;
+  const pausa=$('wspCampEditPausa').value;
+  const fotoInput=$('wspCampEditFoto');
+  closeModal();
+  const payload={u:userId,id};
+  if(msg)payload.mensaje=msg;
+  if(imin)payload.intervalo_min=parseInt(imin);
+  if(imax)payload.intervalo_max=parseInt(imax);
+  if(pausa)payload.espera_ciclo=parseInt(pausa)*60;
+  if(fotoInput&&fotoInput.files&&fotoInput.files[0]){
+    const file=fotoInput.files[0];
+    const reader=new FileReader();
+    reader.onload=async function(){
+      payload.imagen_b64=reader.result.split(',')[1];
+      payload.imagen_nombre=file.name;
+      const r=await api('/api/campanas/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      toast(r.ok?'Campana actualizada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas();
+    };
+    reader.readAsDataURL(file);
+  } else {
+    const r=await api('/api/campanas/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    toast(r.ok?'Campana actualizada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas();
+  }
+}
 
 // --- CONFIG ---
 async function loadConfig(){

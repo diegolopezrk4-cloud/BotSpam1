@@ -311,7 +311,12 @@ poll();
             if (url.pathname === "/api/campanas" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
-                const campanas = db.getCampanas(userId);
+                const campanas = db.getCampanas(userId).map(c => {
+                    const conf = db.getCampanaConfig(c.id);
+                    const grupos = db.getGruposCampana(c.id);
+                    const sesiones = db.getSesionesCampana(c.id);
+                    return { ...c, intervalo_min: conf.intervalo_min, intervalo_max: conf.intervalo_max, espera_ciclo: conf.espera_ciclo, grupos_count: grupos.length, sesiones_count: sesiones.length };
+                });
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campanas }));
             }
@@ -335,6 +340,31 @@ poll();
                 const body = await readBody();
                 if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
                 db.eliminarCampana(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/campanas/editar — Editar campaña { u, id, mensaje, imagen_b64, intervalo_min, intervalo_max, espera_ciclo }
+            if (url.pathname === "/api/campanas/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                const camp = db.getCampanaById(body.id);
+                if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "campana no encontrada" })); }
+                let imagenPath = camp.imagen_path;
+                if (body.imagen_b64 && body.imagen_nombre) {
+                    const fotosDir = path.join(__dirname, "fotos_campanas_wsp");
+                    fs.mkdirSync(fotosDir, { recursive: true });
+                    imagenPath = path.join(fotosDir, `camp_${body.id}_${body.imagen_nombre}`);
+                    const buf = Buffer.from(body.imagen_b64, "base64");
+                    fs.writeFileSync(imagenPath, buf);
+                }
+                const msg = body.mensaje !== undefined ? body.mensaje : camp.mensaje;
+                db.actualizarCampanaMensaje(body.id, msg, imagenPath);
+                const conf = db.getCampanaConfig(body.id);
+                const imin = body.intervalo_min !== undefined ? parseInt(body.intervalo_min) : conf.intervalo_min;
+                const imax = body.intervalo_max !== undefined ? parseInt(body.intervalo_max) : conf.intervalo_max;
+                const eciclo = body.espera_ciclo !== undefined ? parseInt(body.espera_ciclo) : conf.espera_ciclo;
+                db.setCampanaConfig(body.id, imin, imax, conf.espera_cuenta, eciclo);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
