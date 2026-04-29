@@ -203,15 +203,26 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 .toast.success { border-color: var(--success); }
 .toast.error { border-color: var(--danger); }
 
-/* RESPONSIVE */
+/* RESPONSIVE — MOBILE */
+.hamburger { display: none; position: fixed; top: 12px; left: 12px; z-index: 200; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; width: 40px; height: 40px; align-items: center; justify-content: center; cursor: pointer; font-size: 22px; color: var(--text); box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+.sidebar-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 99; }
 @media (max-width: 768px) {
-  .sidebar { width: 60px; }
-  .sidebar .brand h2 span, .sidebar .brand small, .sidebar .user-info, .sidebar nav a span:not(.icon), .sidebar nav .nav-group, .sidebar .bottom-actions span { display: none; }
-  .sidebar nav a { justify-content: center; padding: 13px; border-left: none; }
-  .sidebar nav a .icon { font-size: 19px; }
-  .sidebar .bottom-actions button { font-size: 15px; padding: 10px; }
-  .main { margin-left: 60px; padding: 15px; }
+  .hamburger { display: flex; }
+  .sidebar { transform: translateX(-100%); width: 260px; z-index: 150; }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-overlay.open { display: block; }
+  .main { margin-left: 0; padding: 15px; padding-top: 60px; }
   .grid { grid-template-columns: 1fr; }
+  .section h2 { font-size: 18px; }
+  .table-wrap { overflow-x: auto; }
+  table th, table td { padding: 8px 10px; font-size: 11px; white-space: nowrap; }
+  .btn { padding: 10px 14px; font-size: 14px; }
+  .form-group input, .form-group textarea, .form-group select { font-size: 16px; padding: 12px; }
+  .theme-toggle { top: 12px; right: 12px; }
+  .lang-toggle { top: 12px; right: 60px; }
+  .notif-bell { top: 12px; right: 108px; }
+  .notif-panel { width: calc(100vw - 30px); right: 15px; }
+  .auth-card { padding: 30px 20px; }
 }
 
 /* LOADING / EMPTY */
@@ -329,7 +340,9 @@ table tr:hover { background: rgba(108,92,231,0.05); }
 
 <!-- APP -->
 <div class="app" id="app">
-  <div class="sidebar">
+  <div class="hamburger" onclick="toggleSidebar()">☰</div>
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+  <div class="sidebar" id="sidebarEl">
     <div class="brand">
       <h2>🤖 <span>J&D Bot</span></h2>
       <small>Panel de Control v2.0</small>
@@ -1150,6 +1163,11 @@ async function cambiarPass(){
 }
 
 // --- NAV ---
+// --- SIDEBAR MOBILE TOGGLE ---
+function toggleSidebar(){
+  const sb=$('sidebarEl'),ov=$('sidebarOverlay');
+  sb.classList.toggle('open');ov.classList.toggle('open');
+}
 document.querySelectorAll('.sidebar nav a').forEach(a=>{
   a.addEventListener('click',e=>{
     e.preventDefault();
@@ -1160,6 +1178,8 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     $('sec-'+sec).classList.add('active');
     const loaders={dashboard:loadDashboard,cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:loadMensajes,envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:verRespuestasPromo,programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:loadListaNegra,autoresp:loadAutoResp,stats:loadStats,admin:loadAdminUsuarios,plantillas:loadPlantillas,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats};
     if(loaders[sec])loaders[sec]();
+    // Close sidebar on mobile after nav click
+    if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
   });
 });
 

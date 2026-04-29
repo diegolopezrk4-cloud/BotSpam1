@@ -924,26 +924,16 @@ poll();
                     const meta = await sock.groupMetadata(grupoJid);
                     const miembros = (meta.participants || []).map(p => {
                         const isAdmin = p.admin === "admin" || p.admin === "superadmin";
+                        // Prefer p.jid (phone-based JID) over p.id (may be LID)
+                        const phoneJid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : null;
                         let numero = "";
-                        if (p.id && p.id.includes("@s.whatsapp.net")) {
-                            numero = p.id.split("@")[0];
-                        } else if (p.id && p.id.includes("@lid")) {
-                            numero = p.id.split("@")[0];
+                        if (phoneJid) {
+                            numero = phoneJid.split(":")[0].split("@")[0];
+                        } else if (p.id) {
+                            numero = p.id.split(":")[0].split("@")[0];
                         }
-                        return { id: p.id, numero, admin: isAdmin };
+                        return { id: phoneJid || p.id, numero, admin: isAdmin, lid: p.lid || null };
                     });
-                    // Try to resolve @lid to phone numbers via contacts
-                    const lidMembers = miembros.filter(m => m.id.endsWith("@lid") && !m.numero.match(/^\d{7,15}$/));
-                    if (lidMembers.length > 0 && sock.store && sock.store.contacts) {
-                        for (const m of lidMembers) {
-                            const contact = sock.store.contacts[m.id];
-                            if (contact && contact.id && contact.id.includes("@s.whatsapp.net")) {
-                                m.numero = contact.id.split("@")[0];
-                            } else if (contact && contact.notify) {
-                                m.numero = contact.notify;
-                            }
-                        }
-                    }
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, miembros }));
                 } catch (e) {
@@ -968,19 +958,26 @@ poll();
                     const meta = await sock.groupMetadata(body.grupo);
                     const rawParticipants = meta.participants || [];
 
-                    // Baileys v7: @lid JIDs are valid for DMs — send directly without conversion
+                    // Use p.jid (phone-based JID resolved by Baileys from phone_number attr)
+                    // p.id may be @lid which can't receive DMs in Baileys 6.x
+                    // p.jid is always @s.whatsapp.net (resolved from attrs.phone_number)
                     const myJid = sock.user?.id || "";
                     const myNum = jidToNumber(myJid);
                     const seen = new Set();
                     const jids = [];
                     for (const p of rawParticipants) {
-                        let jid = p.id;
+                        // Prefer p.jid (phone JID) over p.id (may be LID)
+                        let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
+                        if (!jid) continue;
                         // Normalize: strip device suffix (e.g. :0)
-                        if (jid.includes(":")) {
-                            const suffix = jid.endsWith("@s.whatsapp.net") ? "@s.whatsapp.net" : jid.endsWith("@lid") ? "@lid" : "";
-                            if (suffix) jid = jid.split(":")[0] + suffix;
+                        if (jid.includes(":") && (jid.endsWith("@s.whatsapp.net") || jid.endsWith("@lid"))) {
+                            const suffix = jid.endsWith("@s.whatsapp.net") ? "@s.whatsapp.net" : "@lid";
+                            jid = jid.split(":")[0] + suffix;
                         }
+                        // Skip @lid JIDs — DMs to LID don't work in Baileys 6.x
+                        if (jid.endsWith("@lid")) continue;
                         const num = jidToNumber(jid);
+                        if (!num || !/^\d{7,15}$/.test(num)) continue;
                         // Skip sender's own JID and duplicates
                         if (num === myNum) continue;
                         if (seen.has(num)) continue;
@@ -1018,7 +1015,14 @@ poll();
                         res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
                     }
                     const meta = await sock.groupMetadata(body.origen);
-                    const jids = (meta.participants || []).map(p => p.id);
+                    // Use p.jid (phone JID) — p.id may be @lid which groupParticipantsUpdate can't handle
+                    const jids = (meta.participants || []).map(p => {
+                        let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
+                        if (jid && jid.includes(":") && jid.endsWith("@s.whatsapp.net")) {
+                            jid = jid.split(":")[0] + "@s.whatsapp.net";
+                        }
+                        return jid;
+                    }).filter(jid => jid && jid.endsWith("@s.whatsapp.net"));
                     res.writeHead(200);
                     res.end(JSON.stringify({ ok: true, total: jids.length, message: "Agregando miembros en segundo plano..." }));
                     // Run in background to avoid timeout and crash
@@ -1515,6 +1519,11 @@ async function startBot() {
             // Si es mensaje enviado por el bot, ignorar
             if (msg.key.id && botSentIds.has(msg.key.id)) continue;
             if (botIsSending && msg.key.fromMe) continue;
+
+            // Track group activity from OTHER users (for duplicate spam detection)
+            if (jid.endsWith("@g.us") && !msg.key.fromMe) {
+                motor.registrarActividadGrupo(jid);
+            }
 
             // Grupos: solo permitir comandos admin
             if (jid.endsWith("@g.us")) {

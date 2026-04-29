@@ -10,6 +10,12 @@ const clientSessions = {};   // { "userId_nombre": socket }
 const pendingLinks = {};     // { "userId_nombre": { qr, status, error } }
 const reporteInterval = {};  // { userId: intervalId }
 
+// Track last activity per group: { grupoJid: timestamp }
+// Updated by message listeners — used to detect if someone else posted after our spam
+const grupoUltimaActividad = {};
+// Track last campaign send per group: { grupoJid: timestamp }
+const grupoUltimoEnvio = {};
+
 // Limite de envios diarios por cuenta (proteccion anti-ban)
 const LIMITE_ENVIOS_DIARIOS = 500;
 
@@ -48,6 +54,15 @@ async function connectClientAccount(userId, nombre, telefono) {
             retryRequestDelayMs: 2000,
         });
         sock.ev.on("creds.update", saveCreds);
+        // Track group activity from other users for anti-duplicate spam
+        sock.ev.on("messages.upsert", ({ messages }) => {
+            for (const msg of messages) {
+                const jid = msg.key?.remoteJid;
+                if (jid && jid.endsWith("@g.us") && !msg.key.fromMe && msg.message) {
+                    registrarActividadGrupo(jid);
+                }
+            }
+        });
         return sock;
     }
 
@@ -306,6 +321,25 @@ function variarMensaje(mensaje, userId) {
 
 function escapeRegex(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Track group activity from other users (called from index_wsp.js message listener)
+function registrarActividadGrupo(grupoJid) {
+    grupoUltimaActividad[grupoJid] = Date.now();
+}
+
+// Record when campaign sends to a group
+function registrarEnvioCampana(grupoJid) {
+    grupoUltimoEnvio[grupoJid] = Date.now();
+}
+
+// Check if group had activity from others since our last campaign send
+function grupoTieneActividadNueva(grupoJid) {
+    const ultimoEnvio = grupoUltimoEnvio[grupoJid];
+    if (!ultimoEnvio) return true; // never sent = treat as new activity
+    const ultimaActividad = grupoUltimaActividad[grupoJid];
+    if (!ultimaActividad) return false; // no activity from others since we sent
+    return ultimaActividad > ultimoEnvio;
 }
 
 // ============================================================
@@ -589,6 +623,12 @@ function iniciarCampana(campanaId, userId, botSock) {
                             continue;
                         }
 
+                        // Skip group if no new activity since our last send (avoid duplicate spam)
+                        if (ciclo > 1 && !grupoTieneActividadNueva(groupJid)) {
+                            console.log(`   [Anti-dup] Grupo ${grupoLink}: sin actividad nueva, saltando`);
+                            continue;
+                        }
+
                         // MEJORA 1 + 4: Variar mensaje o usar template rotativo
                         let mensajeAEnviar = campana.mensaje;
                         let imagenAEnviar = campana.imagen_path;
@@ -606,8 +646,8 @@ function iniciarCampana(campanaId, userId, botSock) {
                         const result = await sendToGroup(currentSock.sock, groupJid, mensajeAEnviar, imagenAEnviar);
 
                         if (result.sent && (result.delivered || result.reason === "pending" || result.reason === "no_id")) {
-                            // Count as success: message was sent. "pending" means delivery receipt
-                            // didn't arrive within timeout but message was delivered.
+                            // Count as success + mark for anti-duplicate tracking
+                            registrarEnvioCampana(groupJid);
                             db.actualizarStatsCampana(campanaId, 1, 0);
                             db.registrarEnvio(userId, campanaId, grupoLink, result.delivered ? "enviado" : "enviado_pending");
                             db.actualizarGrupoStats(userId, grupoLink, "enviado");
@@ -1209,4 +1249,5 @@ module.exports = {
     detenerEnvioPersonal,
     sendToGroup,
     resolveGroupJid,
+    registrarActividadGrupo,
 };
