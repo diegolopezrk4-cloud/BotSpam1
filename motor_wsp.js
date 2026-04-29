@@ -1073,6 +1073,8 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
                     errores++;
                     console.error(`Error enviando a ${chat.numero}: ${e.message}`);
                     db.registrarEnvio(userId, 0, chat.jid, "error_personal");
+                    // Add to retry queue (Mejora 4)
+                    try { db.agregarRetryQueue(userId, chat.jid, mensaje, imagenPath); } catch (re) {}
                 }
 
                 // Progreso cada 10 envios
@@ -1257,6 +1259,8 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                     console.log(`[EnvioMiembros]   ERROR → ${e.message}`);
                     errores++;
                     db.registrarEnvio(userId, 0, jid, "error_personal", grupoNombre, "personal");
+                    // Add to retry queue (Mejora 4)
+                    try { db.agregarRetryQueue(userId, jid, mensaje, imagenPath); } catch (re) {}
                 }
 
                 // Save progress periodically (every 5 sends)
