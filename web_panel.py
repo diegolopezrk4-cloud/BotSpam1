@@ -768,6 +768,39 @@ async def api_tg_detectar(request):
         return web.json_response({"ok": False, "error": str(e)})
 
 
+async def api_tg_detectar_carpetas(request):
+    user_id = int(request.query.get("u", 0))
+    cuenta = request.query.get("cuenta", "")
+    if not user_id:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    try:
+        carpetas, info = await detectar_carpetas_telegram(user_id, cuenta if cuenta else None)
+        if carpetas is None:
+            return web.json_response({"ok": False, "error": info})
+        return web.json_response({"ok": True, "cuenta": info, "carpetas": carpetas})
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)})
+
+
+async def api_tg_detectar_carpeta_grupos(request):
+    user_id = int(request.query.get("u", 0))
+    cuenta = request.query.get("cuenta", "")
+    folder_id = int(request.query.get("folder", 0))
+    if not user_id or not folder_id:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    try:
+        grupos, info = await detectar_grupos_carpeta(user_id, folder_id, cuenta if cuenta else None)
+        if grupos is None:
+            return web.json_response({"ok": False, "error": info})
+        return web.json_response({
+            "ok": True,
+            "cuenta": info,
+            "grupos": [{"title": g.get("title", ""), "link": g.get("link", ""), "id": g.get("id", 0), "participants": g.get("participants", 0), "tipo": g.get("tipo", "")} for g in grupos]
+        })
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)})
+
+
 # ─────────────────────────────────────────
 #   SERVIDOR WEB
 # ─────────────────────────────────────────
@@ -840,6 +873,8 @@ def create_app():
 
     # Detectar
     app.router.add_get("/api/tg/detectar", api_tg_detectar)
+    app.router.add_get("/api/tg/detectar_carpetas", api_tg_detectar_carpetas)
+    app.router.add_get("/api/tg/detectar_carpeta_grupos", api_tg_detectar_carpeta_grupos)
 
     return app
 

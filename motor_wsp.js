@@ -974,7 +974,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
     return true;
 }
 
-async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock) {
+async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes) {
     if (envioPersonalActivo[userId]) return false;
 
     let cancelled = false;
@@ -984,21 +984,43 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock) 
     };
     envioPersonalActivo[userId] = task;
 
+    batchSize = parseInt(batchSize) || 0;
+    delayMinutes = parseInt(delayMinutes) || 5;
+
     (async () => {
         try {
             const total = jids.length;
             let enviados = 0;
             let errores = 0;
-            const DELAY_ENTRE_ENVIOS = 10000; // 10 segundos
+            const DELAY_ENTRE_ENVIOS = 10000; // 10 segundos entre mensajes
+            const DELAY_ENTRE_LOTES = batchSize ? delayMinutes * 60 * 1000 : 0;
 
+            const batchInfo = batchSize ? `\n📦 Lotes: ${batchSize} por lote, pausa ${delayMinutes} min entre lotes` : "";
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} contacto(s) seleccionados\n\u23F1 Delay: 10 segundos entre cada envio\n\u23F3 Tiempo estimado: ~${Math.round(total * 10 / 60)} min`,
+                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} contacto(s) seleccionados\n\u23F1 Delay: 10 segundos entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round(total * 10 / 60)} min`,
                 });
             } catch (e) {}
 
-            for (const jid of jids) {
+            for (let i = 0; i < jids.length; i++) {
                 if (cancelled) break;
+                const jid = jids[i];
+
+                // Pausa entre lotes (anti-ban)
+                if (batchSize && enviados > 0 && enviados % batchSize === 0) {
+                    try {
+                        await botSock.sendMessage(userId, {
+                            text: `⏸ Lote de ${batchSize} completado (${enviados}/${total}). Pausando ${delayMinutes} minutos para evitar baneo...`,
+                        });
+                    } catch (e) {}
+                    await delay(DELAY_ENTRE_LOTES);
+                    if (cancelled) break;
+                    try {
+                        await botSock.sendMessage(userId, {
+                            text: `▶️ Reanudando envio... (${enviados}/${total})`,
+                        });
+                    } catch (e) {}
+                }
 
                 try {
                     const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
@@ -1017,7 +1039,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock) 
                     db.registrarEnvio(userId, 0, jid, "error_personal");
                 }
 
-                if (enviados % 10 === 0 && enviados > 0) {
+                if (enviados % 10 === 0 && enviados > 0 && !(batchSize && enviados % batchSize === 0)) {
                     try {
                         await botSock.sendMessage(userId, {
                             text: `\u{1F4E8} Progreso: ${enviados}/${total} enviados (${errores} errores)...`,

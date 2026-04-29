@@ -603,6 +603,20 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <label>Mensaje DM (dejar vacio si solo quieres agregar miembros)</label>
         <textarea id="emMensaje" rows="4" placeholder="Mensaje que se enviara como DM a cada miembro..."></textarea>
       </div>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
+        <h4 style="margin:0 0 10px 0">⏰ Envio por Lotes (Anti-Baneo)</h4>
+        <p style="color:var(--text2);font-size:12px;margin-bottom:10px">Divide el envio en lotes para evitar que WhatsApp te banee. Deja vacio para enviar sin pausas.</p>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin:0">
+            <label>Miembros por lote</label>
+            <input type="number" id="emBatchSize" placeholder="Ej: 15" min="1" value="">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Minutos entre lotes</label>
+            <input type="number" id="emDelayMinutes" placeholder="Ej: 5" min="1" value="5">
+          </div>
+        </div>
+      </div>
       <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-success" onclick="enviarAMiembros()">📤 Enviar DM a Miembros</button>
         <button class="btn btn-primary" onclick="agregarMiembrosAGrupo()">➕ Agregar Miembros al Grupo Destino</button>
@@ -821,7 +835,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- DETECTAR GRUPOS TG -->
     <div class="section" id="sec-tgdetectar">
       <h2>🔍 Detectar Grupos Telegram</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Escanea tus grupos de Telegram automaticamente usando una de tus cuentas vinculadas.</p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Escanea tus grupos de Telegram automaticamente. Puedes buscar todos o por carpeta.</p>
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent)">
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
@@ -831,14 +845,20 @@ table tr:hover { background: rgba(108,92,231,0.05); }
             </select>
           </div>
           <button class="btn btn-primary" onclick="detectarGruposTg()">🔍 Detectar Todos</button>
+          <button class="btn btn-outline" onclick="detectarCarpetasTg()">📁 Ver Carpetas</button>
         </div>
       </div>
+      <div id="tgCarpetasResult" style="display:none;background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
+        <h3 style="margin:0 0 10px 0;font-size:16px">📁 Carpetas Detectadas</h3>
+        <div id="tgCarpetasList"></div>
+      </div>
       <div id="tgDetectarResult" style="display:none;background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <h3 style="margin:0;font-size:16px">Grupos detectados</h3>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-success btn-sm" onclick="agregarTodosDetectados()">✅ Agregar Todos</button>
-            <button class="btn btn-outline btn-sm" onclick="agregarSeleccionados()">➕ Agregar Seleccionados</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:10px">
+          <h3 style="margin:0;font-size:16px" id="tgDetectarTitle">Grupos detectados</h3>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="text" id="tgSeleccion" placeholder="Ej: 1,3,5 o T para todos" style="width:180px">
+            <button class="btn btn-success btn-sm" onclick="agregarSeleccionadosTg()">✅ Agregar Seleccionados</button>
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('tgSeleccion').value='T';toast('Todos seleccionados','success')">T Todos</button>
           </div>
         </div>
         <div id="tgDetectarList"></div>
@@ -1420,6 +1440,7 @@ async function loadTgDetectar(){
   }
   $('tgDetectarResult').style.display='none';
   $('tgDetectarLoading').style.display='none';
+  if($('tgCarpetasResult'))$('tgCarpetasResult').style.display='none';
 }
 async function detectarGruposTg(){
   if(!requireMembresia())return;
@@ -1427,44 +1448,88 @@ async function detectarGruposTg(){
   if(!cuenta){toast('Selecciona una cuenta primero','error');return}
   $('tgDetectarLoading').style.display='flex';
   $('tgDetectarResult').style.display='none';
+  $('tgCarpetasResult').style.display='none';
   const r=await api('/api/tg/detectar?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
   $('tgDetectarLoading').style.display='none';
   if(!r.ok){toast('Error: '+(r.error||'No se pudo detectar'),'error');return}
   tgDetectedGroups=r.grupos||[];
   if(!tgDetectedGroups.length){toast('No se detectaron grupos','info');return}
+  $('tgDetectarTitle').textContent='Grupos detectados ('+tgDetectedGroups.length+')';
   $('tgDetectarResult').style.display='block';
   let html='';
   tgDetectedGroups.forEach((g,i)=>{
     html+='<div style="display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid var(--border)">';
-    html+='<input type="checkbox" id="tgDetGrp'+i+'" checked style="width:18px;height:18px">';
+    html+='<span style="font-weight:bold;min-width:30px;color:var(--accent)">'+(i+1)+'</span>';
     html+='<div style="flex:1"><b>'+esc(g.title||'Sin nombre')+'</b><br><span style="font-size:12px;color:var(--text2)">'+esc(g.link||'ID: '+g.id)+'</span></div>';
     html+='</div>';
   });
   $('tgDetectarList').innerHTML=html;
-  toast(tgDetectedGroups.length+' grupos detectados','success');
+  toast(tgDetectedGroups.length+' grupos detectados. Escribe numeros (1,2,5) o T para todos.','success');
 }
-async function agregarTodosDetectados(){
+async function detectarCarpetasTg(){
   if(!requireMembresia())return;
+  const cuenta=$('tgDetectCuenta').value;
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
+  $('tgDetectarLoading').style.display='flex';
+  $('tgCarpetasResult').style.display='none';
+  $('tgDetectarResult').style.display='none';
+  const r=await api('/api/tg/detectar_carpetas?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
+  $('tgDetectarLoading').style.display='none';
+  if(!r.ok){toast('Error: '+(r.error||''),'error');return}
+  const carpetas=r.carpetas||[];
+  if(!carpetas.length){toast('No se encontraron carpetas','info');return}
+  $('tgCarpetasResult').style.display='block';
+  let html='';
+  carpetas.forEach(c=>{
+    html+='<div style="display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid var(--border);cursor:pointer" onclick="detectarGruposCarpetaTg('+c.id+',\''+esc(c.title)+'\')">';
+    html+='<span style="font-size:24px">📁</span>';
+    html+='<div style="flex:1"><b>'+esc(c.title)+'</b><br><span style="font-size:12px;color:var(--text2)">Click para ver grupos de esta carpeta</span></div>';
+    html+='<span style="color:var(--accent)">→</span>';
+    html+='</div>';
+  });
+  $('tgCarpetasList').innerHTML=html;
+  toast(carpetas.length+' carpetas encontradas','success');
+}
+async function detectarGruposCarpetaTg(folderId,folderName){
+  const cuenta=$('tgDetectCuenta').value;
+  if(!cuenta){toast('Selecciona una cuenta','error');return}
+  $('tgDetectarLoading').style.display='flex';
+  $('tgDetectarResult').style.display='none';
+  const r=await api('/api/tg/detectar_carpeta_grupos?u='+userId+'&cuenta='+encodeURIComponent(cuenta)+'&folder='+folderId);
+  $('tgDetectarLoading').style.display='none';
+  if(!r.ok){toast('Error: '+(r.error||''),'error');return}
+  tgDetectedGroups=r.grupos||[];
+  if(!tgDetectedGroups.length){toast('No hay grupos en esta carpeta','info');return}
+  $('tgDetectarTitle').textContent='Grupos de carpeta "'+folderName+'" ('+tgDetectedGroups.length+')';
+  $('tgDetectarResult').style.display='block';
+  let html='';
+  tgDetectedGroups.forEach((g,i)=>{
+    html+='<div style="display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid var(--border)">';
+    html+='<span style="font-weight:bold;min-width:30px;color:var(--accent)">'+(i+1)+'</span>';
+    html+='<div style="flex:1"><b>'+esc(g.title||'Sin nombre')+'</b><br><span style="font-size:12px;color:var(--text2)">'+esc(g.link||'ID: '+g.id)+(g.tipo?' | '+g.tipo:'')+'</span></div>';
+    html+='</div>';
+  });
+  $('tgDetectarList').innerHTML=html;
+  toast(tgDetectedGroups.length+' grupos en carpeta "'+folderName+'"','success');
+}
+async function agregarSeleccionadosTg(){
+  if(!requireMembresia())return;
+  if(!tgDetectedGroups||!tgDetectedGroups.length){toast('Detecta grupos primero','error');return}
+  const input=($('tgSeleccion')?$('tgSeleccion').value:'').trim().toUpperCase();
+  let indices=[];
+  if(!input||input==='T'){
+    indices=tgDetectedGroups.map((_,i)=>i);
+  }else{
+    input.split(',').forEach(s=>{const n=parseInt(s.trim());if(n>=1&&n<=tgDetectedGroups.length)indices.push(n-1)});
+  }
+  if(!indices.length){toast('No hay grupos seleccionados','error');return}
+  if(!confirm('Agregar '+indices.length+' grupo(s)?'))return;
   let added=0;
-  for(const g of tgDetectedGroups){
+  for(const i of indices){
+    const g=tgDetectedGroups[i];
     const link=g.link||('https://t.me/c/'+g.id);
     const r=await api('/api/tg/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link})});
     if(r.ok)added++;
-  }
-  toast(added+' grupos agregados','success');
-  $('tgDetectarResult').style.display='none';
-}
-async function agregarSeleccionados(){
-  if(!requireMembresia())return;
-  let added=0;
-  for(let i=0;i<tgDetectedGroups.length;i++){
-    const cb=$('tgDetGrp'+i);
-    if(cb&&cb.checked){
-      const g=tgDetectedGroups[i];
-      const link=g.link||('https://t.me/c/'+g.id);
-      const r=await api('/api/tg/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link})});
-      if(r.ok)added++;
-    }
   }
   toast(added+' grupos agregados','success');
   $('tgDetectarResult').style.display='none';
@@ -1506,15 +1571,56 @@ async function detectarGrupos(){
   if(!requireMembresia())return;
   const cuenta=$('wspDetectCuenta').value;
   if(!cuenta){toast('Selecciona una cuenta primero','error');return}
-  $('gruposContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Detectando...</div>';
+  $('gruposContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Detectando grupos...</div>';
   const r=await api('/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
   if(!r.ok){toast('Error: '+(r.error||''),'error');loadGrupos();return}
   const g=r.grupos||[];if(!g.length){toast('No se detectaron grupos','error');loadGrupos();return}
-  let h='<div class="table-wrap"><div class="table-header"><h3>Detectados ('+g.length+')</h3><button class="btn btn-success btn-sm" onclick="agregarTodos()">✅ Agregar Todos</button></div><table><thead><tr><th>✓</th><th>#</th><th>Nombre</th><th>Miembros</th></tr></thead><tbody>';
-  g.forEach((x,i)=>{h+=`<tr><td><input type="checkbox" class="dch" value="${i}" checked></td><td>${i+1}</td><td>${x.subject||'?'}</td><td>${x.size||'?'}</td></tr>`});
-  h+='</tbody></table></div>';window._dg=g;$('gruposContent').innerHTML=h;
+  window._dg=g;
+  const postables=g.filter(x=>x.canPost!==false).length;
+  let h='<div class="table-wrap"><div class="table-header"><h3>Detectados ('+g.length+') — '+postables+' donde puedes enviar</h3></div>';
+  h+='<div style="padding:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">';
+  h+='<input type="text" id="wspSeleccion" placeholder="Ej: 1,2,5,8 o T para todos" style="flex:1;min-width:200px">';
+  h+='<label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="wspSoloPostables" checked onchange="filtrarGruposDetectados()"> Solo donde puedo enviar</label>';
+  h+='<button class="btn btn-success btn-sm" onclick="agregarSeleccionadosWSP()">✅ Agregar Seleccionados</button>';
+  h+='<button class="btn btn-primary btn-sm" onclick="document.getElementById(\'wspSeleccion\').value=\'T\';toast(\'Todos seleccionados\',\'success\')">T Todos</button>';
+  h+='</div>';
+  h+='<table><thead><tr><th>#</th><th>Nombre</th><th>Miembros</th><th>Estado</th></tr></thead><tbody id="wspGruposTbody">';
+  g.forEach((x,i)=>{
+    const estado=x.canPost===false?'<span style="color:#e94560">🔇 Solo lectura</span>':(x.esAdmin?'<span style="color:#00b894">👑 Admin</span>':'<span style="color:#00b894">✅ OK</span>');
+    h+=`<tr class="drow" data-idx="${i}" data-canpost="${x.canPost!==false}"><td>${i+1}</td><td>${esc(x.subject||'?')}</td><td>${x.size||'?'}</td><td>${estado}</td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  $('gruposContent').innerHTML=h;
+  filtrarGruposDetectados();
 }
-async function agregarTodos(){if(!requireMembresia())return;const ch=document.querySelectorAll('.dch:checked'),g=window._dg||[];let n=0;for(const c of ch){const x=g[parseInt(c.value)];if(x&&x.id){await api('/api/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:x.id})});n++}}toast(n+' grupos agregados','success');loadGrupos()}
+function filtrarGruposDetectados(){
+  const soloPost=$('wspSoloPostables')&&$('wspSoloPostables').checked;
+  document.querySelectorAll('.drow').forEach(tr=>{
+    tr.style.display=(!soloPost||tr.dataset.canpost==='true')?'':'none';
+  });
+}
+async function agregarSeleccionadosWSP(){
+  if(!requireMembresia())return;
+  const g=window._dg||[];if(!g.length)return;
+  const input=($('wspSeleccion')?$('wspSeleccion').value:'').trim().toUpperCase();
+  const soloPost=$('wspSoloPostables')&&$('wspSoloPostables').checked;
+  let indices=[];
+  if(!input||input==='T'){
+    indices=g.map((_,i)=>i);
+  }else{
+    input.split(',').forEach(s=>{const n=parseInt(s.trim());if(n>=1&&n<=g.length)indices.push(n-1)});
+  }
+  if(soloPost)indices=indices.filter(i=>g[i].canPost!==false);
+  if(!indices.length){toast('No hay grupos seleccionados','error');return}
+  if(!confirm('Agregar '+indices.length+' grupo(s)?'))return;
+  let n=0;
+  for(const i of indices){
+    const x=g[i];if(x&&x.jid){
+      await api('/api/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:x.jid})});n++;
+    }
+  }
+  toast(n+' grupos agregados','success');loadGrupos();
+}
 
 // --- MENSAJES ---
 async function loadMensajes(){
@@ -1745,13 +1851,15 @@ async function cargarGruposCuenta(){
   sel2.innerHTML='<option value="">-- Opcional: grupo destino --</option>';
   if(r.ok){
     const grupos=(r.grupos||[]).sort((a,b)=>(a.subject||'').localeCompare(b.subject||''));
-    grupos.forEach(g=>{
+    const postables=grupos.filter(g=>g.canPost!==false);
+    postables.forEach(g=>{
       const name=g.subject||'Sin nombre';
-      const info=name+' ('+g.size+' miembros)';
+      const badge=g.esAdmin?' [Admin]':'';
+      const info=name+badge+' ('+g.size+' miembros)';
       sel.innerHTML+=`<option value="${g.jid}">${info}</option>`;
       sel2.innerHTML+=`<option value="${g.jid}">${info}</option>`;
     });
-    toast(grupos.length+' grupos cargados','success');
+    toast(postables.length+' grupos cargados ('+grupos.length+' total, filtrados solo donde puedes enviar)','success');
   }else{toast('Error: '+(r.error||''),'error')}
 }
 async function cargarMiembros(){
@@ -1759,8 +1867,7 @@ async function cargarMiembros(){
   const cuenta=$('emCuenta').value;
   if(!grupoJid){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>Selecciona un grupo</p></div>';return}
   $('miembrosContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando miembros...</div>';
-  let url='/api/miembros_grupo?u='+userId+'&grupo='+encodeURIComponent(grupoJid);
-  if(cuenta)url+='&cuenta='+encodeURIComponent(cuenta);
+  let url='/api/miembros_grupo?u='+userId+'&grupo='+encodeURIComponent(grupoJid)+'&cuenta='+encodeURIComponent(cuenta);
   const r=await api(url);
   if(!r.ok){$('miembrosContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
   const m=r.miembros||[];
@@ -1773,22 +1880,30 @@ async function cargarMiembros(){
 }
 async function enviarAMiembros(){
   if(!requireMembresia())return;
-  const grupo=$('emGrupo').value,msg=$('emMensaje').value.trim();
+  const grupo=$('emGrupo').value,msg=$('emMensaje').value.trim(),cuenta=$('emCuenta').value;
+  const batchSize=$('emBatchSize').value,delayMinutes=$('emDelayMinutes').value||5;
   if(!grupo){toast('Selecciona un grupo','error');return}
   if(!msg){toast('Escribe un mensaje','error');return}
-  if(!confirm('Enviar DM a todos los miembros del grupo seleccionado?'))return;
+  const batchInfo=batchSize?' (en lotes de '+batchSize+', pausa '+delayMinutes+' min)':'';
+  if(!confirm('Enviar DM a todos los miembros del grupo seleccionado'+batchInfo+'?'))return;
   toast('Iniciando envio a miembros...','success');
-  const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,grupo,mensaje:msg})});
-  toast(r.ok?'Envio a miembros iniciado':'Error: '+(r.error||''),r.ok?'success':'error');
+  const payload={u:userId,grupo,mensaje:msg};
+  if(cuenta)payload.cuenta=cuenta;
+  if(batchSize){payload.batch_size=parseInt(batchSize);payload.delay_minutes=parseInt(delayMinutes);}
+  const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');}
+  else{toast('Error: '+(r.error||''),'error');}
 }
 async function agregarMiembrosAGrupo(){if(!requireMembresia())return;
-  const origen=$('emGrupo').value,destino=$('emDestino').value;
+  const origen=$('emGrupo').value,destino=$('emDestino').value,cuenta=$('emCuenta').value;
   if(!origen){toast('Selecciona grupo origen','error');return}
   if(!destino){toast('Selecciona grupo destino','error');return}
   if(origen===destino){toast('Origen y destino no pueden ser iguales','error');return}
   if(!confirm('Agregar los miembros del grupo origen al grupo destino?'))return;
   toast('Agregando miembros...','success');
-  const r=await api('/api/agregar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,origen,destino})});
+  const payload={u:userId,origen,destino};
+  if(cuenta)payload.cuenta=cuenta;
+  const r=await api('/api/agregar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   toast(r.ok?'Miembros agregados: '+(r.agregados||0)+' ok, '+(r.fallidos||0)+' error':'Error: '+(r.error||''),r.ok?'success':'error');
 }
 

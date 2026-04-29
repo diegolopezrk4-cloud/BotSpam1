@@ -92,7 +92,7 @@ async def wsp_detectar_grupos(user_id, cuenta=None):
     params = {"u": str(user_id)}
     if cuenta:
         params["cuenta"] = cuenta
-    return await _get("/api/detectar", params, timeout=30)
+    return await _get("/api/detectar", params, timeout=90)
 
 # --- MEMBRESIA ---
 async def wsp_usuarios_todos():

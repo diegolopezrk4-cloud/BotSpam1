@@ -825,9 +825,16 @@ poll();
                         return res.end(JSON.stringify({ ok: false, error: "Cuenta no conectada." }));
                     }
                     const allGroups = await sock.groupFetchAllParticipating();
-                    const grupos = Object.values(allGroups).filter(g => motor.esGrupoReal(g.id, g)).map(g => ({
-                        jid: g.id, subject: g.subject, size: (g.participants || []).length
-                    }));
+                    const myJid = sock.user ? sock.user.id.split(":")[0] + "@s.whatsapp.net" : "";
+                    const grupos = Object.values(allGroups).filter(g => motor.esGrupoReal(g.id, g)).map(g => {
+                        const myParticipant = (g.participants || []).find(p => p.id === myJid || p.id.split(":")[0] === myJid.split("@")[0]);
+                        const esAdmin = myParticipant ? (myParticipant.admin === "admin" || myParticipant.admin === "superadmin") : false;
+                        const canPost = !(g.announce) || esAdmin;
+                        return {
+                            jid: g.id, subject: g.subject, size: (g.participants || []).length,
+                            announce: g.announce || false, esAdmin, canPost
+                        };
+                    });
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, grupos }));
                 } catch (e) {
@@ -840,10 +847,18 @@ poll();
             if (url.pathname === "/api/miembros_grupo" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 const grupoJid = url.searchParams.get("grupo");
+                const cuenta = url.searchParams.get("cuenta");
                 if (!userId || !grupoJid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 try {
-                    const meta = await botSock.groupMetadata(grupoJid);
+                    let sock;
+                    if (cuenta) {
+                        sock = await motor.getOrConnectClient(userId, cuenta);
+                    } else if (botSock) {
+                        sock = botSock;
+                    } else {
+                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                    }
+                    const meta = await sock.groupMetadata(grupoJid);
                     const miembros = (meta.participants || []).map(p => ({
                         id: p.id, admin: p.admin === "admin" || p.admin === "superadmin"
                     }));
@@ -859,13 +874,22 @@ poll();
             if (url.pathname === "/api/enviar_miembros" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.u || !body.grupo || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, grupo o mensaje" })); }
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 try {
-                    const meta = await botSock.groupMetadata(body.grupo);
+                    let sock;
+                    if (body.cuenta) {
+                        sock = await motor.getOrConnectClient(body.u, body.cuenta);
+                    } else if (botSock) {
+                        sock = botSock;
+                    } else {
+                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                    }
+                    const meta = await sock.groupMetadata(body.grupo);
                     const jids = (meta.participants || []).map(p => p.id);
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, null, botSock);
+                    const batchSize = parseInt(body.batch_size) || 0;
+                    const delayMinutes = parseInt(body.delay_minutes) || 5;
+                    motor.enviarASeleccionados(body.u, jids, body.mensaje, null, sock, batchSize, delayMinutes);
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, total: jids.length }));
+                    return res.end(JSON.stringify({ ok: true, total: jids.length, batch_size: batchSize || jids.length, delay_minutes: batchSize ? delayMinutes : 0 }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -876,15 +900,23 @@ poll();
             if (url.pathname === "/api/agregar_miembros" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.u || !body.origen || !body.destino) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, origen o destino" })); }
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 try {
-                    const meta = await botSock.groupMetadata(body.origen);
+                    let sock;
+                    if (body.cuenta) {
+                        sock = await motor.getOrConnectClient(body.u, body.cuenta);
+                    } else if (botSock) {
+                        sock = botSock;
+                    } else {
+                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                    }
+                    const meta = await sock.groupMetadata(body.origen);
                     const jids = (meta.participants || []).map(p => p.id);
                     let agregados = 0, fallidos = 0;
                     for (const jid of jids) {
                         try {
-                            await botSock.groupParticipantsUpdate(body.destino, [jid], "add");
+                            await sock.groupParticipantsUpdate(body.destino, [jid], "add");
                             agregados++;
+                            await new Promise(r => setTimeout(r, 2000));
                         } catch { fallidos++; }
                     }
                     res.writeHead(200);
