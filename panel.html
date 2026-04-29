@@ -3201,7 +3201,7 @@ function exportarHistorialCSV(){
 // --- BLACKLIST NUMEROS ---
 async function loadListaNegraNumeros(){
   const r=await api('/api/blacklist_numeros?u='+userId);
-  if(!r.ok){$('blacklistNumerosContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'desconocido')+'</p></div>';return}
+  if(!r.ok){$('blacklistNumerosContent').innerHTML='<div class="empty-state"><p>Error: '+esc(r.error||'desconocido')+'</p></div>';return}
   const nums=r.numeros||[];
   if(!nums.length){$('blacklistNumerosContent').innerHTML='<div class="empty-state"><div class="icon">🚫</div><p>Sin numeros bloqueados</p></div>';return}
   let h='<div class="table-wrap"><div class="table-header"><h3>🚫 '+nums.length+' numeros bloqueados</h3></div>';
