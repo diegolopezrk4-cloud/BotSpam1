@@ -1153,17 +1153,21 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
 
                 try {
                     const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
+                    console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid}`);
+                    let result;
                     if (imagenPath && fs.existsSync(imagenPath)) {
-                        await botSock.sendMessage(jid, {
+                        result = await botSock.sendMessage(jid, {
                             image: fs.readFileSync(imagenPath),
                             caption: textoFinal,
                         });
                     } else {
-                        await botSock.sendMessage(jid, { text: textoFinal });
+                        result = await botSock.sendMessage(jid, { text: textoFinal });
                     }
+                    console.log(`[EnvioMiembros]   OK → key.id=${result?.key?.id || "?"} status=${result?.status || "?"}`);
                     enviados++;
                     db.registrarEnvio(userId, 0, jid, "enviado_personal", grupoNombre);
                 } catch (e) {
+                    console.log(`[EnvioMiembros]   ERROR → ${e.message}`);
                     errores++;
                     db.registrarEnvio(userId, 0, jid, "error_personal", grupoNombre);
                 }

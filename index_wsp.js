@@ -942,6 +942,33 @@ poll();
                 }
             }
 
+            // ─── DEBUG MIEMBROS (raw participant data) ───
+            if (url.pathname === "/api/debug_miembros" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const grupoJid = url.searchParams.get("grupo");
+                const cuenta = url.searchParams.get("cuenta");
+                if (!userId || !grupoJid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
+                try {
+                    let sock;
+                    if (cuenta) { sock = await motor.getOrConnectClient(userId, cuenta); }
+                    else if (botSock) { sock = botSock; }
+                    else { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" })); }
+                    const meta = await sock.groupMetadata(grupoJid);
+                    const raw = (meta.participants || []).map(p => ({
+                        id: p.id || null,
+                        jid: p.jid || null,
+                        lid: p.lid || null,
+                        admin: p.admin || null,
+                        all_keys: Object.keys(p),
+                    }));
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, grupo: meta.subject, total: raw.length, participants: raw }, null, 2));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
             // ─── ENVIAR A MIEMBROS WSP ───
             if (url.pathname === "/api/enviar_miembros" && req.method === "POST") {
                 const body = await readBody();
