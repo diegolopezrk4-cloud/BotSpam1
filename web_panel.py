@@ -101,6 +101,10 @@ async def api_tg_auth_send_code(request):
         }
         return web.json_response({"ok": True, "status": "code_sent", "token": token})
     except Exception as e:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
         error_msg = str(e).lower()
         if "flood" in error_msg:
             msg = "Demasiados intentos. Espera unos minutos."

@@ -926,13 +926,23 @@ poll();
             }
 
             // ─── ADMIN ENDPOINTS ───
+            // Helper: verificar si el solicitante es admin
+            function checkAdmin(adminId) {
+                if (!adminId) return false;
+                const u = db.getUsuario(String(adminId));
+                return u && u.es_admin === 1;
+            }
+
             if (url.pathname === "/api/admin/usuarios" && req.method === "GET") {
+                const adminId = url.searchParams.get("u") || url.searchParams.get("admin_id");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 const usuarios = db.getTodosUsuariosAdmin();
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, usuarios }));
             }
             if (url.pathname === "/api/admin/membresia" && req.method === "POST") {
                 const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 const tid = body.telegram_id || body.user_id;
                 const dias = parseInt(body.dias) || 0;
                 const plan = body.plan || (dias >= 36500 ? "permanente" : dias >= 30 ? "mensual" : dias >= 7 ? "semanal" : "diario");
@@ -953,6 +963,7 @@ poll();
             }
             if (url.pathname === "/api/admin/set_admin" && req.method === "POST") {
                 const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 const tid = body.telegram_id || body.user_id;
                 if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
                 db.setAdmin(tid, body.es_admin);
@@ -961,6 +972,7 @@ poll();
             }
             if (url.pathname === "/api/admin/tipo_membresia" && req.method === "POST") {
                 const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 const tid = body.telegram_id || body.user_id;
                 if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
                 db.setTipoMembresia(tid, body.tipo);
@@ -968,6 +980,8 @@ poll();
                 return res.end(JSON.stringify({ ok: true }));
             }
             if (url.pathname === "/api/actividad_admin" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, logs: [] }));
             }

@@ -2819,13 +2819,13 @@ async def cb_tg_stats(call: types.CallbackQuery):
 async def cb_tg_membresia(call: types.CallbackQuery):
     user = await db.get_usuario(call.from_user.id)
     if user:
-        plan = user.get("plan", "sin_plan")
-        exp = user.get("fecha_expira", "N/A")
-        activo = plan == "permanente" or (exp and datetime.fromisoformat(exp) > datetime.now() if exp and exp != "N/A" else False)
+        plan = user["plan"] if user["plan"] else "sin_plan"
+        exp = user["fecha_expira"] if user["fecha_expira"] else "N/A"
+        activo = plan == "permanente" or (exp != "N/A" and datetime.fromisoformat(exp) > ahora_peru().replace(tzinfo=None))
         texto = (
             "👑 TU MEMBRESÍA:\n\n"
             f"📋 Plan: {plan}\n"
-            f"📅 Expira: {exp or 'N/A'}\n"
+            f"📅 Expira: {exp}\n"
             f"✅ Estado: {'Activa' if activo else '⛔ Expirada'}\n"
         )
     else:
