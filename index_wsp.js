@@ -609,7 +609,7 @@ poll();
                 if (!sock) sock = botSock;
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 try {
-                    const started = await motor.enviarAPersonales(userId, mensaje, imagenPath, sock);
+                    const started = await motor.enviarAPersonales(userId, mensaje, imagenPath, sock, body.cuenta);
                     if (started) db.agregarLog(userId, 'envio', 'Envio personal iniciado');
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
