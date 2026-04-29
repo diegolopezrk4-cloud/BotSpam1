@@ -13,8 +13,6 @@ const reporteInterval = {};  // { userId: intervalId }
 // Track last activity per group: { grupoJid: timestamp }
 // Updated by message listeners — used to detect if someone else posted after our spam
 const grupoUltimaActividad = {};
-// Track last campaign send per group: { grupoJid: timestamp }
-const grupoUltimoEnvio = {};
 
 // Limite de envios diarios por cuenta (proteccion anti-ban)
 const LIMITE_ENVIOS_DIARIOS = 500;
@@ -328,18 +326,19 @@ function registrarActividadGrupo(grupoJid) {
     grupoUltimaActividad[grupoJid] = Date.now();
 }
 
-// Record when campaign sends to a group
-function registrarEnvioCampana(grupoJid) {
-    grupoUltimoEnvio[grupoJid] = Date.now();
+// Record when campaign sends to a group (persists to DB)
+function registrarEnvioCampana(campanaId, grupoJid) {
+    db.registrarEnvioCampanaDB(campanaId, grupoJid);
 }
 
 // Check if group had activity from others since our last campaign send
-function grupoTieneActividadNueva(grupoJid) {
-    const ultimoEnvio = grupoUltimoEnvio[grupoJid];
-    if (!ultimoEnvio) return true; // never sent = treat as new activity
+function grupoTieneActividadNueva(campanaId, grupoJid) {
+    const row = db.getUltimoEnvioCampana(campanaId, grupoJid);
+    if (!row) return true; // never sent = treat as new
+    const envioTime = new Date(row.ultimo_envio + "Z").getTime();
     const ultimaActividad = grupoUltimaActividad[grupoJid];
     if (!ultimaActividad) return false; // no activity from others since we sent
-    return ultimaActividad > ultimoEnvio;
+    return ultimaActividad > envioTime;
 }
 
 // ============================================================
@@ -624,7 +623,8 @@ function iniciarCampana(campanaId, userId, botSock) {
                         }
 
                         // Skip group if no new activity since our last send (avoid duplicate spam)
-                        if (ciclo > 1 && !grupoTieneActividadNueva(groupJid)) {
+                        // Works even after restart because send timestamps are stored in DB
+                        if (!grupoTieneActividadNueva(campanaId, groupJid)) {
                             console.log(`   [Anti-dup] Grupo ${grupoLink}: sin actividad nueva, saltando`);
                             continue;
                         }
@@ -647,7 +647,7 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                         if (result.sent && (result.delivered || result.reason === "pending" || result.reason === "no_id")) {
                             // Count as success + mark for anti-duplicate tracking
-                            registrarEnvioCampana(groupJid);
+                            registrarEnvioCampana(campanaId, groupJid);
                             db.actualizarStatsCampana(campanaId, 1, 0);
                             db.registrarEnvio(userId, campanaId, grupoLink, result.delivered ? "enviado" : "enviado_pending");
                             db.actualizarGrupoStats(userId, grupoLink, "enviado");
@@ -1080,12 +1080,15 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
     return true;
 }
 
+let _taskIdCounter = 0;
 async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes, grupoNombre, grupoJid, startIndex) {
     if (envioPersonalActivo[userId]) return false;
 
     let cancelled = false;
+    const taskId = ++_taskIdCounter;
     const task = {
         running: true,
+        taskId,
         cancel: () => { cancelled = true; },
     };
     envioPersonalActivo[userId] = task;
@@ -1204,7 +1207,9 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
         } catch (e) {
             console.error(`Error envio personal ${userId}: ${e.message}`);
         } finally {
-            delete envioPersonalActivo[userId];
+            if (envioPersonalActivo[userId]?.taskId === taskId) {
+                delete envioPersonalActivo[userId];
+            }
         }
     })();
 
@@ -1215,7 +1220,6 @@ function detenerEnvioPersonal(userId) {
     const task = envioPersonalActivo[userId];
     if (task) {
         task.cancel();
-        delete envioPersonalActivo[userId];
         return true;
     }
     return false;

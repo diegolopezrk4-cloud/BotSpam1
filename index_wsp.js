@@ -969,7 +969,7 @@ poll();
                 }
             }
 
-            // ─── DEBUG: Test single message send ───
+            // ─── DEBUG: Test single message send with delivery check ───
             if (url.pathname === "/api/debug_test_send" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.u || !body.numero) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o numero" })); }
@@ -983,7 +983,33 @@ poll();
                     const msg = body.mensaje || "Test de envio desde BotSpam1";
                     console.log(`[DEBUG_SEND] From: ${myJid} → To: ${targetJid} Msg: ${msg.substring(0,30)}...`);
                     const result = await sock.sendMessage(targetJid, { text: msg });
-                    console.log(`[DEBUG_SEND] Result: key.id=${result?.key?.id} key.remoteJid=${result?.key?.remoteJid} status=${result?.status}`);
+                    const msgId = result?.key?.id;
+                    console.log(`[DEBUG_SEND] Result: key.id=${msgId} key.remoteJid=${result?.key?.remoteJid} status=${result?.status}`);
+
+                    // Wait up to 15s for delivery receipt
+                    let deliveryStatus = "pending";
+                    if (msgId) {
+                        deliveryStatus = await new Promise((resolve) => {
+                            const timeout = setTimeout(() => {
+                                sock.ev.off("messages.update", handler);
+                                resolve("timeout_15s (no delivery receipt)");
+                            }, 15000);
+                            const handler = (updates) => {
+                                for (const u of updates) {
+                                    if (u.key?.id === msgId && u.update?.status) {
+                                        clearTimeout(timeout);
+                                        sock.ev.off("messages.update", handler);
+                                        const s = u.update.status;
+                                        resolve(s >= 3 ? "delivered" : s === 2 ? "server_ack" : `status_${s}`);
+                                        return;
+                                    }
+                                }
+                            };
+                            sock.ev.on("messages.update", handler);
+                        });
+                    }
+                    console.log(`[DEBUG_SEND] Delivery: ${deliveryStatus}`);
+
                     res.writeHead(200);
                     return res.end(JSON.stringify({
                         ok: true,
@@ -991,12 +1017,13 @@ poll();
                         to: targetJid,
                         key: result?.key || null,
                         status: result?.status || null,
+                        delivery: deliveryStatus,
                         messageTimestamp: result?.messageTimestamp || null,
                     }, null, 2));
                 } catch (e) {
                     console.log(`[DEBUG_SEND] ERROR: ${e.message}`);
                     res.writeHead(500);
-                    return res.end(JSON.stringify({ ok: false, error: e.message, stack: e.stack?.split("\n").slice(0,3) }));
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
                 }
             }
 

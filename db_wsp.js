@@ -259,7 +259,25 @@ function init() {
             PRIMARY KEY(user_id, grupo_jid)
         );
     `);
+    // Table for tracking campaign sends per group (anti-duplicate across restarts)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS campana_grupo_envio (
+            campana_id INTEGER,
+            grupo_jid TEXT,
+            ultimo_envio TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY(campana_id, grupo_jid)
+        );
+    `);
     console.log("\u2705 Base de datos WSP inicializada");
+}
+
+// --- CAMPANA GRUPO ENVIO (anti-duplicate) ---
+function registrarEnvioCampanaDB(campanaId, grupoJid) {
+    db.prepare("INSERT OR REPLACE INTO campana_grupo_envio (campana_id, grupo_jid, ultimo_envio) VALUES (?, ?, datetime('now'))").run(campanaId, grupoJid);
+}
+
+function getUltimoEnvioCampana(campanaId, grupoJid) {
+    return db.prepare("SELECT ultimo_envio FROM campana_grupo_envio WHERE campana_id = ? AND grupo_jid = ?").get(campanaId, grupoJid);
 }
 
 // --- USUARIOS ---
@@ -1152,4 +1170,6 @@ module.exports = {
     setAdmin, setTipoMembresia, getTodosUsuariosAdmin, normalizeId,
     // Progreso envio (resume)
     guardarProgresoEnvio, getProgresoEnvio, getProgresoEnvioPendiente, eliminarProgresoEnvio,
+    // Anti-duplicate campana
+    registrarEnvioCampanaDB, getUltimoEnvioCampana,
 };
