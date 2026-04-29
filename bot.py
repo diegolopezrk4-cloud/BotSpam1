@@ -2248,8 +2248,7 @@ async def cb_detectar_grupos_tg(call: types.CallbackQuery):
         return
     if len(sesiones) == 1:
         # Solo una cuenta, ir directo al menu de opciones
-        call.data = f"grp_detect_menu:{sesiones[0]['nombre']}"
-        await cb_grp_detect_menu(call)
+        await cb_grp_detect_menu(call, cuenta_override=sesiones[0]['nombre'])
         return
     texto = "🔍 DETECTAR GRUPOS DE TELEGRAM\n\nElige la cuenta para detectar grupos:\n"
     botones = []
@@ -2261,10 +2260,10 @@ async def cb_detectar_grupos_tg(call: types.CallbackQuery):
     await call.answer()
 
 @dp.callback_query(F.data.startswith("grp_detect_menu:"))
-async def cb_grp_detect_menu(call: types.CallbackQuery):
+async def cb_grp_detect_menu(call: types.CallbackQuery, cuenta_override=None):
     if not await verificar_membresia_cb(call):
         return
-    cuenta = call.data.split(":", 1)[1]
+    cuenta = cuenta_override or call.data.split(":", 1)[1]
     texto = (
         f"🔍 DETECTAR GRUPOS DE TELEGRAM\n"
         f"📱 Cuenta: {cuenta}\n\n"
@@ -2685,7 +2684,6 @@ async def cb_sec_cmdtlg(call: types.CallbackQuery):
 async def cb_sec_cmdwsp(call: types.CallbackQuery):
     """Redirige a la sección WhatsApp."""
     # Simular click en sec_wsp
-    call.data = "sec_wsp"
     await cb_sec_wsp(call)
 
 
@@ -3541,8 +3539,7 @@ async def cb_wsp_detectar(call: types.CallbackQuery):
     sesiones = r["sesiones"]
     if len(sesiones) == 1:
         # Solo una cuenta, detectar directo
-        call.data = f"wsp_detectar_cuenta:{sesiones[0]['nombre']}"
-        await cb_wsp_detectar_cuenta(call)
+        await cb_wsp_detectar_cuenta(call, cuenta_override=sesiones[0]['nombre'])
         return
     texto = "🔍 DETECTAR GRUPOS WSP\n\nElige la cuenta para detectar grupos:\n"
     botones = []
@@ -3554,10 +3551,10 @@ async def cb_wsp_detectar(call: types.CallbackQuery):
     await call.answer()
 
 @dp.callback_query(F.data.startswith("wsp_detectar_cuenta:"))
-async def cb_wsp_detectar_cuenta(call: types.CallbackQuery):
+async def cb_wsp_detectar_cuenta(call: types.CallbackQuery, cuenta_override=None):
     if not await verificar_membresia_cb(call):
         return
-    cuenta = call.data.split(":", 1)[1]
+    cuenta = cuenta_override or call.data.split(":", 1)[1]
     import wsp_bridge as wsp
     await safe_edit(call.message, f"🔍 Detectando grupos de la cuenta '{cuenta}'...\nEsto puede tardar unos segundos.")
     r = await wsp.wsp_detectar_grupos(call.from_user.id, cuenta)
