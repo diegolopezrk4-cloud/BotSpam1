@@ -1893,8 +1893,12 @@ async function cargarMiembros(){
   const m=r.miembros||[];
   if(!m.length){$('miembrosContent').innerHTML='<div class="empty-state"><div class="icon">👥</div><p>No se encontraron miembros</p></div>';return}
   let h='<div class="table-wrap"><div class="table-header"><h3>👥 '+m.length+' Miembros</h3></div>';
-  h+='<table><thead><tr><th>#</th><th>ID</th><th>Admin</th></tr></thead><tbody>';
-  m.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td>${x.id||x}</td><td>${x.admin?'<span class="badge badge-info">Admin</span>':''}</td></tr>`});
+  h+='<table><thead><tr><th>#</th><th>Numero</th><th>ID</th><th>Admin</th></tr></thead><tbody>';
+  m.forEach((x,i)=>{
+    const num=x.numero||(x.id?x.id.split('@')[0]:'?');
+    const displayNum=num.match(/^\d{7,15}$/)?'+'+num:num;
+    h+=`<tr><td>${i+1}</td><td><b>${displayNum}</b></td><td style="font-size:11px;color:var(--text2)">${x.id||x}</td><td>${x.admin?'<span class="badge badge-info">Admin</span>':''}</td></tr>`;
+  });
   h+='</tbody></table></div>';
   $('miembrosContent').innerHTML=h;
 }

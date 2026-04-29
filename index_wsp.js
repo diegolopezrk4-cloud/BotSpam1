@@ -859,9 +859,28 @@ poll();
                         res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
                     }
                     const meta = await sock.groupMetadata(grupoJid);
-                    const miembros = (meta.participants || []).map(p => ({
-                        id: p.id, admin: p.admin === "admin" || p.admin === "superadmin"
-                    }));
+                    const miembros = (meta.participants || []).map(p => {
+                        const isAdmin = p.admin === "admin" || p.admin === "superadmin";
+                        let numero = "";
+                        if (p.id && p.id.includes("@s.whatsapp.net")) {
+                            numero = p.id.split("@")[0];
+                        } else if (p.id && p.id.includes("@lid")) {
+                            numero = p.id.split("@")[0];
+                        }
+                        return { id: p.id, numero, admin: isAdmin };
+                    });
+                    // Try to resolve @lid to phone numbers via contacts
+                    const lidMembers = miembros.filter(m => m.id.endsWith("@lid") && !m.numero.match(/^\d{7,15}$/));
+                    if (lidMembers.length > 0 && sock.store && sock.store.contacts) {
+                        for (const m of lidMembers) {
+                            const contact = sock.store.contacts[m.id];
+                            if (contact && contact.id && contact.id.includes("@s.whatsapp.net")) {
+                                m.numero = contact.id.split("@")[0];
+                            } else if (contact && contact.notify) {
+                                m.numero = contact.notify;
+                            }
+                        }
+                    }
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, miembros }));
                 } catch (e) {
