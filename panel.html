@@ -1582,8 +1582,8 @@ async function loadGrupos(){
   if(!r.ok){$('gruposContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
   const g=r.grupos||[];
   if(!g.length){$('gruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos.<br>Usa "Detectar" para buscar.</p></div>';return}
-  let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+')</h3></div><table><thead><tr><th>#</th><th>Link/JID</th><th>Acciones</th></tr></thead><tbody>';
-  g.forEach((x,i)=>{const l=x.link||x.jid||'?';h+=`<tr><td>${i+1}</td><td style="font-size:12px">${l.length>50?l.slice(0,50)+'...':l}</td><td><button class="btn btn-danger btn-sm" onclick="eliminarGrupo('${encodeURIComponent(l)}')">🗑</button></td></tr>`});
+  let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Link/JID</th><th>Acciones</th></tr></thead><tbody>';
+  g.forEach((x,i)=>{const l=x.link||x.jid||'?';const name=x.nombre||x.subject||'';h+=`<tr><td>${i+1}</td><td><b>${name?esc(name):'<span style="color:var(--text2)">—</span>'}</b></td><td style="font-size:11px;color:var(--text2)">${l.length>50?l.slice(0,50)+'...':l}</td><td><button class="btn btn-danger btn-sm" onclick="eliminarGrupo('${encodeURIComponent(l)}')">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('gruposContent').innerHTML=h;
 }
 async function eliminarGrupo(l){if(!requireMembresia())return;const r=await api('/api/grupos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:decodeURIComponent(l)})});toast(r.ok?'Eliminado':'Error',r.ok?'success':'error');loadGrupos()}
@@ -1636,7 +1636,7 @@ async function agregarSeleccionadosWSP(){
   let n=0;
   for(const i of indices){
     const x=g[i];if(x&&x.jid){
-      await api('/api/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:x.jid})});n++;
+      await api('/api/grupos/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,link:x.jid,nombre:x.subject||''})});n++;
     }
   }
   toast(n+' grupos agregados','success');loadGrupos();

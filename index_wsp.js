@@ -268,7 +268,7 @@ poll();
             if (url.pathname === "/api/grupos/add" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.u || !body.link) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o link" })); }
-                db.agregarGrupo(body.u, body.link);
+                db.agregarGrupo(body.u, body.link, body.nombre || null);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }

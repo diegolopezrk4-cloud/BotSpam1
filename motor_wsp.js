@@ -27,48 +27,68 @@ function getSessionDir(userId, nombre) {
 
 async function connectClientAccount(userId, nombre, telefono) {
     const sessionDir = getSessionDir(userId, nombre);
+    const key = `${userId}_${nombre}`;
     fs.mkdirSync(sessionDir, { recursive: true });
-    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
 
-    let version;
-    try {
-        const { version: v } = await fetchLatestBaileysVersion();
-        version = v;
-    } catch (e) {}
+    async function createSocket() {
+        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+        let version;
+        try {
+            const { version: v } = await fetchLatestBaileysVersion();
+            version = v;
+        } catch (e) {}
 
-    const sock = makeWASocket({
-        auth: state,
-        logger: require("pino")({ level: "silent" }),
-        browser: Browsers.ubuntu("Chrome"),
-        version,
-        connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 30000,
-        retryRequestDelayMs: 2000,
-    });
-    sock.ev.on("creds.update", saveCreds);
+        const sock = makeWASocket({
+            auth: state,
+            logger: require("pino")({ level: "silent" }),
+            browser: Browsers.ubuntu("Chrome"),
+            version,
+            connectTimeoutMs: 60000,
+            keepAliveIntervalMs: 10000,
+            retryRequestDelayMs: 2000,
+        });
+        sock.ev.on("creds.update", saveCreds);
+        return sock;
+    }
+
+    const sock = await createSocket();
 
     return new Promise((resolve, reject) => {
         let resolved = false;
-        const key = `${userId}_${nombre}`;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT = 5;
+
         sock.ev.on("connection.update", async (update) => {
             const { connection, lastDisconnect } = update;
-            if (connection === "open" && !resolved) {
-                resolved = true;
+            if (connection === "open") {
+                reconnectAttempts = 0;
                 clientSessions[key] = sock;
-                resolve(sock);
+                if (!resolved) {
+                    resolved = true;
+                    resolve(sock);
+                }
             }
             if (connection === "close") {
                 const code = lastDisconnect?.error?.output?.statusCode;
-                // Clean up stale session
                 if (clientSessions[key] === sock) {
                     delete clientSessions[key];
                 }
                 if (code === 401 || code === DisconnectReason.loggedOut) {
-                    // Session was logged out - clean up auth files
                     try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
                     if (!resolved) {
                         resolved = true;
                         reject(new Error("Sesion WSP expirada o cerrada. Re-vincula tu cuenta desde Cuentas WSP."));
+                    }
+                } else if (resolved && reconnectAttempts < MAX_RECONNECT) {
+                    // Auto-reconnect after initial connection was established
+                    reconnectAttempts++;
+                    console.log(`[WSP] Cuenta ${nombre} desconectada (code ${code}). Reconectando intento ${reconnectAttempts}/${MAX_RECONNECT}...`);
+                    await delay(3000 * reconnectAttempts);
+                    try {
+                        const newSock = await connectClientAccount(userId, nombre, telefono);
+                        clientSessions[key] = newSock;
+                    } catch (e) {
+                        console.log(`[WSP] Reconexion fallida para ${nombre}: ${e.message}`);
                     }
                 } else if (!resolved) {
                     resolved = true;
