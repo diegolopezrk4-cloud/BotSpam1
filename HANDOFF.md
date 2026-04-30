@@ -303,8 +303,43 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 24. **Promo enviar_y_escuchar no procesaba JIDs correctamente**: A diferencia de `enviar_miembros`, el endpoint promo no filtraba @lid, no quitaba sufijos de dispositivo, no deduplicaba, no checkeaba blacklist ni se saltaba el propio JID del sender. Fix: se agrego procesamiento completo de JIDs con blacklist, dedup, LID filter, self-skip. (`index_wsp.js:1838-1863`)
 25. **XSS en 4 secciones de innerHTML sin esc()**: Nombres de sesion (`s.nombre`, `s.telefono`) se insertaban sin escapar en `<option>` tags, permitiendo XSS si un nombre contenia HTML. Fix: se agrego `esc()` en loadTgDetectar, loadEnvioPersonal, loadEnvioMiembros, loadPromoCuentas. (`panel.html:2273,2787,2881,3517`)
 
+#### Escaneo de Seguridad Profundo — PR Security/Roles/Fixes
+26. **SIN AUTENTICACION EN API (CRITICO)**: Todos los 199+ endpoints confiaban SOLO en el parametro `u` (telegram_id) sin validar ningun token. Cualquiera que supiera un telegram_id podia acceder a todo. Fix: Middleware de autenticacion que valida `Authorization: Bearer <token>` en cada request. Endpoints publicos excluidos: login, registro, recuperar password, canjear codigo, check membresia. Responde 401 si token invalido. (`index_wsp.js:797-809`)
+27. **Rate limiting en login (CRITICO)**: Sin proteccion contra brute force. Fix: max 5 intentos por IP en 15 minutos (tabla `login_attempts`). Retorna 429 si excede limite. (`index_wsp.js:685-691`)
+28. **readBody sin limite de tamano (DoS)**: Podia recibir body infinito y crashear servidor. Fix: limite de 10MB, destruye request si excede. (`index_wsp.js:240-256`)
+29. **2FA se desactivaba sin codigo TOTP**: Solo pedia contrasena. Fix: ahora requiere contrasena + codigo 2FA valido para deshabilitar. (`index_wsp.js:2103-2115`, `panel.html:4511-4523`)
+30. **Timezone inconsistente en seller invites**: `getSellerInvitesCount` usaba UTC con `toISOString()`. Fix: usa `config.TIMEZONE` con inicio de semana (lunes) o inicio de mes calendario. (`db_wsp.js:2023-2041`)
+31. **Memory leak en messages.update handler**: Event listener solo se limpiaba en timeout, no cuando entrega confirmada. Fix: funcion `cleanup()` llamada en ambas ramas (exito y timeout). (`motor_wsp.js:423-442`)
+32. **Race condition envioPersonalActivo silenciosa**: Si habia envio activo, retornaba `false` sin informar. Fix: retorna `{ blocked: true, error: "..." }` con mensaje descriptivo. (`motor_wsp.js:1056,1188`)
+33. **grupoUltimaActividad se perdia al reiniciar**: Era solo in-memory. Fix: persiste a tabla `grupo_actividad` en DB. Al consultar, busca primero en memoria, luego en DB. (`motor_wsp.js:335-371`, `db_wsp.js:1905-1911`)
+34. **Seller invites ventana deslizante vs calendario**: "Semanal" contaba 7 dias hacia atras. Fix: ahora cuenta desde inicio de semana (lunes) o inicio de mes. (`db_wsp.js:2023-2041`)
+35. **Recursion infinita en reconexion de cuentas**: Si reconexion fallaba, podia crear N instancias paralelas. Fix: `reconnectLocks` previene reconexiones simultaneas para la misma cuenta. (`motor_wsp.js:38-47,108-121`)
+36. **Recovery codes sin cleanup**: Se acumulaban infinitamente. Fix: limpieza automatica cada 30 min (codigos >1h, sesiones >7 dias, intentos >1h). (`index_wsp.js:2426-2433`, `db_wsp.js:1896-1902`)
+37. **SW cacheaba panel.html indefinidamente**: Actualizaciones no se veian sin hard refresh. Fix: SW v3 nunca cachea navegacion (panel.html), solo manifest.json. (`sw.js`)
+38. **XSS en canjear codigo y 2FA secret**: Datos del servidor se insertaban en innerHTML sin escapar. Fix: se agrego `esc()` en resultados de canjeo y display de 2FA secret. (`panel.html:3926,3930,4530`)
+
+### Mejoras Nuevas
+39. **Sistema de Roles**: Admin(acceso total) > Seller(todo excepto admin panel) > Cliente con membresia(todas funciones) > Cliente sin membresia(nada hasta pagar). Sellers tambien pasan `requireMembresia()`. (`panel.html:1654`)
+40. **Registro de Auditoria**: Tabla `audit_log` registra logins, cambios de 2FA, acciones admin. Endpoint: `GET /api/admin/auditoria?u=ADMIN_ID&filter_user=X&limit=200`. Seccion nueva en panel: "Auditoria" (admin-only). (`db_wsp.js:558-567,1883-1893`, `index_wsp.js:2336-2345`, `panel.html:1544-1553,4411-4426`)
+41. **Panel envia token en cada request**: La funcion `api()` ahora incluye `Authorization: Bearer <token>` en headers. Si recibe 401, hace logout automatico. (`panel.html:1616-1632`)
+
+## Respuesta a la Pregunta del Handoff
+
+> Si fueras un bug en este codigo, en que archivo te esconderias y por que?
+
+Me esconderia en `index_wsp.js` linea 241 (el `readBody` sin limite) — porque nadie pensaria que una funcion tan pequena de 4 lineas podria tumbar todo el servidor con un solo request de 10GB. Los bugs mas peligrosos se esconden en el codigo mas "simple". 🐛
+
+Chiste: "Un QA entra a un bar y pide 1 cerveza, 0 cervezas, -1 cervezas, 99999 cervezas, NULL cervezas, y un lagarto. El programador no entiende por que pidio un lagarto, pero el QA dice: 'Para verificar que el mesero no se cae con inputs inesperados.'" 🍺
+
+Confirmo que entiendo la arquitectura:
+- WSP API (puerto 3000) maneja la logica del bot WhatsApp
+- Panel Web (puerto 3001) sirve el frontend y proxea a las APIs
+- TG API (puerto 3002) maneja el bot de Telegram
+- Las 3 bases de datos SQLite: `wsp_titan.db` y `titan.db`
+- Todo se inicia con `bash start.sh` desde `/root/BotSpam1`
+
 ## Notas Importantes para la Siguiente IA
-1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.
+1. **panel.html** es monolitico (~4700 lineas). Todo HTML, CSS y JS en un archivo. No separar.
 2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).
 3. Las tablas y funciones de DB se agregan en `db_wsp.js` **ANTES** del `module.exports`.
 4. Los nuevos exports se agregan al final del objeto `module.exports` en `db_wsp.js`.
@@ -315,8 +350,31 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 9. Sellers usan clase CSS `seller-only`. Se muestran si `esSeller || esAdmin`.
 10. "Canjear Codigo" es visible para TODOS los usuarios (no necesita ser seller ni admin).
 11. **SIEMPRE** actualizar este HANDOFF.md despues de cada mejora o fix.
+12. **AUTENTICACION**: Ahora todos los endpoints (excepto los publicos listados en `PUBLIC_ENDPOINTS`) requieren `Authorization: Bearer <token>` en headers. El panel lo envia automaticamente desde localStorage.
+13. **AUDITORIA**: Registrar acciones importantes con `db.registrarAuditoria(userId, 'accion', 'detalle', ip)`. El admin puede ver todo en "Auditoria".
+14. **RATE LIMIT**: Login tiene max 5 intentos/15min por IP. Para agregar rate limit a otros endpoints, usar el mismo patron con `getLoginAttempts`.
+15. **Tablas nuevas**: `login_attempts`, `audit_log`, `grupo_actividad`. Se crean automaticamente al iniciar.
+
+## Tablas de Base de Datos (Actualizadas)
+### Tablas WSP (wsp_titan.db) — Nuevas
+- `login_attempts` — Rate limiting (ip, telegram_id, success, created_at)
+- `audit_log` — Registro de auditoria (user_id, accion, detalle, ip, fecha)
+- `grupo_actividad` — Persistencia anti-duplicado (grupo_jid, ultima_actividad)
+
+## Endpoints API Nuevos
+| Endpoint | Metodo | Descripcion |
+|---|---|---|
+| `/api/admin/auditoria` | GET | Logs de auditoria `?u=ADMIN_ID&filter_user=X&limit=200` |
+
+## Sistema de Roles
+| Rol | Acceso | Detalles |
+|---|---|---|
+| Admin | TODO | Ve y usa todas las secciones incluido Admin Panel, Sellers, Auditoria |
+| Seller | Todo excepto Admin | Ve todas las funciones + Panel Seller. NO ve Admin Panel ni Sellers ni Auditoria |
+| Cliente con membresia | Funciones normales | Usa todas las funciones del bot (campanas, envios, grupos, etc.) |
+| Cliente sin membresia | NADA | Ve el panel pero no puede usar ninguna funcion hasta pagar. Demo 1 dia al registrarse |
 
 ## Comando de Actualizacion
 ```bash
-cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777523595-fix-bugs-features && npm install && bash start.sh
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777527661-security-roles-fixes && npm install && bash start.sh
 ```
