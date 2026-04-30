@@ -2,7 +2,7 @@
 # Script para actualizar e iniciar todo el bot J&D
 # Uso: bash start.sh
 
-cd /root/BotSpam1 || { echo "ERROR: No se encontro /root/BotSpam1"; exit 1; }
+cd "${BOTSPAM_DIR:-/root/BotSpam1}" || { echo "ERROR: No se encontro el directorio del bot"; exit 1; }
 
 echo "🔄 Deteniendo servicios anteriores..."
 # Matar por nombre de proceso

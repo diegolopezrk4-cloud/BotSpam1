@@ -5728,7 +5728,8 @@ async function handleFSM(jid, msg, text, trimmed, state) {
 
             if (data.modo === "todos") {
                 const allJids = data.chats.map(c => c.jid);
-                motor.enviarASeleccionados(jid, allJids, mensaje, null, botSock);
+                const envRes1 = await motor.enviarASeleccionados(jid, allJids, mensaje, null, botSock);
+                if (envRes1?.blocked) return await send(jid, `\u274c ${envRes1.error}`);
                 return await send(jid,
                     `\u{1F680} *Envio personal iniciado!*\n\n` +
                     `\u{1F464} ${allJids.length} contacto(s)\n` +
@@ -5738,7 +5739,8 @@ async function handleFSM(jid, msg, text, trimmed, state) {
                     `Escribe */cancelarenvio* para detener.`
                 );
             } else {
-                motor.enviarASeleccionados(jid, data.jids, mensaje, null, botSock);
+                const envRes2 = await motor.enviarASeleccionados(jid, data.jids, mensaje, null, botSock);
+                if (envRes2?.blocked) return await send(jid, `\u274c ${envRes2.error}`);
                 return await send(jid,
                     `\u{1F680} *Envio personal iniciado!*\n\n` +
                     `\u{1F464} ${data.total} contacto(s)\n` +

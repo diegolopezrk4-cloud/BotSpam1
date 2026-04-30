@@ -21,6 +21,7 @@ services:
       - QR_PORT=3000
       - PANEL_PORT=3001
       - TG_PORT=3002
+      - BOTSPAM_DIR=/app
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
