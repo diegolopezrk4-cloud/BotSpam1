@@ -1588,7 +1588,7 @@ poll();
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const maxG = db.getMaxGrupos(userId);
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, max_grupos: maxG }));
+                return res.end(JSON.stringify({ ok: true, limites: { max_grupos: maxG, max_envios_dia: 999999 } }));
             }
 
             // ─── ENVIOS CHART ───
