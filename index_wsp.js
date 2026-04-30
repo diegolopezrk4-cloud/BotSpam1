@@ -181,7 +181,7 @@ body{background:#111;color:#fff;font-family:Arial;text-align:center;padding:40px
 </style></head><body>
 <div class="box">
 <h1>\u{1F4F1} Vincular Cuenta</h1>
-<h2>${nombre}</h2>
+<h2>${nombre.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}</h2>
 <div id="content"><div class="status disconnected">\u23F3 Preparando QR...</div><p>Espera unos segundos...</p></div>
 </div>
 <script>
@@ -564,6 +564,7 @@ poll();
 
             // POST /api/cancelar_envio_personal — Cancelar envio personal
             if (url.pathname === "/api/cancelar_envio_personal" && req.method === "POST") {
+                const body = await readBody();
                 const userId = body.u;
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const stopped = motor.detenerEnvioPersonal(userId);

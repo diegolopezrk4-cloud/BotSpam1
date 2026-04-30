@@ -418,6 +418,10 @@ function dentroDeHorario(campanaId) {
 // CAMPANA ENGINE con las 10 mejoras
 // ============================================================
 function iniciarCampana(campanaId, userId, botSock) {
+    if (!botSock || !botSock.user) {
+        console.error(`[Campana] No se puede iniciar: bot no conectado`);
+        return false;
+    }
     if (tareasActivas[campanaId]) {
         // Si estaba pausado, reanudar
         const existing = tareasActivas[campanaId];
@@ -487,6 +491,19 @@ function iniciarCampana(campanaId, userId, botSock) {
             const MAX_CONSECUTIVE_PENDING = 3;
             const PAUSA_RATE_LIMIT = 300;
 
+            // Restaurar progreso guardado si existe
+            let startGrupoIndex = 0;
+            let startCuentaIndex = 0;
+            const hasProgress = !!campanaProgress[campanaId];
+            if (hasProgress) {
+                const saved = campanaProgress[campanaId];
+                ciclo = saved.ciclo || 0;
+                startGrupoIndex = saved.grupoIndex || 0;
+                startCuentaIndex = saved.cuentaIndex || 0;
+                delete campanaProgress[campanaId];
+                console.log(`[Campana ${campana.nombre}] Reanudando desde ciclo=${ciclo}, cuenta=${startCuentaIndex}, grupo=${startGrupoIndex}`);
+            }
+
             try {
                 let tiempoMsg = "";
                 if (numCuentas === 1) {
@@ -500,27 +517,16 @@ function iniciarCampana(campanaId, userId, botSock) {
                 }
                 let templateMsg = templates.length ? `\n\u{1F4DD} ${templates.length} template(s) para rotacion` : "";
 
-                await botSock.sendMessage(userId, {
-                    text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}${templateMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`,
-                });
-            } catch (e) {}
-
-            // Restaurar progreso guardado si existe
-            let startGrupoIndex = 0;
-            let startCuentaIndex = 0;
-            if (campanaProgress[campanaId]) {
-                const saved = campanaProgress[campanaId];
-                ciclo = saved.ciclo || 0;
-                startGrupoIndex = saved.grupoIndex || 0;
-                startCuentaIndex = saved.cuentaIndex || 0;
-                delete campanaProgress[campanaId];
-                console.log(`[Campana ${campana.nombre}] Reanudando desde ciclo=${ciclo}, cuenta=${startCuentaIndex}, grupo=${startGrupoIndex}`);
-                try {
+                if (hasProgress) {
                     await botSock.sendMessage(userId, {
-                        text: `\u25B6 *${campana.nombre}* reanudada desde donde se pausó.\nCiclo: ${ciclo} | Grupo: ${startGrupoIndex + 1}`,
+                        text: `\u25B6 *${campana.nombre}* reanudada desde donde se pausó.\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\nCiclo: ${ciclo} | Grupo: ${startGrupoIndex + 1}\n${tiempoMsg}${horarioMsg}${templateMsg}`,
                     });
-                } catch (e) {}
-            }
+                } else {
+                    await botSock.sendMessage(userId, {
+                        text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}${templateMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`,
+                    });
+                }
+            } catch (e) {}
 
             while (!cancelled) {
                 // Verificar si esta pausado
@@ -570,7 +576,13 @@ function iniciarCampana(campanaId, userId, botSock) {
                 gruposLinks = gruposLinks.filter(gl => !blLinks.has(gl));
 
                 for (let si = (startCuentaIndex > 0 ? startCuentaIndex : 0); si < socks.length; si++) {
-                    if (cancelled || paused) break;
+                    if (cancelled) break;
+                    if (paused) {
+                        // Guardar progreso al pausar entre cuentas
+                        campanaProgress[campanaId] = { grupoIndex: 0, cuentaIndex: si, ciclo };
+                        console.log(`[Campana] Pausada entre cuentas en ciclo=${ciclo}, cuenta=${si}`);
+                        break;
+                    }
                     let currentSock = socks[si];
 
                     // MEJORA 9: Verificar limite diario
@@ -867,6 +879,10 @@ const RESPONDER_MAX_MENSAJES = 10;     // Enviar maximo N mensajes antes de paus
 const RESPONDER_PAUSA_SEGUNDOS = 300;  // Pausar 5 minutos (300s) despues de N mensajes
 
 function iniciarResponder(userId, contacto, palabras, botSock) {
+    if (!botSock || !botSock.user) {
+        console.error(`[Responder] No se puede iniciar: bot no conectado`);
+        return false;
+    }
     if (responderActivos[userId]) {
         // Si estaba pausado, reanudar
         const existing = responderActivos[userId];
@@ -929,23 +945,24 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
                                         paused = true;
                                         console.log(`[Responder] Rate limit: ${respondidos} mensajes enviados, pausando ${RESPONDER_PAUSA_SEGUNDOS}s...`);
                                         try {
-                                            await botSock.sendMessage(userId, {
+                                            botSock.sendMessage(userId, {
                                                 text: `\u23F8 *Auto-responder pausado*\n\n` +
                                                     `Se enviaron ${respondidos} mensajes.\n` +
                                                     `Esperando ${Math.round(RESPONDER_PAUSA_SEGUNDOS / 60)} minutos...\n\n` +
                                                     `Escribe *reanudar* para continuar antes.`,
-                                            });
+                                            }).catch(() => {});
                                         } catch (e) {}
-                                        // Esperar la pausa
-                                        await delay(RESPONDER_PAUSA_SEGUNDOS * 1000);
-                                        if (cancelled) return;
-                                        paused = false;
-                                        respondidos = 0;
-                                        try {
-                                            await botSock.sendMessage(userId, {
-                                                text: `\u25B6 *Auto-responder reanudado* despues de la pausa.`,
-                                            });
-                                        } catch (e) {}
+                                        // Programar reanudacion automatica sin bloquear el event handler
+                                        setTimeout(async () => {
+                                            if (cancelled) return;
+                                            paused = false;
+                                            respondidos = 0;
+                                            try {
+                                                await botSock.sendMessage(userId, {
+                                                    text: `\u25B6 *Auto-responder reanudado* despues de la pausa.`,
+                                                });
+                                            } catch (e) {}
+                                        }, RESPONDER_PAUSA_SEGUNDOS * 1000);
                                     }
                                     return;
                                 }
@@ -1046,6 +1063,7 @@ async function listarChatsPersonales(botSock) {
 }
 
 async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
+    if (!botSock || !botSock.user) return false;
     if (envioPersonalActivo[userId]) return false;
 
     let cancelled = false;
@@ -1138,6 +1156,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
 }
 
 async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock) {
+    if (!botSock || !botSock.user) return false;
     if (envioPersonalActivo[userId]) return false;
 
     let cancelled = false;
