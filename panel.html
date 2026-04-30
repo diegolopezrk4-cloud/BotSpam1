@@ -3978,8 +3978,14 @@ async function load2FAStatus(){
   }
 }
 async function setup2FA(){
-  const r=await api('/api/2fa/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId})});
-  if(!r.ok){toast('Error al configurar 2FA','error');return}
+  showModal(`<h3>🔐 Configurar 2FA</h3><p style="color:var(--text2);margin-bottom:15px">Ingresa tu contrasena para configurar la autenticacion de dos factores.</p><div class="form-group"><label>Contrasena</label><input type="password" id="setup2faPass"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="confirmSetup2FA()">Continuar</button></div>`);
+}
+async function confirmSetup2FA(){
+  const pass=$('setup2faPass').value;
+  if(!pass){toast('Ingresa tu contrasena','error');return}
+  closeModal();
+  const r=await api('/api/2fa/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId,password:pass})});
+  if(!r.ok){toast(r.error||'Error al configurar 2FA','error');return}
   $('twoFactorSecret').textContent=r.secret;
   $('twoFactorQR').innerHTML=`<div style="padding:20px;background:var(--bg);border-radius:8px;font-size:13px"><p>Clave secreta:</p><code style="font-size:16px;letter-spacing:3px;color:var(--accent2)">${r.secret}</code><p style="margin-top:10px;color:var(--text2);font-size:11px">Ingresa esta clave en tu app de autenticacion<br>(Google Authenticator, Authy, Microsoft Authenticator)</p></div>`;
   $('twoFactorSetup').style.display='block';

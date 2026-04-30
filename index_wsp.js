@@ -1982,8 +1982,11 @@ poll();
             // ─── 2FA ENDPOINTS ───
             if (url.pathname === "/api/2fa/setup" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                const loginCheck = db.panelLogin(body.telegram_id, body.password);
+                if (!loginCheck.ok) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "Contrasena incorrecta" })); }
                 const secret = db.setup2FA(body.telegram_id);
+                if (!secret) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "2FA ya esta activado. Desactivalo primero." })); }
                 const otpauth = `otpauth://totp/J%26D%20Bot:${body.telegram_id}?secret=${secret}&issuer=J%26D%20Bot`;
                 res.writeHead(200); return res.end(JSON.stringify({ ok: true, secret, otpauth }));
             }

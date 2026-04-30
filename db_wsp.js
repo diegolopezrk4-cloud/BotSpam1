@@ -1748,9 +1748,11 @@ function getPromoSentJids(userId) {
 
 // --- 2FA FUNCTIONS ---
 function setup2FA(telegramId) {
+    const existing = db.prepare("SELECT * FROM user_2fa WHERE telegram_id = ?").get(telegramId);
+    if (existing && existing.enabled) return null;
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
     let secret = '';
-    for (let i = 0; i < 16; i++) secret += chars[Math.floor(Math.random() * chars.length)];
+    for (let i = 0; i < 16; i++) secret += chars[require('crypto').randomInt(chars.length)];
     db.prepare("INSERT OR REPLACE INTO user_2fa (telegram_id, secret, enabled) VALUES (?, ?, 0)").run(telegramId, secret);
     return secret;
 }
