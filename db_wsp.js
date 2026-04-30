@@ -1865,26 +1865,26 @@ function importFullConfig(userId, data) {
     let imported = { grupos: 0, campanas: 0, templates: 0, blacklist: 0, auto_respuestas: 0 };
     if (data.grupos && Array.isArray(data.grupos)) {
         data.grupos.forEach(g => {
-            try { db.prepare("INSERT OR IGNORE INTO grupos (user_id, grupo_jid, nombre, link, seccion, size) VALUES (?, ?, ?, ?, ?, ?)").run(userId, g.grupo_jid, g.nombre, g.link, g.seccion || null, g.size || 0); imported.grupos++; } catch(_) {}
+            try { db.prepare("INSERT OR IGNORE INTO grupos (user_id, link, nombre, seccion, size) VALUES (?, ?, ?, ?, ?)").run(userId, g.link, g.nombre || null, g.seccion || '', g.size || 0); imported.grupos++; } catch(_) {}
         });
     }
     if (data.templates && Array.isArray(data.templates)) {
         data.templates.forEach(t => {
-            try { db.prepare("INSERT INTO templates (user_id, nombre, mensaje, imagen_b64) VALUES (?, ?, ?, ?)").run(userId, t.nombre, t.mensaje, t.imagen_b64 || null); imported.templates++; } catch(_) {}
+            try { db.prepare("INSERT INTO templates (user_id, nombre, mensaje, imagen_path) VALUES (?, ?, ?, ?)").run(userId, t.nombre, t.mensaje, t.imagen_path || null); imported.templates++; } catch(_) {}
         });
     }
     if (data.blacklist && Array.isArray(data.blacklist)) {
         data.blacklist.forEach(b => {
-            try { db.prepare("INSERT OR IGNORE INTO blacklist (user_id, grupo_jid, nombre) VALUES (?, ?, ?)").run(userId, b.grupo_jid, b.nombre || ''); imported.blacklist++; } catch(_) {}
+            try { db.prepare("INSERT OR IGNORE INTO blacklist (user_id, grupo_link, razon) VALUES (?, ?, ?)").run(userId, b.grupo_link, b.razon || ''); imported.blacklist++; } catch(_) {}
         });
     }
     if (data.auto_respuestas && Array.isArray(data.auto_respuestas)) {
         data.auto_respuestas.forEach(a => {
-            try { db.prepare("INSERT INTO auto_respuestas (user_id, keyword, respuesta) VALUES (?, ?, ?)").run(userId, a.keyword, a.respuesta); imported.auto_respuestas++; } catch(_) {}
+            try { db.prepare("INSERT INTO auto_respuestas (user_id, palabra, respuesta) VALUES (?, ?, ?)").run(userId, a.palabra, a.respuesta); imported.auto_respuestas++; } catch(_) {}
         });
     }
     if (data.config) {
-        try { db.prepare("INSERT OR REPLACE INTO user_envio_config (user_id, intervalo_min, intervalo_max, espera_ciclo, envio_imagen, caption_mode) VALUES (?, ?, ?, ?, ?, ?)").run(userId, data.config.intervalo_min || 8, data.config.intervalo_max || 15, data.config.espera_ciclo || 3600, data.config.envio_imagen || 0, data.config.caption_mode || 'caption'); } catch(_) {}
+        try { db.prepare("INSERT OR REPLACE INTO user_envio_config (user_id, delay_seg, lote_tamano, lote_pausa_seg, hora_inicio, hora_fin) VALUES (?, ?, ?, ?, ?, ?)").run(userId, data.config.delay_seg || 10, data.config.lote_tamano || 0, data.config.lote_pausa_seg || 30, data.config.hora_inicio || 0, data.config.hora_fin || 24); } catch(_) {}
     }
     return imported;
 }
