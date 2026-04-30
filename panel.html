@@ -1637,6 +1637,13 @@ async function api(path,opts){
       setTimeout(()=>doLogout(),1500);
       return{ok:false,error:'sesion_invalida'};
     }
+    if(r.status===403){
+      const d=await r.json().catch(()=>({}));
+      if(d.error==='membresia_requerida'){
+        toast('Necesitas una membresia activa para usar esta funcion.','error');
+      }
+      return{ok:false,error:d.error||'No autorizado'};
+    }
     const ct=r.headers.get('content-type')||'';
     if(!ct.includes('json')){const t=await r.text();return{ok:false,error:'Servidor no responde (HTTP '+r.status+')'}}
     return await r.json();
@@ -1835,7 +1842,11 @@ async function doRegister(){
   setTimeout(()=>{showLogin();$('loginId').value=id},2000);
 }
 
-function doLogout(){localStorage.removeItem('panel_uid');localStorage.removeItem('panel_token');localStorage.removeItem('panel_admin');localStorage.removeItem('panel_seller');location.reload()}
+function doLogout(){
+  const token=localStorage.getItem('panel_token');
+  if(token)fetch('/api/panel_logout',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({telegram_id:userId})}).catch(()=>{});
+  localStorage.removeItem('panel_uid');localStorage.removeItem('panel_token');localStorage.removeItem('panel_admin');localStorage.removeItem('panel_seller');location.reload();
+}
 
 function showErr(id,msg){const el=$(id);el.style.display='block';el.textContent=msg;el.className='auth-error';el.style.display='block'}
 function showMsg(id,msg){const el=$(id);el.style.display='block';el.textContent=msg}
@@ -2165,7 +2176,9 @@ async function editTgCampMsgPanel(id){
   fd.append('sesiones',JSON.stringify(sesiones));
   fd.append('grupos',JSON.stringify(grupos));
   if(fotoInput&&fotoInput.files&&fotoInput.files[0])fd.append('foto',fotoInput.files[0]);
-  const r=await fetch('/api/tg/campanas/editar',{method:'POST',body:fd}).then(r=>r.json()).catch(e=>({ok:false,error:e.message}));
+  const token=localStorage.getItem('panel_token');
+  const headers={};if(token)headers['Authorization']='Bearer '+token;
+  const r=await fetch('/api/tg/campanas/editar',{method:'POST',body:fd,headers}).then(r=>r.json()).catch(e=>({ok:false,error:e.message}));
   toast(r.ok?'Campana actualizada':'Error: '+(r.error||''),r.ok?'success':'error');loadTgCampanas();
 }
 

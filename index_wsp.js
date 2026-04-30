@@ -263,8 +263,7 @@ poll();
         const PUBLIC_ENDPOINTS = [
             "/api/status", "/api/panel_login", "/api/panel_registro",
             "/api/panel_recuperar_solicitar", "/api/panel_recuperar_reset",
-            "/api/canjear_codigo", "/api/check_membresia",
-            "/api/panel_cambiar_password"
+            "/api/canjear_codigo", "/api/check_membresia"
         ];
         const isPublicEndpoint = PUBLIC_ENDPOINTS.includes(url.pathname) || url.pathname === "/api/status";
 
@@ -740,8 +739,13 @@ poll();
             }
             if (url.pathname === "/api/panel_cambiar_password" && req.method === "POST") {
                 const body = await readBody();
+                // Requires valid session token
+                const cpToken = req.headers["authorization"]?.replace("Bearer ", "") || body._token;
+                const cpSession = db.validateSession(cpToken);
+                if (!cpSession) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "sesion_invalida" })); }
                 if (!body.telegram_id || !body.old_password || !body.new_password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id, old_password o new_password" })); }
                 const r = db.panelCambiarPassword(body.telegram_id, body.old_password, body.new_password);
+                if (r.ok) db.registrarAuditoria(body.telegram_id, 'cambiar_password', 'Password cambiado', getClientIp());
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
             }
@@ -795,6 +799,20 @@ poll();
                 return res.end(JSON.stringify(r));
             }
 
+            // ─── LOGOUT ───
+            if (url.pathname === "/api/panel_logout" && req.method === "POST") {
+                const logoutToken = req.headers["authorization"]?.replace("Bearer ", "");
+                if (logoutToken) {
+                    const session = db.validateSession(logoutToken);
+                    if (session) {
+                        db.deleteSession(session.telegram_id, session.id);
+                        db.registrarAuditoria(session.telegram_id, 'logout', 'Sesion cerrada', getClientIp());
+                    }
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
             // ═══ TOKEN AUTHENTICATION MIDDLEWARE ═══
             // All endpoints below this point require a valid session token
             if (!isPublicEndpoint) {
@@ -807,6 +825,29 @@ poll();
                 // Attach authenticated user to request context
                 req._authUser = session.telegram_id;
                 req._authToken = authToken;
+
+                // ═══ MEMBERSHIP VALIDATION ═══
+                // Endpoints that work without active membership (read-only / account management)
+                const NO_MEMBRESIA_ENDPOINTS = [
+                    "/api/panel_sessions", "/api/panel_sessions/close",
+                    "/api/2fa/setup", "/api/2fa/enable", "/api/2fa/disable", "/api/2fa/status",
+                    "/api/dashboard", "/api/dashboard_extended", "/api/reporte_diario",
+                    "/api/tasa_entrega", "/api/panel_logout", "/api/notificaciones",
+                    "/api/actividad", "/api/limites"
+                ];
+                const needsMembresia = !NO_MEMBRESIA_ENDPOINTS.includes(url.pathname);
+                if (needsMembresia) {
+                    const u = db.getUsuario(session.telegram_id) || db.findUserByNumber(session.telegram_id);
+                    const isAdminUser = u && u.es_admin === 1;
+                    const isSellerUser = !!db.isSellerUser(session.telegram_id);
+                    if (!isAdminUser && !isSellerUser) {
+                        const membresia = db.checkMembresia(session.telegram_id);
+                        if (!membresia.activa) {
+                            res.writeHead(403);
+                            return res.end(JSON.stringify({ ok: false, error: "membresia_requerida", msg: "Tu membresia no esta activa. Adquiere una membresia para usar esta funcion." }));
+                        }
+                    }
+                }
             }
 
             // ─── DESVINCULAR CUENTA ───
