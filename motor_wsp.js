@@ -344,6 +344,9 @@ function grupoTieneActividadNueva(campanaId, grupoJid) {
     if (!row) return true; // never sent = treat as new
     const envioTime = new Date(row.ultimo_envio + "Z").getTime();
     const ultimaActividad = grupoUltimaActividad[grupoJid];
+    // If we sent recently (last 30 min) from THIS campaign, skip even without activity data
+    const minutesSinceSend = (Date.now() - envioTime) / 60000;
+    if (minutesSinceSend < 30) return false;
     if (ultimaActividad === undefined) return true; // no data (e.g. after restart) — allow send
     return ultimaActividad > envioTime;
 }
