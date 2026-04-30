@@ -1003,6 +1003,13 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           </div>
         </div>
         <div class="form-group">
+          <label>📋 Cargar mensaje guardado</label>
+          <div style="display:flex;gap:10px;align-items:center">
+            <select id="promoPlantillaSelect" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" onchange="cargarPlantillaEn('promoPlantillaSelect','promoMensaje')"><option value="">-- Escribir manualmente --</option></select>
+            <button class="btn btn-outline btn-sm" onclick="refreshPlantillasSelect('promoPlantillaSelect')">🔄</button>
+          </div>
+        </div>
+        <div class="form-group">
           <label>📝 Mensaje de la promo</label>
           <textarea id="promoMensaje" rows="3" placeholder="Ej: Hola! Tenemos una oferta especial para ti. Responde SI si te interesa o NO si no." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:14px;resize:vertical"></textarea>
         </div>
@@ -1022,7 +1029,14 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           </div>
           <div class="form-group">
             <label>👥 Grupo (de donde tomar miembros)</label>
-            <select id="promoGrupo" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%"><option value="">-- Carga grupos primero --</option></select>
+            <select id="promoGrupo" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%" onchange="cargarMiembrosPromo()"><option value="">-- Carga grupos primero --</option></select>
+          </div>
+          <div class="form-group">
+            <label>🌍 Filtrar miembros por pais</label>
+            <div style="display:flex;gap:10px;align-items:center">
+              <select id="promoPais" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" onchange="filtrarMiembrosPromo()"><option value="">-- Todos los paises --</option></select>
+              <span id="promoPaisCount" style="color:var(--text2);font-size:13px"></span>
+            </div>
           </div>
         </div>
         <div class="form-group">
@@ -1756,7 +1770,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){}};
+    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoPlantillaSelect')},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){}};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -3203,6 +3217,8 @@ async function enviarPromoTodoEnUno(){
   if(tipoEnvio==='miembros'){
     payload.grupo=$('promoGrupo').value;
     payload.grupo_cuenta=$('promoGrupoCuenta').value;
+    const paisFilter=$('promoPais')?.value||null;
+    if(paisFilter)payload.filtro_pais=paisFilter;
   }
   if(imagenB64){payload.imagen_b64=imagenB64;payload.imagen_nombre=imagenNombre}
   if(respAceptarImgB64)payload.resp_aceptar_imagen_b64=respAceptarImgB64;
@@ -3342,6 +3358,38 @@ async function cargarGruposPromoMiembros(forceRefresh){
     const cacheMsg=r.from_cache?' (desde cache)':' (actualizado)';
     toast(grupos.length+' grupos cargados'+cacheMsg,'success');
   }else{toast('Error: '+(r.error||''),'error')}
+}
+let _promoMiembrosCache=[];
+async function cargarMiembrosPromo(){
+  const grupoJid=$('promoGrupo').value;
+  const cuenta=$('promoGrupoCuenta').value;
+  if(!grupoJid){$('promoPais').innerHTML='<option value="">-- Todos los paises --</option>';$('promoPaisCount').textContent='';_promoMiembrosCache=[];return}
+  const r=await api('/api/miembros_grupo?u='+userId+'&grupo='+encodeURIComponent(grupoJid)+'&cuenta='+encodeURIComponent(cuenta));
+  if(!r.ok){toast('Error cargando miembros','error');_promoMiembrosCache=[];return}
+  const m=r.miembros||[];
+  _promoMiembrosCache=m;
+  const countryCounts={};
+  m.forEach(x=>{
+    const num=x.numero||(x.id?x.id.split('@')[0]:'');
+    const cc=detectCountryCode(num);
+    if(cc){countryCounts[cc]=(countryCounts[cc]||0)+1;}
+  });
+  const sel=$('promoPais');
+  sel.innerHTML='<option value="">Todos los paises ('+m.length+' miembros)</option>';
+  Object.keys(countryCounts).sort((a,b)=>countryCounts[b]-countryCounts[a]).forEach(cc=>{
+    const name=COUNTRY_NAMES[cc]||'';
+    sel.innerHTML+=`<option value="${cc}">+${cc} ${name} (${countryCounts[cc]} miembros)</option>`;
+  });
+  $('promoPaisCount').textContent=m.length+' miembros total';
+}
+function filtrarMiembrosPromo(){
+  const cc=$('promoPais').value;
+  if(!cc){$('promoPaisCount').textContent=_promoMiembrosCache.length+' miembros total';return}
+  const filtered=_promoMiembrosCache.filter(x=>{
+    const num=x.numero||(x.id?x.id.split('@')[0]:'');
+    return num.startsWith(cc);
+  });
+  $('promoPaisCount').textContent=filtered.length+' de '+_promoMiembrosCache.length+' miembros';
 }
 
 // --- LOGS (Mejora 6) ---
