@@ -733,6 +733,8 @@ poll();
             if (url.pathname === "/api/panel_login" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                body.telegram_id = String(body.telegram_id).replace(/[^0-9]/g, '');
+                if (!body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "ID invalido. Usa solo numeros." })); }
                 // Rate limiting: max 5 attempts per IP in 15 minutes
                 const clientIp = getClientIp();
                 const attempts = db.getLoginAttempts(clientIp);
@@ -773,6 +775,13 @@ poll();
             if (url.pathname === "/api/panel_registro" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                // Validate telegram_id is numeric only (no phone numbers)
+                const cleanId = String(body.telegram_id).replace(/[^0-9]/g, '');
+                if (!/^\d{5,15}$/.test(cleanId)) {
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: "El ID debe ser numerico (solo digitos). Usa /miid en el bot de Telegram." }));
+                }
+                body.telegram_id = cleanId;
                 const r = db.panelRegistro(body.telegram_id, body.password, body.username || '');
                 // Sync 1-day demo to TG database
                 if (r.ok) {

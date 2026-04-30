@@ -327,7 +327,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       </ol>
       <p style="margin-top:10px;font-size:12px;color:var(--text2)">Tambien puedes contactar al creador para ayuda: <a href="https://t.me/JhonnyVip05" target="_blank">@JhonnyVip05</a></p>
     </div>
-    <input type="text" id="regId" placeholder="Tu ID de Telegram (numerico)" autocomplete="off">
+    <input type="text" id="regId" placeholder="Ej: 8001675901 (usa /miid en el bot)" autocomplete="off" inputmode="numeric" pattern="[0-9]*">
     <input type="text" id="regUsername" placeholder="Nombre de usuario" autocomplete="off">
     <input type="password" id="regPass" placeholder="Crear contrasena">
     <input type="password" id="regPass2" placeholder="Confirmar contrasena">
@@ -1880,9 +1880,13 @@ async function doLogin(){
 }
 
 async function doRegister(){
-  const id=$('regId').value.trim(),username=$('regUsername').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
+  const id=$('regId').value.trim().replace(/[^0-9]/g,''),username=$('regUsername').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
   hideMsg('regError');hideMsg('regSuccess');
   if(!id||!username||!pass){showErr('regError','Completa todos los campos');return}
+  if(!/^\d{5,15}$/.test(id)){showErr('regError','El ID debe ser numerico (solo digitos, sin + ni espacios). Usa /miid en el bot para obtenerlo.');return}
+  if(id.startsWith('51')||id.startsWith('1')||id.startsWith('34')){
+    if(id.length>=9&&id.length<=12){showErr('regError','Eso parece un numero de telefono, no un Telegram ID. Usa el comando /miid en el bot de Telegram para obtener tu ID.');return}
+  }
   if(pass.length<4){showErr('regError','La contrasena debe tener minimo 4 caracteres');return}
   if(pass!==pass2){showErr('regError','Las contrasenas no coinciden');return}
   $('btnRegister').disabled=true;$('btnRegister').textContent='Registrando...';
