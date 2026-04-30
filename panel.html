@@ -473,7 +473,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           <h3 style="margin:0 0 5px;color:#fff">Membresia Requerida</h3>
           <p style="margin:0;font-size:13px;opacity:0.9" id="membresiaMsg">Tu periodo de prueba ha terminado. Puedes ver todo pero no usar las funciones hasta activar una membresia.</p>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;flex-wrap:wrap" id="headerPlanesWrap">
           <div style="background:rgba(255,255,255,0.15);padding:8px 15px;border-radius:8px;text-align:center">
             <div style="font-size:11px;opacity:0.8">Semanal</div>
             <div style="font-weight:bold;font-size:16px">S/ 15</div>
@@ -1189,7 +1189,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       </div>
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px">
         <h3 style="margin-bottom:10px">💰 Planes de Membresia</h3>
-        <div style="display:flex;gap:15px;flex-wrap:wrap">
+        <div id="adminPlanesCards" style="display:flex;gap:15px;flex-wrap:wrap">
           <div style="background:var(--bg2);padding:15px;border-radius:10px;flex:1;min-width:150px;border:1px solid var(--accent)">
             <h4 style="color:var(--accent)">Semanal</h4>
             <div style="font-size:24px;font-weight:bold;margin:10px 0">S/ 15</div>
@@ -1928,6 +1928,20 @@ async function showApp(){
       }
     }
   }
+  // Update header prices from API
+  try{
+    const pR=await api('/api/pagos/planes');
+    if(pR.ok&&pR.planes){
+      const wrap=$('headerPlanesWrap');
+      if(wrap){
+        let ph='';
+        for(const[k,p]of Object.entries(pR.planes)){
+          ph+=`<div style="background:rgba(255,255,255,0.15);padding:8px 15px;border-radius:8px;text-align:center"><div style="font-size:11px;opacity:0.8;text-transform:capitalize">${esc(k)}</div><div style="font-weight:bold;font-size:16px">${esc(p.precio)}</div></div>`;
+        }
+        wrap.innerHTML=ph;
+      }
+    }
+  }catch(e){}
   // Mostrar items admin
   if(esAdmin){
     document.querySelectorAll('.admin-only').forEach(el=>el.style.display='');
@@ -4215,6 +4229,7 @@ async function loadAdminPagos(){
     <button class="btn btn-outline btn-sm" onclick="adminPagosTab('todos')">📊 Todos los Comprobantes</button>
     <button class="btn btn-outline btn-sm" onclick="adminPagosTab('crypto')">💳 Pagos Crypto</button>
     <button class="btn btn-outline btn-sm" onclick="adminPagosTab('metodos')">⚙️ Metodos de Pago</button>
+    <button class="btn btn-outline btn-sm" onclick="adminPagosTab('planes')">💰 Editar Planes</button>
   </div>`;
   h+='<div id="adminPagosTabContent"></div>';
   el.innerHTML=h;
@@ -4283,6 +4298,36 @@ async function adminPagosTab(tab){
       });
       h+='</tbody></table></div>';
     }
+    el.innerHTML=h;
+  }else if(tab==='planes'){
+    const r=await api('/api/admin/planes?u='+userId);
+    const planes=r.ok?r.planes:{};
+    let h='<div style="background:var(--card);border-radius:12px;padding:20px;border:1px solid var(--accent)">';
+    h+='<h3 style="margin-bottom:15px">💰 Editar Planes de Membresia</h3>';
+    h+='<p style="color:var(--text2);font-size:13px;margin-bottom:15px">Edita los precios y configuracion de cada plan. Los cambios se aplican inmediatamente.</p>';
+    h+='<div id="planesEditWrap">';
+    const keys=Object.keys(planes);
+    keys.forEach(key=>{
+      const p=planes[key];
+      h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:12px;border:1px solid var(--accent)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <span style="font-size:28px">${esc(p.emoji||'')}</span>
+          <b style="font-size:16px;text-transform:capitalize">${esc(key)}</b>
+          <span style="color:var(--text2);font-size:13px">(${p.dias} dias)</span>
+          <button class="btn btn-danger btn-sm" onclick="eliminarPlan('${esc(key)}')" style="margin-left:auto" title="Eliminar plan">🗑</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div class="form-group" style="margin:0"><label style="font-size:12px">Dias</label><input type="number" class="plan-dias" data-plan="${esc(key)}" value="${p.dias}" min="1" style="padding:8px"></div>
+          <div class="form-group" style="margin:0"><label style="font-size:12px">Precio (Soles)</label><input type="text" class="plan-precio" data-plan="${esc(key)}" value="${esc(p.precio)}" style="padding:8px"></div>
+          <div class="form-group" style="margin:0"><label style="font-size:12px">Precio USDT</label><input type="number" step="0.01" class="plan-usdt" data-plan="${esc(key)}" value="${p.precio_usdt}" style="padding:8px"></div>
+        </div>
+      </div>`;
+    });
+    h+='</div>';
+    h+='<div style="display:flex;gap:10px;margin-top:15px">';
+    h+='<button class="btn btn-success" onclick="guardarPlanes()">💾 Guardar Cambios</button>';
+    h+='<button class="btn btn-outline" onclick="agregarPlanModal()">+ Agregar Plan</button>';
+    h+='</div></div>';
     el.innerHTML=h;
   }
 }
@@ -4382,6 +4427,57 @@ async function eliminarQrMetodo(id){
 
 function verQrMetodo(id){
   showModal(`<h3>📷 QR del Metodo de Pago</h3><div style="text-align:center;padding:20px"><img src="/api/metodos_pago/qr?id=${id}" style="max-width:100%;max-height:70vh;border-radius:12px;border:3px solid var(--accent)" onerror="this.alt='Error al cargar QR';this.style.display='none'"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
+}
+
+// --- EDITAR PLANES ---
+async function guardarPlanes(){
+  const planes={};
+  document.querySelectorAll('.plan-dias').forEach(inp=>{
+    const key=inp.getAttribute('data-plan');
+    const dias=parseInt(inp.value)||7;
+    const precioEl=document.querySelector(`.plan-precio[data-plan="${key}"]`);
+    const usdtEl=document.querySelector(`.plan-usdt[data-plan="${key}"]`);
+    const precio=precioEl?precioEl.value:'S/ 0';
+    const usdt=usdtEl?parseFloat(usdtEl.value)||0:0;
+    const emojis={semanal:'\u{1F948}',mensual:'\u{1F947}',diario:'\u{1F949}',trimestral:'\u{1F3C6}',anual:'\u{1F451}'};
+    planes[key]={dias:dias,precio:precio,precio_usdt:usdt,emoji:emojis[key]||'\u{1F4B0}'};
+  });
+  if(!Object.keys(planes).length){toast('No hay planes para guardar','error');return}
+  const r=await api('/api/admin/planes/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,planes:planes})});
+  if(r.ok){toast('Planes actualizados!','success');adminPagosTab('planes')}else{toast(r.error||'Error','error')}
+}
+
+function agregarPlanModal(){
+  showModal(`<h3>+ Nuevo Plan</h3>
+    <div class="form-group"><label>Nombre (clave)</label><input type="text" id="npKey" placeholder="Ej: trimestral"></div>
+    <div class="form-group"><label>Dias</label><input type="number" id="npDias" value="30" min="1"></div>
+    <div class="form-group"><label>Precio (Soles)</label><input type="text" id="npPrecio" placeholder="Ej: S/ 50.00"></div>
+    <div class="form-group"><label>Precio USDT</label><input type="number" step="0.01" id="npUsdt" value="0" min="0"></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="agregarPlan()">Agregar</button></div>`);
+}
+
+async function agregarPlan(){
+  const key=($('npKey').value||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+  if(!key){toast('Nombre de plan requerido','error');return}
+  const dias=parseInt($('npDias').value)||30;
+  const precio=$('npPrecio').value||'S/ 0';
+  const usdt=parseFloat($('npUsdt').value)||0;
+  const r=await api('/api/admin/planes?u='+userId);
+  const planes=r.ok?r.planes:{};
+  const emojis={semanal:'\u{1F948}',mensual:'\u{1F947}',diario:'\u{1F949}',trimestral:'\u{1F3C6}',anual:'\u{1F451}'};
+  planes[key]={dias:dias,precio:precio,precio_usdt:usdt,emoji:emojis[key]||'\u{1F4B0}'};
+  const r2=await api('/api/admin/planes/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,planes:planes})});
+  if(r2.ok){closeModal();toast('Plan agregado!','success');adminPagosTab('planes')}else{toast(r2.error||'Error','error')}
+}
+
+async function eliminarPlan(key){
+  if(!confirm('Eliminar plan "'+key+'"?'))return;
+  const r=await api('/api/admin/planes?u='+userId);
+  const planes=r.ok?r.planes:{};
+  delete planes[key];
+  if(!Object.keys(planes).length){toast('Debe haber al menos 1 plan','error');return}
+  const r2=await api('/api/admin/planes/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,planes:planes})});
+  if(r2.ok){toast('Plan eliminado','success');adminPagosTab('planes')}else{toast(r2.error||'Error','error')}
 }
 
 // ═══════════════════════════════════════

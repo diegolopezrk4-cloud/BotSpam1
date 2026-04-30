@@ -1386,6 +1386,7 @@ function detenerEnvioPersonal(userId) {
     const task = envioPersonalActivo[userId];
     if (task) {
         task.cancel();
+        delete envioPersonalActivo[userId];
         return true;
     }
     return false;

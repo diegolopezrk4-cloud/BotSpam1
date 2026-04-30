@@ -633,6 +633,12 @@ function init() {
             qr_imagen TEXT DEFAULT ''
         );
 
+        -- Admin config overrides (editable from panel)
+        CREATE TABLE IF NOT EXISTS admin_config (
+            clave TEXT PRIMARY KEY,
+            valor TEXT NOT NULL
+        );
+
         -- Push subscriptions (Web Push)
         CREATE TABLE IF NOT EXISTS push_subscriptions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2332,6 +2338,32 @@ function editarMetodoPago(id, nombre, valor, instrucciones, activo, qrImagen) {
     }
 }
 
+// ─────── ADMIN CONFIG ───────
+function getAdminConfig(clave) {
+    const row = db.prepare("SELECT valor FROM admin_config WHERE clave = ?").get(clave);
+    return row ? row.valor : null;
+}
+
+function setAdminConfig(clave, valor) {
+    db.prepare("INSERT OR REPLACE INTO admin_config (clave, valor) VALUES (?, ?)").run(clave, valor);
+}
+
+function getAllAdminConfig() {
+    return db.prepare("SELECT * FROM admin_config").all();
+}
+
+function getPlanes() {
+    const custom = getAdminConfig('planes');
+    if (custom) {
+        try { return JSON.parse(custom); } catch (e) {}
+    }
+    return null;
+}
+
+function setPlanes(planes) {
+    setAdminConfig('planes', JSON.stringify(planes));
+}
+
 function setMetodoPagoQr(id, qrImagen) {
     db.prepare("UPDATE metodos_pago SET qr_imagen = ? WHERE id = ?").run(qrImagen || '', id);
 }
@@ -2594,6 +2626,8 @@ module.exports = {
     getTodosComprobantes, aprobarComprobante, rechazarComprobante, getComprobantesStats,
     // Metodos de pago (admin configurable)
     getMetodosPago, getMetodosPagoActivos, crearMetodoPago, editarMetodoPago, eliminarMetodoPago, initDefaultMetodosPago, setMetodoPagoQr, getMetodoPago,
+    // Admin config + planes editables
+    getAdminConfig, setAdminConfig, getAllAdminConfig, getPlanes, setPlanes,
     // Push notifications
     addPushSubscription, getPushSubscriptions, removePushSubscription, getAllPushSubscriptions,
     // Tickets

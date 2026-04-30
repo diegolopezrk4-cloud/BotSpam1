@@ -1616,7 +1616,8 @@ poll();
                     const envioConfig = db.getUserEnvioConfig(body.u);
                     const batchSize = parseInt(body.batch_size) || envioConfig.lote_tamano || 0;
                     const delayMinutes = parseInt(body.delay_minutes) || Math.ceil((envioConfig.lote_pausa_seg || 300) / 60);
-                    motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    const envResultResume = await motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    if (envResultResume?.blocked) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: envResultResume.error })); }
                     res.writeHead(200);
                     return res.end(JSON.stringify({
                         ok: true,
@@ -2088,7 +2089,8 @@ poll();
                     const envioConfig = db.getUserEnvioConfig(body.u);
                     const batchSize = body.batch_size || envioConfig.lote_tamano || 0;
                     const delayMinutes = body.delay_minutes || Math.ceil((envioConfig.lote_pausa_seg || 300) / 60);
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo);
+                    const envResultPromo = await motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo);
+                    if (envResultPromo?.blocked) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: envResultPromo.error })); }
                     db.agregarLog(body.u, 'promo', `Promo enviada a ${jids.length} miembros de ${grupoNombre} + escucha activada`);
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, message: `promo enviada a ${jids.length} miembros y escucha activada`, total: jids.length, grupo_nombre: grupoNombre }));
@@ -2568,8 +2570,10 @@ poll();
 
             // GET /api/pagos/planes — Lista planes disponibles con precios USDT
             if (url.pathname === "/api/pagos/planes" && req.method === "GET") {
+                const customPlanes = db.getPlanes();
+                const basePlanes = customPlanes || config.PLANES;
                 const planes = {};
-                for (const [key, plan] of Object.entries(config.PLANES)) {
+                for (const [key, plan] of Object.entries(basePlanes)) {
                     planes[key] = { dias: plan.dias, precio: plan.precio, precio_usdt: plan.precio_usdt, emoji: plan.emoji };
                 }
                 const binanceConfigured = !!(config.BINANCE_PAY.API_KEY && config.BINANCE_PAY.API_SECRET);
@@ -3034,6 +3038,27 @@ poll();
                 if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
                 db.eliminarMetodoPago(parseInt(body.id));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/admin/planes — Admin: obtener planes actuales
+            if (url.pathname === "/api/admin/planes" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const customPlanes = db.getPlanes();
+                const planes = customPlanes || config.PLANES;
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, planes, is_custom: !!customPlanes }));
+            }
+
+            // POST /api/admin/planes/editar — Admin: editar planes
+            if (url.pathname === "/api/admin/planes/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.planes || typeof body.planes !== "object") { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta planes" })); }
+                db.setPlanes(body.planes);
+                db.registrarAuditoria(body.admin_id, 'planes_editados', JSON.stringify(Object.keys(body.planes)), getClientIp());
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }

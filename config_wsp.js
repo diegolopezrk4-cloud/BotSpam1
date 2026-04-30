@@ -14,9 +14,8 @@ module.exports = {
 
     // Planes (precios en Soles y USDT)
     PLANES: {
-        diario:  { dias: 1,  precio: "S/ 2.00",  precio_usdt: 0.55,  emoji: "\u{1F949}" },
-        semanal: { dias: 7,  precio: "S/ 10.00", precio_usdt: 2.70,  emoji: "\u{1F948}" },
-        mensual: { dias: 30, precio: "S/ 25.00", precio_usdt: 6.75,  emoji: "\u{1F947}" },
+        semanal: { dias: 7,  precio: "S/ 15.00", precio_usdt: 4.00,  emoji: "\u{1F948}" },
+        mensual: { dias: 30, precio: "S/ 30.00", precio_usdt: 8.00,  emoji: "\u{1F947}" },
     },
 
     // Binance Pay (Merchant API)
