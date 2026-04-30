@@ -549,7 +549,7 @@ async def agregar_keywords(user_id, palabras, respuesta=""):
             p = p.strip().lower()
             if p:
                 await db.execute(
-                    "INSERT INTO responder_keywords (user_id, palabra, respuesta) VALUES (?,?,?)",
+                    "INSERT OR IGNORE INTO responder_keywords (user_id, palabra, respuesta) VALUES (?,?,?)",
                     (user_id, p, respuesta)
                 )
         await db.commit()

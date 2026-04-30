@@ -71,7 +71,7 @@ async def wsp_admin_desactivar(telegram_id):
     return await _post("/api/admin/desactivar", {"admin_id": str(8001675901), "telegram_id": str(telegram_id)})
 
 async def wsp_admin_ban(telegram_id):
-    return await _post("/api/admin/desactivar", {"admin_id": str(8001675901), "telegram_id": str(telegram_id)})
+    return await _post("/api/admin/ban", {"admin_id": str(8001675901), "telegram_id": str(telegram_id)})
 
 # --- CAMPANAS ---
 async def wsp_campanas(user_id):

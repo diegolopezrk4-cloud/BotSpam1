@@ -106,18 +106,24 @@ async function connectClientAccount(userId, nombre, telefono) {
                         reject(new Error("Sesion WSP expirada o cerrada. Re-vincula tu cuenta desde Cuentas WSP."));
                     }
                 } else if (resolved && reconnectAttempts < MAX_RECONNECT) {
-                    // Auto-reconnect after initial connection was established
                     reconnectAttempts++;
                     console.log(`[WSP] Cuenta ${nombre} desconectada (code ${code}). Reconectando intento ${reconnectAttempts}/${MAX_RECONNECT}...`);
                     await delay(3000 * reconnectAttempts);
-                    reconnectLocks[key] = true;
                     try {
-                        const newSock = await connectClientAccount(userId, nombre, telefono);
+                        const newSock = await createSocket();
                         clientSessions[key] = newSock;
+                        newSock.ev.on("connection.update", async (upd2) => {
+                            if (upd2.connection === "open") {
+                                reconnectAttempts = 0;
+                                clientSessions[key] = newSock;
+                                console.log(`[WSP] Cuenta ${nombre} reconectada OK`);
+                            }
+                            if (upd2.connection === "close") {
+                                if (clientSessions[key] === newSock) delete clientSessions[key];
+                            }
+                        });
                     } catch (e) {
                         console.log(`[WSP] Reconexion fallida para ${nombre}: ${e.message}`);
-                    } finally {
-                        delete reconnectLocks[key];
                     }
                 } else if (!resolved) {
                     resolved = true;
@@ -1300,19 +1306,20 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                         try {
                             const deliveryResult = await new Promise((resolve) => {
                                 let done = false;
+                                const cleanup = () => { try { botSock.ev.off("messages.update", handler); } catch (e) {} };
                                 const handler = (updates) => {
                                     for (const upd of updates) {
                                         if (upd.key?.id === msgId) {
                                             const status = upd.update?.status;
-                                            if (status >= 3) { if (!done) { done = true; resolve("leido"); } }
-                                            else if (status >= 2) { if (!done) { done = true; resolve("entregado"); } }
-                                            else if (status === 0) { if (!done) { done = true; resolve("rechazado"); } }
+                                            if (status >= 3) { if (!done) { done = true; cleanup(); resolve("leido"); } }
+                                            else if (status >= 2) { if (!done) { done = true; cleanup(); resolve("entregado"); } }
+                                            else if (status === 0) { if (!done) { done = true; cleanup(); resolve("rechazado"); } }
                                         }
                                     }
                                 };
                                 botSock.ev.on("messages.update", handler);
                                 setTimeout(() => {
-                                    try { botSock.ev.off("messages.update", handler); } catch (e) {}
+                                    cleanup();
                                     if (!done) { done = true; resolve("pendiente"); }
                                 }, 8000);
                             });

@@ -15,8 +15,7 @@ services:
       - ./media:/app/media                # Media files
       - ./comprobantes:/app/comprobantes  # Payment proofs
       - ./backups:/app/backups            # Auto-backups
-      - ./wsp_titan.db:/app/wsp_titan.db  # WSP database
-      - ./titan.db:/app/titan.db          # TG database
+      - ./data:/app/data                  # Database files (wsp_titan.db, titan.db)
     environment:
       - NODE_ENV=production
       - QR_PORT=3000

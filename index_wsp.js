@@ -708,9 +708,10 @@ poll();
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 try {
                     const started = await motor.enviarAPersonales(userId, mensaje, imagenPath, sock, body.cuenta);
+                    if (started?.blocked) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: started.error })); }
                     if (started) db.agregarLog(userId, 'envio', 'Envio personal iniciado');
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
+                    return res.end(JSON.stringify({ ok: !!started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
                 } catch (e) {
                     db.agregarLog(userId, 'error', `Error envio personal: ${e.message}`);
                     res.writeHead(500);
@@ -1423,7 +1424,8 @@ poll();
                         const buf = Buffer.from(body.imagen_b64, "base64");
                         fs.writeFileSync(imagenPath, buf);
                     }
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo, startIndex);
+                    const envResult = await motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo, startIndex);
+                    if (envResult?.blocked) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: envResult.error })); }
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, total: jids.length, filtered: rawParticipants.length - jids.length, batch_size: batchSize || jids.length, delay_minutes: batchSize ? delayMinutes : 0, grupo_nombre: grupoNombre }));
                 } catch (e) {
@@ -1892,6 +1894,26 @@ poll();
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
+            if (url.pathname === "/api/admin/ban" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const tid = body.telegram_id || body.user_id;
+                if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                const user = db.getUsuario(tid) || db.findUserByNumber(tid);
+                if (user) {
+                    db.getDb().prepare("UPDATE usuarios SET activo = 0, plan = 'banned', fecha_expira = NULL WHERE wsp_id = ?").run(user.wsp_id);
+                }
+                try {
+                    const http = require("http");
+                    const syncData = JSON.stringify({ telegram_id: tid, dias: 0, plan: "banned" });
+                    const syncReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                    syncReq.on("error", () => {});
+                    syncReq.write(syncData);
+                    syncReq.end();
+                } catch (_) {}
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Usuario baneado permanentemente" }));
+            }
             if (url.pathname === "/api/admin/set_admin" && req.method === "POST") {
                 const body = await readBody();
                 if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
@@ -2072,9 +2094,10 @@ poll();
                     return res.end(JSON.stringify({ ok: true, message: `promo enviada a ${jids.length} miembros y escucha activada`, total: jids.length, grupo_nombre: grupoNombre }));
                 } else {
                     const started = await motor.enviarAPersonales(body.u, body.mensaje, imagenPath, sock, body.cuenta);
+                    if (started?.blocked) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: started.error })); }
                     db.agregarLog(body.u, 'promo', 'Promo enviada + escucha activada');
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: started, message: started ? "promo enviada y escucha activada" : "ya hay un envio activo" }));
+                    return res.end(JSON.stringify({ ok: !!started, message: started ? "promo enviada y escucha activada" : "ya hay un envio activo" }));
                 }
             }
 

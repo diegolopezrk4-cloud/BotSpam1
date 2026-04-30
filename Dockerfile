@@ -13,7 +13,7 @@ RUN npm ci --production
 COPY . .
 
 # Create required directories
-RUN mkdir -p sessions media comprobantes backups client_sessions
+RUN mkdir -p sessions media comprobantes backups client_sessions data
 
 # Expose ports: WSP API (3000), Panel (3001), TG API (3002)
 EXPOSE 3000 3001 3002
