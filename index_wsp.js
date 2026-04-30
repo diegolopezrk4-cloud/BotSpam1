@@ -237,10 +237,16 @@ poll();
     if (url.pathname.startsWith("/api/")) {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
 
-        // Helper para leer body POST
+        // Helper para leer body POST (con limite de 10MB para prevenir DoS)
+        const MAX_BODY_SIZE = 10 * 1024 * 1024;
         const readBody = () => new Promise((resolve) => {
             let data = "";
-            req.on("data", c => data += c);
+            let size = 0;
+            req.on("data", c => {
+                size += c.length;
+                if (size > MAX_BODY_SIZE) { req.destroy(); resolve({}); return; }
+                data += c;
+            });
             req.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve({}); } });
         });
 
@@ -357,6 +363,13 @@ poll();
             if (url.pathname === "/api/campanas/del" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                // Delete campaign image file if exists
+                try {
+                    const camp = db.getCampanaById(body.id);
+                    if (camp && camp.imagen_path && fs.existsSync(camp.imagen_path)) {
+                        fs.unlinkSync(camp.imagen_path);
+                    }
+                } catch (e) { console.error(`Error eliminando imagen de campana: ${e.message}`); }
                 db.eliminarCampana(body.id);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
@@ -380,9 +393,9 @@ poll();
                 const msg = body.mensaje !== undefined ? body.mensaje : camp.mensaje;
                 db.actualizarCampanaMensaje(body.id, msg, imagenPath);
                 const conf = db.getCampanaConfig(body.id);
-                const imin = body.intervalo_min !== undefined ? parseInt(body.intervalo_min) : conf.intervalo_min;
-                const imax = body.intervalo_max !== undefined ? parseInt(body.intervalo_max) : conf.intervalo_max;
-                const eciclo = body.espera_ciclo !== undefined ? parseInt(body.espera_ciclo) : conf.espera_ciclo;
+                const imin = body.intervalo_min !== undefined ? (parseInt(body.intervalo_min) || conf.intervalo_min) : conf.intervalo_min;
+                const imax = body.intervalo_max !== undefined ? (parseInt(body.intervalo_max) || conf.intervalo_max) : conf.intervalo_max;
+                const eciclo = body.espera_ciclo !== undefined ? (parseInt(body.espera_ciclo) || conf.espera_ciclo) : conf.espera_ciclo;
                 db.setCampanaConfig(body.id, imin, imax, conf.espera_cuenta, eciclo);
                 // Update campaign accounts if provided
                 if (Array.isArray(body.sesiones)) {
@@ -478,17 +491,24 @@ poll();
                 return res.end(JSON.stringify({ ok: true, usuario: user || null }));
             }
 
-            // GET /api/usuarios/todos — Todos los usuarios WSP
+            // GET /api/usuarios/todos — Todos los usuarios WSP (admin only)
             if (url.pathname === "/api/usuarios/todos" && req.method === "GET") {
+                const reqAdminId = url.searchParams.get("admin_id") || url.searchParams.get("u");
+                const isLocal = (req.socket.remoteAddress === "127.0.0.1" || req.socket.remoteAddress === "::1" || req.socket.remoteAddress === "::ffff:127.0.0.1");
+                if (!isLocal && !checkAdmin(reqAdminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 const usuarios = db.getTodosUsuarios();
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, usuarios }));
             }
 
-            // POST /api/activar — Activar membresía WSP { wsp_id, dias }
+            // POST /api/activar — Activar membresía WSP { wsp_id, dias } (admin only)
             if (url.pathname === "/api/activar" && req.method === "POST") {
                 const body = await readBody();
+                const isLocal = (req.socket.remoteAddress === "127.0.0.1" || req.socket.remoteAddress === "::1" || req.socket.remoteAddress === "::ffff:127.0.0.1");
+                if (!isLocal && !checkAdmin(body.admin_id || body.u)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 if (!body.wsp_id || !body.dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta wsp_id o dias" })); }
+                const dias = parseInt(body.dias) || 0;
+                if (dias <= 0) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "dias debe ser un numero positivo" })); }
                 // Buscar usuario por número o ID
                 let user = db.getUsuario(body.wsp_id);
                 if (!user) {
@@ -498,24 +518,33 @@ poll();
                     res.writeHead(404);
                     return res.end(JSON.stringify({ ok: false, error: "usuario no encontrado" }));
                 }
-                db.activarMembresia(user.wsp_id, parseInt(body.dias));
-                const plan = parseInt(body.dias) === 1 ? "diario" : parseInt(body.dias) === 7 ? "semanal" : "mensual";
+                db.activarMembresia(user.wsp_id, dias);
+                const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : "mensual";
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, plan, wsp_id: user.wsp_id, nombre: user.nombre }));
             }
 
-            // POST /api/desactivar — Desactivar/banear usuario WSP { wsp_id }
+            // POST /api/desactivar — Desactivar/banear usuario WSP { wsp_id } (admin only)
             if (url.pathname === "/api/desactivar" && req.method === "POST") {
                 const body = await readBody();
+                const isLocal = (req.socket.remoteAddress === "127.0.0.1" || req.socket.remoteAddress === "::1" || req.socket.remoteAddress === "::ffff:127.0.0.1");
+                if (!isLocal && !checkAdmin(body.admin_id || body.u)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 if (!body.wsp_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta wsp_id" })); }
                 db.banByNumber(body.wsp_id);
+                // Cleanup reporte interval for banned user
+                try { motor.detenerReporteDiario(body.wsp_id); } catch (e) {}
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
 
-            // GET /api/activas — Campañas activas
+            // GET /api/activas — Campañas activas (admin only, o filtrado por usuario)
             if (url.pathname === "/api/activas") {
-                const activas = motor.getCampanasActivas ? motor.getCampanasActivas() : [];
+                const userId = url.searchParams.get("u");
+                const isLocal = (req.socket.remoteAddress === "127.0.0.1" || req.socket.remoteAddress === "::1" || req.socket.remoteAddress === "::ffff:127.0.0.1");
+                let activas = motor.getCampanasActivas ? motor.getCampanasActivas() : [];
+                if (!isLocal && !checkAdmin(userId)) {
+                    activas = activas.filter(a => String(a.userId) === String(userId));
+                }
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, activas }));
             }
@@ -1072,9 +1101,10 @@ poll();
                 }
             }
 
-            // ─── DEBUG MIEMBROS (raw participant data) ───
+            // ─── DEBUG MIEMBROS (raw participant data, admin only) ───
             if (url.pathname === "/api/debug_miembros" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
+                if (!checkAdmin(userId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "Solo admin puede usar debug" })); }
                 const grupoJid = url.searchParams.get("grupo");
                 const cuenta = url.searchParams.get("cuenta");
                 if (!userId || !grupoJid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
@@ -1099,9 +1129,10 @@ poll();
                 }
             }
 
-            // ─── DEBUG: Test single message send with delivery check ───
+            // ─── DEBUG: Test single message send with delivery check (admin only) ───
             if (url.pathname === "/api/debug_test_send" && req.method === "POST") {
                 const body = await readBody();
+                if (!checkAdmin(body.u)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "Solo admin puede usar debug" })); }
                 if (!body.u || !body.numero) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o numero" })); }
                 try {
                     let sock;
@@ -1609,8 +1640,35 @@ poll();
             // ─── AUTOJOIN ───
             if (url.pathname === "/api/autojoin" && req.method === "POST") {
                 const body = await readBody();
+                if (!body.u || !body.links || !Array.isArray(body.links)) {
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: "falta u o links" }));
+                }
+                let sock;
+                if (body.cuenta) {
+                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (e) {}
+                }
+                if (!sock) sock = botSock;
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                const stats = [];
+                for (const link of body.links) {
+                    try {
+                        const code = link.split("chat.whatsapp.com/").pop().split(/[?#]/)[0];
+                        if (!code) { stats.push({ link, ok: false, error: "link invalido" }); continue; }
+                        const meta = await sock.groupAcceptInvite(code);
+                        if (meta) {
+                            db.agregarGrupo(body.u, meta, null, 0);
+                            stats.push({ link, ok: true, jid: meta });
+                        } else {
+                            stats.push({ link, ok: false, error: "no se pudo unir" });
+                        }
+                    } catch (e) {
+                        stats.push({ link, ok: false, error: e.message || "error" });
+                    }
+                    await delay(2000);
+                }
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true }));
+                return res.end(JSON.stringify({ ok: true, stats }));
             }
 
             // ─── ADMIN ENDPOINTS ───

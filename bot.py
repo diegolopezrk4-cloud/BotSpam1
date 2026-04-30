@@ -31,11 +31,11 @@ import web_panel
 # ─────────────────────────────────────────
 #   CONFIGURACIÓN CENTRAL
 # ─────────────────────────────────────────
-BOT_TOKEN = "8779002740:AAEGu8ML62y0uFAqpbpSwStm7FJBn3d-KMo"
-ADMIN_ID  = 8001675901
-API_ID    = 35451933
-API_HASH  = "2070761744260118720b34e6bf20f2eb"
-YAPE_NUM  = "9776680776"
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8779002740:AAEGu8ML62y0uFAqpbpSwStm7FJBn3d-KMo")
+ADMIN_ID  = int(os.environ.get("ADMIN_ID", "8001675901"))
+API_ID    = int(os.environ.get("API_ID", "35451933"))
+API_HASH  = os.environ.get("API_HASH", "2070761744260118720b34e6bf20f2eb")
+YAPE_NUM  = os.environ.get("YAPE_NUM", "9776680776")
 
 MAX_CUENTAS_POR_USUARIO = 5
 MAX_GRUPOS_POR_USUARIO  = 25
@@ -1990,10 +1990,17 @@ async def recibir_codigo_verificacion(msg: types.Message, state: FSMContext):
     except Exception as e:
         logger.error(f"No se pudo notificar al admin del pago: {e}")
 
+_processed_payments = set()  # Prevent double-click race condition
+
 @dp.callback_query(F.data.startswith("admactivar_"))
 async def cb_admin_activar_pago(call: types.CallbackQuery):
     if not es_admin(call.from_user.id):
         return await call.answer("⛔ Solo admin.", show_alert=True)
+    # Prevent double-processing on rapid clicks
+    payment_key = f"{call.message.message_id}_{call.data}"
+    if payment_key in _processed_payments:
+        return await call.answer("Ya procesado", show_alert=True)
+    _processed_payments.add(payment_key)
     partes = call.data.split("_")
     uid = int(partes[1])
     dias = int(partes[2])

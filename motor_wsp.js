@@ -1092,8 +1092,13 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
                 });
             } catch (e) {}
 
-            for (const chat of chats) {
-                if (cancelled) break;
+            for (let chatIdx = 0; chatIdx < chats.length; chatIdx++) {
+                const chat = chats[chatIdx];
+                if (cancelled) {
+                    // Save progress before breaking so pause/resume works
+                    db.guardarProgresoEnvio(userId, 'personal_' + userId, chatIdx, total, mensaje, chats.map(c => c.jid), 'Chats personales');
+                    break;
+                }
 
                 try {
                     const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));

@@ -29,8 +29,8 @@ MAX_CHARS_RESPONDER = 120
 
 logger = logging.getLogger("JDSpamMotor")
 
-API_ID   = 35451933
-API_HASH = '2070761744260118720b34e6bf20f2eb'
+API_ID   = int(os.environ.get("API_ID", "35451933"))
+API_HASH = os.environ.get("API_HASH", "2070761744260118720b34e6bf20f2eb")
 
 # Diccionario global: campana_id -> Task asyncio
 tareas_activas = {}
@@ -42,10 +42,18 @@ responder_activos = {}
 #   UTILIDADES
 # ─────────────────────────────────────────
 def get_session_path(user_id, nombre):
-    """Devuelve la ruta del archivo de sesión Telethon."""
-    folder = f"sessions/{user_id}"
+    """Devuelve la ruta del archivo de sesión Telethon. Sanitiza nombre para prevenir path traversal."""
+    # Sanitize: remove path separators and parent directory references
+    safe_nombre = re.sub(r'[/\\]', '', nombre).replace('..', '')
+    if not safe_nombre:
+        raise ValueError("Nombre de sesion invalido")
+    folder = os.path.abspath(f"sessions/{user_id}")
     os.makedirs(folder, exist_ok=True)
-    return os.path.join(folder, nombre)
+    full_path = os.path.join(folder, safe_nombre)
+    # Verify the resolved path is within the sessions directory
+    if not os.path.abspath(full_path).startswith(folder):
+        raise ValueError("Path traversal detectado")
+    return full_path
 
 def variar_mensaje(msg_original):
     """Agrega caracteres invisibles aleatorios al mensaje para evitar detección de spam."""
@@ -222,14 +230,25 @@ async def worker_campana(campana_id, user_id, bot_notificar=None):
                     nombre = nombres_rotacion[0]
                     client = clientes[nombre]
 
-                # Verificar conexión y reconectar si es necesario
+                # Verificar conexión y reconectar si es necesario (con backoff exponencial)
                 try:
                     if not client.is_connected():
-                        logger.info(f"Cuenta '{nombre}' desconectada, reconectando...")
-                        await client.connect()
-                        if not await client.is_user_authorized():
-                            raise Exception("No autorizada tras reconectar")
-                        logger.info(f"Cuenta '{nombre}' reconectada OK.")
+                        reconn_delay = 2
+                        reconn_ok = False
+                        for reconn_attempt in range(4):  # max 4 attempts: 2s, 4s, 8s, 16s
+                            try:
+                                logger.info(f"Cuenta '{nombre}' desconectada, reconectando (intento {reconn_attempt+1})...")
+                                await client.connect()
+                                if not await client.is_user_authorized():
+                                    raise Exception("No autorizada tras reconectar")
+                                logger.info(f"Cuenta '{nombre}' reconectada OK.")
+                                reconn_ok = True
+                                break
+                            except Exception:
+                                await asyncio.sleep(reconn_delay)
+                                reconn_delay *= 2
+                        if not reconn_ok:
+                            raise Exception("Falló reconexión tras 4 intentos")
                 except Exception as reconn_err:
                     logger.warning(f"Cuenta '{nombre}' no se pudo reconectar: {reconn_err}")
                     # Intentar recrear la sesion completa
@@ -727,7 +746,9 @@ async def worker_responder(user_id, contacto, keywords, bot_notificar=None):
                 logger.info(f"Responder [{nombre}]: ciclo {ciclo} - {encontrados_re} respuestas nuevas")
             # Limpiar mensajes respondidos antiguos
             if len(mensajes_respondidos) > 5000:
-                mensajes_respondidos.clear()
+                # Keep only the newest 2000 IDs to prevent memory leak while avoiding re-responses
+                sorted_ids = sorted(mensajes_respondidos)
+                mensajes_respondidos.difference_update(sorted_ids[:3000])
 
     except asyncio.CancelledError:
         logger.info(f"Auto-responder para usuario {user_id} cancelado.")

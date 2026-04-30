@@ -303,6 +303,41 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 24. **Promo enviar_y_escuchar no procesaba JIDs correctamente**: A diferencia de `enviar_miembros`, el endpoint promo no filtraba @lid, no quitaba sufijos de dispositivo, no deduplicaba, no checkeaba blacklist ni se saltaba el propio JID del sender. Fix: se agrego procesamiento completo de JIDs con blacklist, dedup, LID filter, self-skip. (`index_wsp.js:1838-1863`)
 25. **XSS en 4 secciones de innerHTML sin esc()**: Nombres de sesion (`s.nombre`, `s.telefono`) se insertaban sin escapar en `<option>` tags, permitiendo XSS si un nombre contenia HTML. Fix: se agrego `esc()` en loadTgDetectar, loadEnvioPersonal, loadEnvioMiembros, loadPromoCuentas. (`panel.html:2273,2787,2881,3517`)
 
+#### Fixes de Seguridad y Bugs del REPORTE_BUGS_COMPLETO (28 bugs)
+
+**CRITICOS (Security):**
+26. **BUG-C01: API TG sin autenticacion** — web_panel.py tenia 30+ endpoints sin ningun auth check. Fix: middleware `auth_middleware` que bloquea requests que no vienen de localhost (solo acepta requests del proxy panel_server.js).
+27. **BUG-C02: Credenciales hardcodeadas** — BOT_TOKEN, API_ID, API_HASH, ADMIN_ID estaban en texto plano en bot.py, motor.py, web_panel.py. Fix: ahora usan `os.environ.get()` con fallback al valor actual.
+28. **BUG-C03: Path traversal en sesiones TG** — `get_session_path()` permitia nombres como `../../etc/passwd`. Fix: sanitiza nombre removiendo `/\..`, valida que la ruta resultante este dentro de `sessions/`.
+29. **BUG-C04: Upload sin limite de tamaño** — Multipart upload de fotos de campana no tenia limite. Fix: max 10MB con respuesta 413 si se excede.
+30. **BUG-C05: Race condition en pago** — Double-click en boton "Activar" duplicaba la membresia. Fix: set `_processed_payments` que previene doble procesamiento del mismo callback.
+
+**ALTOS (Auth/Memory):**
+31. **BUG-H01: Memory leak web_login_sessions** — Sesiones de login TG nunca se limpiaban. Fix: tarea de fondo cada 10 min que elimina sesiones > 15 min de antiguedad.
+32. **BUG-H03: /api/usuarios/todos sin admin** — Cualquier usuario veia todos los usuarios. Fix: requiere checkAdmin() o ser request local.
+33. **BUG-H04: /api/activar y /api/desactivar sin admin** — Cualquier usuario podia activar/desactivar membresias. Fix: checkAdmin() + localhost check.
+34. **BUG-H05: /api/activas exponia todas las campanas** — Sin filtro por usuario. Fix: no-admin solo ve sus propias campanas.
+35. **BUG-H06: Debug endpoints expuestos** — `/api/debug_miembros` y `/api/debug_test_send` sin auth. Fix: requiere checkAdmin().
+36. **BUG-H07: Lista negra TG era stub** — Los endpoints retornaban siempre vacio. Fix: tabla `lista_negra_tg` en db.py + CRUD real implementado.
+37. **BUG-H08: Campana TG sin verificar membresia** — Usuarios expirados podian lanzar campanas. Fix: verifica `activo` y `fecha_expira` antes de iniciar.
+
+**MEDIOS:**
+38. **BUG-M01: parseInt sin validacion** — NaN podia romper SQL. Fix: fallbacks `|| defaultValue` en todos los parseInt criticos.
+39. **BUG-M02: Reconexion sin backoff** — Inundaba Telegram con reconexiones. Fix: backoff exponencial (2s, 4s, 8s, 16s) con max 4 intentos.
+40. **BUG-M03: mensajes_respondidos crecia infinitamente** — Set que nunca se limpiaba. Fix: al llegar a 5000, elimina los 3000 mas antiguos (mantiene los 2000 mas recientes).
+41. **BUG-M04: delete campana_sesiones sin filtro** — `eliminar_sesion` borraba sesiones de TODOS los usuarios. Fix: subquery filtra por user_id.
+42. **BUG-M07: Recovery codes sin expiracion** — Codigos viejos nunca se limpiaban. Fix: cleanup de codigos > 10 min al crear nuevos.
+43. **BUG-M08: Fotos de campana no se eliminan** — Al borrar campana, la imagen quedaba en disco. Fix: `fs.unlinkSync()` de la imagen antes de borrar de DB.
+
+**BAJOS:**
+44. **BUG-L04: Stack traces expuestos** — panel_server.js enviaba `e.message` al cliente. Fix: log a console, mensaje generico al cliente.
+45. **BUG-L05: ReporteDiario sin cleanup** — Al banear usuario, el setInterval seguia corriendo. Fix: `detenerReporteDiario()` al desactivar usuario.
+
+**EXTRAS:**
+46. **enviarAPersonales sin guardar progreso** — El for-of no guardaba progreso al cancelar. Fix: convertido a for indexado con `guardarProgresoEnvio()` antes del break.
+47. **readBody sin limite** — El parser JSON del API no tenia limite de tamaño. Fix: max 10MB.
+48. **Proxy sin X-Forwarded-For** — panel_server.js no pasaba IP del cliente a los backends. Fix: header `x-forwarded-for` en ambos proxies.
+
 ## Notas Importantes para la Siguiente IA
 1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.
 2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).
