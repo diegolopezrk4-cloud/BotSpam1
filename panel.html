@@ -734,6 +734,13 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Cancelar Envio</button>
       </div>
       <div class="form-group">
+        <label>📋 Cargar mensaje guardado</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select id="epPlantillaSelect" style="flex:1" onchange="cargarPlantillaEn('epPlantillaSelect','epMensaje')"><option value="">-- Escribir manualmente --</option></select>
+          <button class="btn btn-outline btn-sm" onclick="refreshPlantillasSelect('epPlantillaSelect')">🔄</button>
+        </div>
+      </div>
+      <div class="form-group">
         <label>Mensaje a enviar</label>
         <textarea id="epMensaje" rows="4" placeholder="Escribe el mensaje que se enviara a tus contactos..."></textarea>
       </div>
@@ -785,6 +792,13 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <span id="emPaisCount" style="color:var(--text2);font-size:13px"></span>
         <button class="btn btn-success" onclick="exportarMiembrosCSV()">📥 Exportar CSV</button>
         <button class="btn btn-primary" onclick="exportarMiembrosTXT()">📄 Exportar TXT</button>
+      </div>
+      <div class="form-group">
+        <label>📋 Cargar mensaje guardado</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select id="emPlantillaSelect" style="flex:1" onchange="cargarPlantillaEn('emPlantillaSelect','emMensaje')"><option value="">-- Escribir manualmente --</option></select>
+          <button class="btn btn-outline btn-sm" onclick="refreshPlantillasSelect('emPlantillaSelect')">🔄</button>
+        </div>
       </div>
       <div class="form-group">
         <label>Mensaje DM (dejar vacio si solo quieres agregar miembros)</label>
@@ -2601,6 +2615,30 @@ async function ejecutarAutoJoin(){
 
 // --- ENVIO PERSONAL ---
 let epCuentaActual='';
+// --- Cargar mensajes/plantillas guardados en un select ---
+async function refreshPlantillasSelect(selectId){
+  const sel=$(selectId);if(!sel)return;
+  sel.innerHTML='<option value="">-- Escribir manualmente --</option>';
+  const [mr,pr]=await Promise.all([api('/api/mensajes?u='+userId),api('/api/plantillas?u='+userId)]);
+  const msgs=(mr.ok?mr.mensajes:[])||[];
+  const plts=(pr.ok?pr.plantillas:[])||[];
+  if(msgs.length){
+    const og=document.createElement('optgroup');og.label='Mensajes';
+    msgs.forEach(m=>{const o=document.createElement('option');o.value='msg:'+m.id;o.textContent='✉ '+m.nombre;o.dataset.texto=m.texto||'';og.appendChild(o)});
+    sel.appendChild(og);
+  }
+  if(plts.length){
+    const og=document.createElement('optgroup');og.label='Plantillas';
+    plts.forEach(p=>{const o=document.createElement('option');o.value='plt:'+p.id;o.textContent='📋 '+p.nombre;o.dataset.texto=p.mensaje||'';og.appendChild(o)});
+    sel.appendChild(og);
+  }
+}
+function cargarPlantillaEn(selectId,textareaId){
+  const sel=$(selectId);if(!sel||!sel.value)return;
+  const opt=sel.options[sel.selectedIndex];
+  if(opt&&opt.dataset.texto){$(textareaId).value=opt.dataset.texto}
+}
+
 async function loadEnvioPersonal(){
   const r=await api('/api/sesiones?u='+userId);
   const sel=$('epCuenta');
@@ -2610,6 +2648,7 @@ async function loadEnvioPersonal(){
       sel.innerHTML+=`<option value="${s.nombre}">${s.nombre} (${s.telefono||'?'})</option>`;
     });
   }
+  refreshPlantillasSelect('epPlantillaSelect');
 }
 async function cargarChatsPersonales(){
   const cuenta=$('epCuenta').value;
@@ -2705,6 +2744,7 @@ async function loadEnvioMiembros(){
   }
   $('emGrupo').innerHTML='<option value="">-- Carga grupos primero --</option>';
   $('emDestino').innerHTML='<option value="">-- Opcional: grupo destino --</option>';
+  refreshPlantillasSelect('emPlantillaSelect');
   // Check for pending resume
   checkEnvioProgreso();
   // Load scheduled member sends

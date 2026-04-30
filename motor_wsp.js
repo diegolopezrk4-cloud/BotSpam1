@@ -17,6 +17,12 @@ const grupoUltimaActividad = {};
 // Limite de envios diarios por cuenta (proteccion anti-ban)
 const LIMITE_ENVIOS_DIARIOS = 500;
 
+// Whole-word matching to avoid partial matches (e.g. 'no' in 'noches')
+function matchWholeWord(text, word) {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('(?:^|\\s|[^a-zA-Z\\u00C0-\\u024F])' + escaped + '(?:$|\\s|[^a-zA-Z\\u00C0-\\u024F])', 'i').test(text) || text === word;
+}
+
 let _botSock = null;
 let _botNombre = "Bot_Principal";
 
@@ -486,9 +492,6 @@ function iniciarCampana(campanaId, userId, botSock) {
             const conf = db.getCampanaConfig(campanaId);
             const horario = db.getCampanaHorario(campanaId);
 
-            // MEJORA 4: Cargar templates para rotacion
-            const templates = db.getTemplates(userId);
-
             if (!sesionesNombres.length || !gruposLinks.length) {
                 await botSock.sendMessage(userId, { text: "\u26A0 Campana sin cuentas o grupos asignados." });
                 return;
@@ -534,10 +537,8 @@ function iniciarCampana(campanaId, userId, botSock) {
                 if (horario.hora_inicio !== 0 || horario.hora_fin !== 24) {
                     horarioMsg = `\n\u{1F553} Horario: ${horario.hora_inicio}:00 - ${horario.hora_fin}:00`;
                 }
-                let templateMsg = templates.length ? `\n\u{1F4DD} ${templates.length} template(s) para rotacion` : "";
-
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}${templateMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`,
+                    text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`,
                 });
             } catch (e) {}
 
@@ -632,15 +633,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                             continue;
                         }
 
-                        // MEJORA 1 + 4: Variar mensaje o usar template rotativo
+                        // Use campaign's own message (don't override with shared templates)
                         let mensajeAEnviar = campana.mensaje;
                         let imagenAEnviar = campana.imagen_path;
-
-                        if (templates.length > 0) {
-                            const tmpl = templates[Math.floor(Math.random() * templates.length)];
-                            mensajeAEnviar = tmpl.mensaje;
-                            if (tmpl.imagen_path) imagenAEnviar = tmpl.imagen_path;
-                        }
 
                         mensajeAEnviar = variarMensaje(mensajeAEnviar, userId);
 
@@ -923,7 +918,7 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
                         // Check auto_respuestas rules first (varied responses)
                         let matched = false;
                         for (const [kw, respuestas] of Object.entries(autoReglasMap)) {
-                            if (lower.includes(kw) && respuestas.length > 0) {
+                            if (matchWholeWord(lower, kw) && respuestas.length > 0) {
                                 if (!autoRespCounters[kw]) autoRespCounters[kw] = 0;
                                 const idx = autoRespCounters[kw] % respuestas.length;
                                 autoRespCounters[kw]++;
@@ -944,7 +939,7 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
 
                         // Fallback to simple keyword match
                         for (const kw of keywordsLower) {
-                            if (lower.includes(kw)) {
+                            if (matchWholeWord(lower, kw)) {
                                 try {
                                     await sock.sendMessage(jid, {
                                         text: `Hola! Te recomiendo contactar a ${contacto} \u{1F4F1}`,
@@ -1455,7 +1450,7 @@ function iniciarPromoEscucha(userId, sock, palabraAceptar, palabraRechazar, resp
             // Check extra keywords first (Mejora 7)
             let matched = false;
             for (const kw of extraKeywords) {
-                if (text.includes(kw.palabra.toLowerCase().trim())) {
+                if (matchWholeWord(text, kw.palabra.toLowerCase().trim())) {
                     state.respondedJids.add(jid);
                     db.registrarPromoRespuesta(userId, jid, numero, pushName, kw.tipo || 'aceptado');
                     db.agregarLog(userId, 'promo', `${numero} (${pushName}) respondio "${text}" -> keyword "${kw.palabra}"`);
@@ -1472,7 +1467,7 @@ function iniciarPromoEscucha(userId, sock, palabraAceptar, palabraRechazar, resp
             if (matched) continue;
 
             // Default accept/reject keywords
-            if (text.includes(acLower)) {
+            if (matchWholeWord(text, acLower)) {
                 state.respondedJids.add(jid);
                 db.registrarPromoRespuesta(userId, jid, numero, pushName, 'aceptado');
                 db.agregarLog(userId, 'promo', `${numero} (${pushName}) ACEPTO con "${text}"`);
@@ -1483,7 +1478,7 @@ function iniciarPromoEscucha(userId, sock, palabraAceptar, palabraRechazar, resp
                 } else if (respAceptar) {
                     try { await sock.sendMessage(jid, { text: respAceptar }); } catch (e) {}
                 }
-            } else if (text.includes(reLower)) {
+            } else if (matchWholeWord(text, reLower)) {
                 state.respondedJids.add(jid);
                 db.registrarPromoRespuesta(userId, jid, numero, pushName, 'rechazado');
                 db.agregarLog(userId, 'promo', `${numero} (${pushName}) RECHAZO con "${text}"`);
