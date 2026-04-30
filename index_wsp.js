@@ -340,6 +340,42 @@ poll();
                 return res.end(JSON.stringify({ ok: true }));
             }
 
+            // POST /api/pausar — Pausar campaña { id }
+            if (url.pathname === "/api/pausar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                const paused = motor.pausarCampana(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: paused, message: paused ? "campana pausada" : "no se pudo pausar" }));
+            }
+
+            // POST /api/reanudar — Reanudar campaña { id, u }
+            if (url.pathname === "/api/reanudar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id || !body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id o u" })); }
+                const resumed = motor.reanudarCampana(body.id, body.u, botSock);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: resumed, message: resumed ? "campana reanudada" : "no se pudo reanudar" }));
+            }
+
+            // POST /api/pausar_responder — Pausar auto-responder { u }
+            if (url.pathname === "/api/pausar_responder" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const paused = motor.pausarResponder(body.u);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: paused }));
+            }
+
+            // POST /api/reanudar_responder — Reanudar auto-responder { u }
+            if (url.pathname === "/api/reanudar_responder" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const resumed = motor.reanudarResponder(body.u);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: resumed }));
+            }
+
             // GET /api/historial?u=USER_ID — Historial de envíos
             if (url.pathname === "/api/historial" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
@@ -482,8 +518,36 @@ poll();
                 }
             }
 
+            // GET /api/templates?u=USER_ID — Lista de templates/mensajes guardados
+            if (url.pathname === "/api/templates" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const templates = db.getTemplates(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, templates }));
+            }
+
+            // POST /api/templates/crear — Crear template { u, nombre, mensaje }
+            if (url.pathname === "/api/templates/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.nombre || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, nombre o mensaje" })); }
+                const id = db.agregarTemplate(body.u, body.nombre, body.mensaje, body.imagen || null);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, id }));
+            }
+
+            // POST /api/templates/del — Eliminar template { id }
+            if (url.pathname === "/api/templates/del" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.eliminarTemplate(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
             // POST /api/enviar_personal — Enviar mensaje a chats personales
             if (url.pathname === "/api/enviar_personal" && req.method === "POST") {
+                const body = await readBody();
                 const userId = body.u;
                 const mensaje = body.mensaje;
                 if (!userId || !mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o mensaje" })); }
@@ -842,6 +906,8 @@ async function handleMessage(jid, msg) {
                 case "campanas": case "campana": return await showCampanas(jid);
                 case "iniciar": case "start_camp": return await showIniciar(jid);
                 case "detener": case "stop": return await showDetener(jid);
+                case "pausar": case "pause": return await showPausar(jid);
+                case "reanudar": case "resume": case "continuar": return await showReanudar(jid);
                 case "responder": case "autoresponder": return await showResponder(jid);
                 case "intervalo": return await showIntervalo(jid);
                 case "historial": case "stats": return await showHistorial(jid);
@@ -905,6 +971,8 @@ async function handleMessage(jid, msg) {
             case "21": return await showLimiteDiario(jid);
             case "22": return await showReporteDiario(jid);
             case "23": return await showEnvioPersonal(jid);
+            case "24": return await showPausar(jid);
+            case "25": return await showReanudar(jid);
             default:
                 return;
         }
@@ -969,7 +1037,9 @@ async function sendMainMenu(jid, nombre) {
             `*20.* \u{1F4E6} Exportar — /exportar\n` +
             `*21.* \u{1F6E1} Limite — /limitediario\n` +
             `*22.* \u{1F4CA} Reporte — /reporte\n` +
-            `*23.* \u{1F4E8} Envio Personal — /personal\n\n` +
+            `*23.* \u{1F4E8} Envio Personal — /personal\n` +
+            `*24.* \u{23F8} Pausar — /pausar\n` +
+            `*25.* \u{25B6} Reanudar — /reanudar\n\n` +
             `Escribe /start para comenzar`
         );
     } else {
@@ -1024,6 +1094,8 @@ async function showCmds(jid) {
         texto += `/reporte \u2014 Reporte diario\n`;
         texto += `/personal \u2014 Envio a chats personales\n`;
         texto += `/cancelarenvio \u2014 Cancelar envio personal\n`;
+        texto += `/pausar \u2014 Pausar campana o responder\n`;
+        texto += `/reanudar \u2014 Reanudar desde donde se quedo\n`;
         texto += `\n\u2501\u2501 *ADMIN (Grupo)* \u2501\u2501\n`;
         texto += `/activar [codigo] [dias] \u2014 Activar membresia\n`;
         texto += `/desactivar [codigo] \u2014 Desactivar\n`;
@@ -1308,6 +1380,73 @@ async function showDetener(jid) {
     }
     texto += "\nResponde el *numero*\n*0.* \u{1F519} Volver";
     setState(jid, "detener", { campanas });
+    await send(jid, texto);
+}
+
+// --- PAUSAR ---
+async function showPausar(jid) {
+    if (!await checkMembership(jid)) return;
+    const campanas = db.getCampanas(jid).filter(c => c.activa);
+    const respActivo = motor.responderActivos[jid];
+
+    if (!campanas.length && !respActivo) {
+        return await send(jid, "\u23F8 No hay nada activo para pausar.\n\n*0.* \u{1F519} Volver");
+    }
+
+    let texto = "\u23F8 *PAUSAR*\n\n";
+    let opciones = [];
+    let idx = 1;
+
+    for (const c of campanas) {
+        texto += `*${idx}.* \u{1F4CB} Campana: ${c.nombre}\n`;
+        opciones.push({ tipo: "campana", id: c.id, nombre: c.nombre });
+        idx++;
+    }
+
+    if (respActivo && !respActivo.paused) {
+        texto += `*${idx}.* \u{1F916} Auto-responder\n`;
+        opciones.push({ tipo: "responder" });
+        idx++;
+    }
+
+    texto += "\nResponde el *numero*\n*0.* \u{1F519} Volver";
+    setState(jid, "pausar_select", { opciones });
+    await send(jid, texto);
+}
+
+// --- REANUDAR ---
+async function showReanudar(jid) {
+    if (!await checkMembership(jid)) return;
+    const campanas = db.getCampanas(jid);
+    const respActivo = motor.responderActivos[jid];
+
+    let opciones = [];
+    let texto = "\u25B6 *REANUDAR*\n\n";
+    let idx = 1;
+
+    // Campanas pausadas (activa en tarea pero paused=true)
+    for (const c of campanas) {
+        const task = motor.tareasActivas[c.id];
+        const hasProgress = motor.campanaProgress[c.id];
+        if ((task && task.paused) || hasProgress) {
+            texto += `*${idx}.* \u{1F4CB} Campana: ${c.nombre}${hasProgress ? " (progreso guardado)" : " (pausada)"}\n`;
+            opciones.push({ tipo: "campana", id: c.id, nombre: c.nombre });
+            idx++;
+        }
+    }
+
+    if (respActivo && respActivo.paused) {
+        texto += `*${idx}.* \u{1F916} Auto-responder (pausado)\n`;
+        opciones.push({ tipo: "responder" });
+        idx++;
+    }
+
+    if (!opciones.length) {
+        return await send(jid, "\u25B6 No hay nada pausado para reanudar.\n\n*0.* \u{1F519} Volver");
+    }
+
+    texto += "\nResponde el *numero*\n*0.* \u{1F519} Volver";
+    setState(jid, "reanudar_select", { opciones });
     await send(jid, texto);
 }
 
@@ -2068,6 +2207,60 @@ async function handleFSM(jid, msg, text, trimmed, state) {
             motor.detenerCampana(camp.id);
             clearState(jid);
             await send(jid, `\u{1F6D1} Campana '${camp.nombre}' detenida.`);
+            return;
+        }
+
+        // --- PAUSAR ---
+        case "pausar_select": {
+            const idx = parseInt(trimmed) - 1;
+            if (isNaN(idx) || idx < 0 || idx >= data.opciones.length) {
+                clearState(jid);
+                return await sendMainMenu(jid, pushName);
+            }
+            const opPausar = data.opciones[idx];
+            clearState(jid);
+            if (opPausar.tipo === "campana") {
+                const paused = motor.pausarCampana(opPausar.id);
+                if (paused) {
+                    await send(jid, `\u23F8 Campana '${opPausar.nombre}' pausada.\n\nEscribe *reanudar* o *25* para continuar donde se quedo.`);
+                } else {
+                    await send(jid, `\u274C No se pudo pausar la campana.`);
+                }
+            } else if (opPausar.tipo === "responder") {
+                const paused = motor.pausarResponder(jid);
+                if (paused) {
+                    await send(jid, `\u23F8 Auto-responder pausado.\n\nEscribe *reanudar* o *25* para continuar.`);
+                } else {
+                    await send(jid, `\u274C No se pudo pausar el auto-responder.`);
+                }
+            }
+            return;
+        }
+
+        // --- REANUDAR ---
+        case "reanudar_select": {
+            const idx = parseInt(trimmed) - 1;
+            if (isNaN(idx) || idx < 0 || idx >= data.opciones.length) {
+                clearState(jid);
+                return await sendMainMenu(jid, pushName);
+            }
+            const opReanudar = data.opciones[idx];
+            clearState(jid);
+            if (opReanudar.tipo === "campana") {
+                const resumed = motor.reanudarCampana(opReanudar.id, jid, botSock);
+                if (resumed) {
+                    await send(jid, `\u25B6 Campana '${opReanudar.nombre}' reanudada! Continuando donde se quedo.`);
+                } else {
+                    await send(jid, `\u274C No se pudo reanudar la campana.`);
+                }
+            } else if (opReanudar.tipo === "responder") {
+                const resumed = motor.reanudarResponder(jid);
+                if (resumed) {
+                    await send(jid, `\u25B6 Auto-responder reanudado!`);
+                } else {
+                    await send(jid, `\u274C No se pudo reanudar el auto-responder.`);
+                }
+            }
             return;
         }
 

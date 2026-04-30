@@ -65,8 +65,30 @@ async def wsp_iniciar(user_id, campana_id):
 async def wsp_detener(campana_id):
     return await _post("/api/detener", {"id": campana_id})
 
+async def wsp_pausar(campana_id):
+    return await _post("/api/pausar", {"id": campana_id})
+
+async def wsp_reanudar(user_id, campana_id):
+    return await _post("/api/reanudar", {"u": str(user_id), "id": campana_id})
+
+async def wsp_pausar_responder(user_id):
+    return await _post("/api/pausar_responder", {"u": str(user_id)})
+
+async def wsp_reanudar_responder(user_id):
+    return await _post("/api/reanudar_responder", {"u": str(user_id)})
+
 async def wsp_activas():
     return await _get("/api/activas")
+
+# --- TEMPLATES ---
+async def wsp_templates(user_id):
+    return await _get("/api/templates", {"u": str(user_id)})
+
+async def wsp_crear_template(user_id, nombre, mensaje):
+    return await _post("/api/templates/crear", {"u": str(user_id), "nombre": nombre, "mensaje": mensaje})
+
+async def wsp_eliminar_template(template_id):
+    return await _post("/api/templates/del", {"id": template_id})
 
 # --- INFO ---
 async def wsp_historial(user_id):
