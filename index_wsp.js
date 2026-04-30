@@ -435,7 +435,11 @@ poll();
                 if (!body.u || !campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
                 const camp = db.getCampanaById(campId);
                 if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "campana no encontrada" })); }
-                motor.iniciarCampana(campId, body.u, botSock);
+                const started = motor.iniciarCampana(campId, body.u, botSock);
+                if (!started) {
+                    res.writeHead(409);
+                    return res.end(JSON.stringify({ ok: false, error: "Campana ya esta activa" }));
+                }
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campana: camp.nombre }));
             }
@@ -2352,6 +2356,7 @@ server.listen(QR_PORT, "0.0.0.0", () => {
 // --- INICIO DEL BOT ---
 async function startBot() {
     db.init();
+    db.resetAllCampanasOnStartup();
     db.setAdminJids(adminJids);
     fs.mkdirSync("sessions", { recursive: true });
     fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });

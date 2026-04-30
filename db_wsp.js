@@ -856,6 +856,10 @@ function actualizarStatsCampana(campanaId, enviados, errores) {
     db.prepare("UPDATE campanas SET enviados = enviados + ?, errores = errores + ? WHERE id = ?").run(enviados, errores, campanaId);
 }
 
+function resetAllCampanasOnStartup() {
+    db.prepare("UPDATE campanas SET activa = 0 WHERE activa = 1").run();
+}
+
 function setCampanaActiva(campanaId, activa) {
     if (activa) {
         const inicio = nowPeru();
@@ -2002,7 +2006,7 @@ module.exports = {
     getSesiones, agregarSesion, eliminarSesion,
     getGrupos, agregarGrupo, eliminarGrupo, eliminarGrupoPorLink, eliminarTodosGrupos, actualizarGrupoLink,
     getCampanas, crearCampana, getCampanaById, actualizarStatsCampana,
-    setCampanaActiva, actualizarCampanaMensaje, eliminarCampana, clonarCampana, resetearStatsCampana,
+    setCampanaActiva, resetAllCampanasOnStartup, actualizarCampanaMensaje, eliminarCampana, clonarCampana, resetearStatsCampana,
     getSesionesCampana, agregarSesionCampana, getGruposCampana, agregarGrupoCampana, eliminarGrupoCampana,
     getCampanaConfig, setCampanaConfig,
     getMaxGrupos, setMaxGrupos,
