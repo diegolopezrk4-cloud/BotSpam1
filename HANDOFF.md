@@ -632,3 +632,94 @@ Cuando un pago es confirmado (automatico por Binance webhook o manual por admin)
 - **Donde**: `HANDOFF.md` linea 31, `handoff_updated.md` linea 11
 - **Sintoma**: Token del bot de Telegram commiteado en texto plano en archivos de documentacion
 - **Fix**: Reemplazado con referencia a `bot.py` linea 34. Idealmente el token de bot.py tambien deberia moverse a variable de entorno en una futura iteracion.
+
+### BUG-006: Registro aceptaba numeros de telefono en vez de Telegram ID — CORREGIDO
+- **Donde**: `panel.html` (formulario registro), `index_wsp.js` (endpoint `/api/panel_registro`)
+- **Sintoma**: Un usuario se registro con `+51 930 605 663` (numero de celular) en vez de su Telegram ID numerico. El sistema lo acepto y la cuenta quedaba inutilizable (el bot TG no puede enviar mensajes a un numero de telefono).
+- **Fix**: Validacion front y backend — solo acepta digitos puros (sin +, espacios, guiones). Debe ser 5-15 digitos.
+
+### BUG-007: Usuarios con sesion previa saltaban verificacion — CORREGIDO
+- **Donde**: `panel.html` (auto-login en window.load)
+- **Sintoma**: Usuarios que tenian sesion en localStorage de ANTES de la actualizacion no veian la alerta de verificacion. Podian usar todas las funciones sin verificar.
+- **Causa**: `localStorage.getItem('panel_verificado')` retornaba `null` (no existia antes), y el check `!== '0'` evaluaba `null !== '0'` como `true` (verificado).
+- **Fix**: Cambiado a `=== '1'` — solo pasa si es explicitamente `'1'`. Null, undefined, '0' = no verificado.
+
+### BUG-008: API no verificaba cuenta en servidor — CORREGIDO
+- **Donde**: `index_wsp.js` (middleware de auth)
+- **Sintoma**: Aunque el panel mostrara alerta de verificacion, un usuario podia llamar la API directamente (curl/postman) y usar todas las funciones sin verificar.
+- **Fix**: Middleware que retorna 403 `cuenta_no_verificada` para usuarios no verificados en TODOS los endpoints (excepto logout, verificar_cuenta, check_membresia, dashboard, notificaciones). Admins excluidos. Frontend `api()` detecta este error y muestra overlay de verificacion automaticamente.
+
+---
+
+## Sistema de Verificacion de Registro (Nuevo)
+
+### Descripcion
+Sistema que asegura que solo usuarios reales de Telegram puedan registrarse y usar el panel. Usa codigos unicos generados por el bot de TG.
+
+### Flujo para Nuevos Usuarios
+1. Usuario abre el bot de Telegram → envia `/registro`
+2. Bot genera codigo unico (ej: `REG-A3K9X2`, expira en 30 min)
+3. Usuario va al panel web → Registrarse → ingresa el codigo + contrasena
+4. Sistema verifica codigo, extrae el Telegram ID automaticamente → crea la cuenta
+5. Un Telegram ID solo puede tener 1 cuenta (enforced por unique constraint)
+
+### Flujo para Usuarios Existentes (No Verificados)
+1. Al hacer login, ven pantalla bloqueante "Verifica tu Cuenta" con instrucciones
+2. Van al bot TG → `/registro` → obtienen codigo
+3. Ingresan codigo en el panel → se marca como verificado
+4. A partir de ahi pueden usar todas las funciones normalmente
+
+### Reglas
+- **Admin**: Siempre verificado automaticamente (no necesita codigo)
+- **Codigo**: Formato `REG-XXXXXX`, expira en 30 minutos, 1 uso
+- **1 cuenta por ID**: No se puede crear segunda cuenta con mismo Telegram ID
+- **Server-side enforcement**: API retorna 403 si usuario no verificado intenta usar funciones
+
+### Tablas
+- `registration_codes` (telegram_id TEXT, code TEXT UNIQUE, created_at TEXT, used INTEGER DEFAULT 0)
+- `panel_users.verificado` (INTEGER DEFAULT 0 — columna agregada por migracion)
+
+### Endpoints
+| Endpoint | Metodo | Descripcion |
+|---|---|---|
+| `/api/generar_codigo_registro` | POST | Genera codigo de registro `{telegram_id}` (llamado por bot TG) |
+| `/api/verificar_cuenta` | POST | Verifica cuenta existente `{telegram_id, codigo}` |
+| `/api/panel_registro` | POST | Registro con codigo `{codigo, password}` (extrae TG ID del codigo) |
+
+### Comandos Bot TG
+- `/registro` — Genera codigo unico para registro/verificacion
+- `/miid` — Muestra el Telegram ID del usuario
+
+---
+
+## Sistema de Estado de Campanas (Nuevo)
+
+### Descripcion
+Las campanas ahora tienen un campo `estado_detalle` que indica su estado preciso, visible en el panel con badges de colores.
+
+### Estados
+| Valor | Badge | Color | Significado |
+|---|---|---|---|
+| `activa` | Activa | Verde | Enviando mensajes activamente |
+| `en_reposo` | En reposo | Amarillo (#f39c12) | Termino un ciclo, esperando pausa entre rondas |
+| `detenida_actualizacion` | Detenida (actualizacion) | Naranja (#e67e22) | Se detuvo porque el servidor se reinicio/actualizo |
+| `detenida` / null | Detenida | Rojo | Detenida manualmente |
+
+### Comportamiento
+1. **Al iniciar servidor** (`startBot()`): `marcarCampanasDetenidaPorActualizacion()` marca todas las campanas que estaban activas como `detenida_actualizacion` (activa=0)
+2. **Al iniciar campana**: `setCampanaActiva(id, true)` pone estado_detalle = `activa`
+3. **Al terminar un ciclo** (pausa entre rondas en `motor_wsp.js`): `setCampanaEstadoDetalle(id, 'en_reposo')`
+4. **Al terminar la pausa**: `setCampanaEstadoDetalle(id, 'activa')` (si no fue cancelada)
+5. **Al detener manualmente**: `setCampanaActiva(id, false)` pone estado_detalle = `detenida`
+
+### Columna DB
+- `campanas.estado_detalle` (TEXT DEFAULT NULL — agregada por migracion automatica)
+
+### Funciones DB
+- `setCampanaActiva(campanaId, activa, estado_detalle)` — Ahora acepta 3er parametro opcional
+- `setCampanaEstadoDetalle(campanaId, estado_detalle)` — Setter directo
+- `marcarCampanasDetenidaPorActualizacion()` — Marca todas las activas como detenidas por actualizacion
+
+### UI
+- `getEstadoCampanaBadge(x)` en panel.html — Funcion que retorna el badge HTML correcto segun estado
+- Aplica tanto a campanas WSP como TG
