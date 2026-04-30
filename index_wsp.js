@@ -286,8 +286,8 @@ poll();
     if (url.pathname.startsWith("/api/")) {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
 
-        // Helper para leer body POST con limite de tamaño (10MB max)
-        const MAX_BODY_SIZE = 10 * 1024 * 1024;
+        // Helper para leer body POST con limite de tamaño (50MB max for images)
+        const MAX_BODY_SIZE = 50 * 1024 * 1024;
         const readBody = () => new Promise((resolve) => {
             let data = "";
             let size = 0;
@@ -295,7 +295,11 @@ poll();
             req.on("data", c => {
                 size += c.length;
                 if (size > MAX_BODY_SIZE) {
-                    if (!aborted) { aborted = true; req.destroy(); resolve({}); }
+                    if (!aborted) {
+                        aborted = true;
+                        if (!res.headersSent) { res.writeHead(413); res.end(JSON.stringify({ ok: false, error: "Archivo demasiado grande (max 50MB)" })); }
+                        req.destroy();
+                    }
                     return;
                 }
                 data += c;
@@ -492,6 +496,8 @@ poll();
                 const grupos = db.getGruposCampana ? db.getGruposCampana(campId) : [];
                 if (!sesiones.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Campana sin cuentas asignadas. Edita la campana y asigna al menos una cuenta." })); }
                 if (!grupos.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Campana sin grupos asignados. Edita la campana y asigna al menos un grupo." })); }
+                // Set active immediately so frontend sees the change on reload
+                db.setCampanaActiva(campId, true);
                 motor.iniciarCampana(campId, body.u, botSock);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campana: camp.nombre }));
