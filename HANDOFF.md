@@ -354,6 +354,83 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 
 55. **Notificacion zombie: delay de 5s para estabilidad** — El codigo de deteccion zombie se ejecutaba inmediatamente al abrir conexion, pero el socket podia no estar 100% listo para enviar mensajes. Fix: se agrego `await delay(5000)` antes de detectar zombies + log de cuantas campanas zombie se encontraron. (`index_wsp.js:2479-2482`)
 
+---
+
+## ERRORES PENDIENTES POR CORREGIR (PRIORIDAD ALTA)
+
+### ERROR 1: Campana conecta cuentas pero NO envia mensajes a grupos
+- **Estado**: Las campanas inician correctamente, las cuentas se conectan OK (visible en Logs del Bot), pero los mensajes NO se envian a los grupos
+- **Evidencia**: Los logs muestran `Cuenta '907' conectada OK` pero despues NO aparecen logs de envio a grupos. La Cola de Reintentos muestra 84 mensajes pendientes
+- **Donde investigar**:
+  - `motor_wsp.js` lineas 598-770 — El bucle de envio (`while (!cancelled)`) que itera sobre grupos
+  - `motor_wsp.js` linea 654 — `grupoTieneActividadNueva()` puede estar bloqueando TODOS los grupos (anti-duplicado). Si el bot reinicio y no hay actividad registrada en memoria, podria saltar todos los grupos
+  - `motor_wsp.js` linea 665 — `sendToGroup()` puede estar fallando silenciosamente
+  - `motor_wsp.js` linea 641 — `resolveGroupJid()` puede retornar null si los links de grupos son invalidos
+- **Solucion sugerida**: Agregar `db.agregarLog()` dentro del bucle de envio (al intentar cada grupo, al resolver JID, al enviar) para ver EXACTAMENTE donde se corta. Posible fix: revisar si `grupoTieneActividadNueva` esta saltando todos los grupos despues de un reinicio
+- **Archivos**: `motor_wsp.js` (lineas 598-770)
+
+### ERROR 2: Cola de Reintentos tiene 84 mensajes pendientes sin procesarse
+- **Estado**: La cola muestra 84 Pendientes, 0 Reenviados, 0 Fallidos
+- **Donde investigar**:
+  - `motor_wsp.js` funcion `iniciarRetryProcessor()` — Verifica que este corriendo
+  - `db_wsp.js` funcion `getRetryPendientesGlobal()` — Puede que `proximo_intento <= datetime('now')` este mal (timezone?)
+  - Los reintentos solo se agregan en `enviarAPersonales` y `enviarAMiembros` (lineas 1117, 1317 de motor_wsp.js), NO en campanas. Los 84 pendientes podrian ser de envios personales fallidos
+- **Archivos**: `motor_wsp.js`, `db_wsp.js`
+
+### ERROR 3: Bot no notifica al usuario cuando se detiene por actualizacion
+- **Estado**: El codigo de deteccion zombie existe (index_wsp.js:2477-2504) y tiene delay de 5s, pero el usuario reporta que no recibe la notificacion WhatsApp
+- **Posibles causas**:
+  - Las campanas ya estaban en `activa=0` al momento del reinicio (el usuario las detuvo antes de actualizar)
+  - `botSock.onWhatsApp(uid + "@s.whatsapp.net")` falla para el ID del usuario
+  - El `resetZombieCampanas()` se ejecuta pero no encuentra campanas activas
+- **Donde investigar**: `index_wsp.js` lineas 2477-2504, verificar que la deteccion zombie este corriendo revisando los logs de consola al inicio del bot
+- **Archivos**: `index_wsp.js`
+
+---
+
+## QUE NO TOCAR (NO CAMBIAR NADA DE ESTO)
+
+### Funcionalidades que YA funcionan correctamente:
+1. **Sistema de Sellers/Revendedores** — Crear sellers, generar codigos, canjear codigos, activar membresias. NO tocar endpoints `/api/admin/sellers/*`, `/api/seller/*`, `/api/canjear_codigo`
+2. **Login/Registro/2FA** — Autenticacion completa con TOTP. NO tocar `/api/panel_login`, `/api/2fa/*`
+3. **Sesiones activas** — Ver/cerrar sesiones. NO tocar `/api/panel_sessions`
+4. **PWA** — manifest.json, sw.js, install prompt. NO tocar
+5. **Dashboard** — Graficos, estadisticas. NO tocar sec-dashboard ni `/api/dashboard`
+6. **Grupos WSP/TG** — Busqueda, orden, secciones. NO tocar
+7. **Mensajes y Plantillas** — CRUD de mensajes. NO tocar (ya corregido `m.texto` → `m.mensaje`)
+8. **Envio Unico** — NO tocar
+9. **Envio Personal** — Ya soporta lotes. NO tocar
+10. **Envio a Miembros** — Pausa/reanudar, lotes. NO tocar
+11. **Envio Interactivo/Promo** — Plantillas, filtro pais, Todo en Uno. NO tocar
+12. **Programados** — NO tocar
+13. **Auto-Responder** — NO tocar
+14. **Backup/Restaurar** — Ya corregido importFullConfig. NO tocar
+15. **Lista Negra** — NO tocar
+16. **Logs del Bot** — Funciona, muestra logs de campana. NO tocar
+17. **Multi-idioma** — ES/EN/PT. NO tocar
+18. **Modo Oscuro/Claro** — NO tocar
+
+### Archivos que NO se deben modificar (a menos que sea para corregir los errores de arriba):
+- `panel_server.js` — Funciona perfecto, NO tocar
+- `sw.js` — Service Worker OK
+- `manifest.json` — PWA OK
+- `start.sh` — Script de inicio OK
+- `config_wsp.js` — Config OK
+- `bot.py` — Bot TG (solo modificar si hay bug TG)
+- `motor.py` — Motor TG (solo modificar si hay bug TG)
+- `db.py` — DB TG (solo modificar si hay bug TG)
+
+### Reglas estrictas:
+- **NO refactorizar** — Solo corregir los 3 errores de arriba
+- **NO separar panel.html** — Es monolitico y asi se queda
+- **NO cambiar nombres de funciones** existentes
+- **NO eliminar** ningun endpoint existente
+- **NO cambiar** la estructura de tablas existentes
+- **Si agregas un endpoint**, va ANTES de `// Endpoint no encontrado` en index_wsp.js
+- **Despues de CADA fix**, actualizar este HANDOFF.md
+
+---
+
 ## Notas Importantes para la Siguiente IA
 1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.
 2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).
@@ -367,7 +444,19 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 10. "Canjear Codigo" es visible para TODOS los usuarios (no necesita ser seller ni admin).
 11. **SIEMPRE** actualizar este HANDOFF.md despues de cada mejora o fix.
 
-## Comando de Actualizacion
+## Historial de Comandos de Actualizacion
+
+### PR #23 — Sistema de Sellers + Mejoras
+```bash
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777514912-country-filter-mejoras && npm install && bash start.sh
+```
+
+### PR #30 — Fix Campanas + Bugs #49-55 (ACTUAL)
 ```bash
 cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777583803-fix-campaign-bugs && npm install && bash start.sh
+```
+
+### Comando general para volver a main (si algo se rompe)
+```bash
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/main && npm install && bash start.sh
 ```
