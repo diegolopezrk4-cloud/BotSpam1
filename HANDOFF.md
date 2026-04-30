@@ -34,17 +34,19 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 ## Archivos Principales
 | Archivo | Descripcion | Lineas aprox |
 |---|---|---|
-| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~5000 |
-| `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~5100 |
-| `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2375 |
-| `motor_wsp.js` | Motor de envio WhatsApp | ~74000 |
-| `panel_server.js` | Servidor web que sirve panel.html y proxea APIs | ~100 |
-| `bot.py` | Bot de Telegram (comandos + API) | ~178000 |
-| `motor.py` | Motor de envio Telegram | ~48000 |
-| `db.py` | Base de datos SQLite Telegram | ~27000 |
-| `manifest.json` | Manifiesto de PWA | ~46 |
-| `sw.js` | Service Worker para PWA | ~51 |
-| `start.sh` | Script de inicio de todos los servicios | ~50 |
+| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~5592 |
+| `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~6072 |
+| `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2744 |
+| `motor_wsp.js` | Motor de envio WhatsApp | ~1699 |
+| `panel_server.js` | Servidor web que sirve panel.html y proxea APIs | ~131 |
+| `bot.py` | Bot de Telegram (comandos + API) | ~4772 |
+| `motor.py` | Motor de envio Telegram | ~1122 |
+| `db.py` | Base de datos SQLite Telegram | ~743 |
+| `manifest.json` | Manifiesto de PWA | ~45 |
+| `sw.js` | Service Worker para PWA | ~62 |
+| `start.sh` | Script de inicio de todos los servicios | ~52 |
+| `wsp_bridge.py` | Bridge WSP<->TG (funciones de comunicacion) | ~226 |
+| `web_panel.py` | Panel web de Telegram | ~1062 |
 
 ## Mejoras Implementadas
 
@@ -202,6 +204,12 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 | 36 | Logs Global | sec-adminlogs | admin-only | Logs de todos los usuarios |
 | 37 | **Pagar Membresia** | sec-pagos | Ambas | **NUEVO**: Pagar con Binance Pay o comprobante manual |
 | 38 | **Gestion de Pagos** | sec-adminpagos | admin-only | **NUEVO**: Ver/aprobar comprobantes, stats, config metodos de pago |
+| 39 | **Tickets/Soporte** | sec-tickets | Ambas | Crear tickets de soporte |
+| 40 | **Analytics Avanzado** | sec-analytics | Ambas | Graficos envios/dia, horas activas, tasa por cuenta |
+| 41 | **Webhooks** | sec-webhooks | Ambas | Configurar URLs para recibir eventos HTTP |
+| 42 | **Admin Tickets** | sec-admintickets | admin-only | Bandeja de tickets + historial conversacion |
+| 43 | **Admin Backups** | sec-adminbackups | admin-only | Respaldo automatico diario + manual |
+| 44 | **Auditoria** | sec-auditoria | admin-only | Registro de auditoria de acciones |
 
 ## Endpoints API Completos
 ### Sellers (NUEVOS)
@@ -366,7 +374,7 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 20. **Panel mobile nativo (React Native)** — Pendiente. PWA actual funciona bien en mobile.
 
 ### Mejoras de Infraestructura
-21. **Separar panel.html en componentes** — Pendiente. Panel tiene 5300+ lineas, beneficiaria de modularizacion.
+21. **Separar panel.html en componentes** — Pendiente. Panel tiene 5500+ lineas, beneficiaria de modularizacion.
 22. **Migrar SQLite a PostgreSQL** — Pendiente. Para alta concurrencia futura.
 23. ~~**Docker compose**~~ — **IMPLEMENTADO** (#65) Dockerfile + docker-compose.yml con volumes y healthcheck.
 24. ~~**CI/CD automatico**~~ — **IMPLEMENTADO** (#66) GitHub Actions: syntax check JS/Python + Docker build.
@@ -390,7 +398,7 @@ Confirmo que entiendo la arquitectura:
 - Todo se inicia con `bash start.sh` desde `/root/BotSpam1`
 
 ## Notas Importantes para la Siguiente IA
-1. **panel.html** es monolitico (~4700 lineas). Todo HTML, CSS y JS en un archivo. No separar.
+1. **panel.html** es monolitico (~5592 lineas). Todo HTML, CSS y JS en un archivo. No separar.
 2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).
 3. Las tablas y funciones de DB se agregan en `db_wsp.js` **ANTES** del `module.exports`.
 4. Los nuevos exports se agregan al final del objeto `module.exports` en `db_wsp.js`.

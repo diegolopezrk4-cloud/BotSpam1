@@ -998,7 +998,7 @@ poll();
                     const NO_MEMBRESIA_ENDPOINTS = [
                         "/api/panel_sessions", "/api/panel_sessions/close",
                         "/api/2fa/setup", "/api/2fa/enable", "/api/2fa/disable", "/api/2fa/status",
-                        "/api/dashboard", "/api/dashboard_extended", "/api/reporte_diario",
+                        "/api/dashboard", "/api/dashboard/extended", "/api/reporte_diario",
                         "/api/tasa_entrega", "/api/panel_logout", "/api/notificaciones",
                         "/api/actividad", "/api/limites",
                         "/api/pagos/planes", "/api/pagos/crear", "/api/pagos/estado", "/api/pagos/historial",
