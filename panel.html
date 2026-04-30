@@ -2270,7 +2270,7 @@ async function loadTgDetectar(){
   sel.innerHTML='<option value="">-- Seleccionar cuenta --</option>';
   const r=await api('/api/sesiones_tg?u='+userId);
   if(r.ok&&r.sesiones){
-    r.sesiones.forEach(s=>{sel.innerHTML+='<option value="'+s.nombre+'">'+s.nombre+' ('+s.telefono+')</option>'});
+    r.sesiones.forEach(s=>{sel.innerHTML+='<option value="'+esc(s.nombre)+'">'+esc(s.nombre)+' ('+esc(s.telefono||'?')+')</option>'});
   }
   $('tgDetectarResult').style.display='none';
   $('tgDetectarLoading').style.display='none';
@@ -2784,7 +2784,7 @@ async function loadEnvioPersonal(){
   sel.innerHTML='<option value="">-- Selecciona cuenta --</option>';
   if(r.ok){
     (r.sesiones||[]).forEach(s=>{
-      sel.innerHTML+=`<option value="${s.nombre}">${s.nombre} (${s.telefono||'?'})</option>`;
+      sel.innerHTML+=`<option value="${esc(s.nombre)}">${esc(s.nombre)} (${esc(s.telefono||'?')})</option>`;
     });
   }
   refreshPlantillasSelect('epPlantillaSelect');
@@ -2878,7 +2878,7 @@ async function loadEnvioMiembros(){
   sel.innerHTML='<option value="">-- Selecciona cuenta --</option>';
   if(r.ok){
     (r.sesiones||[]).forEach(s=>{
-      sel.innerHTML+=`<option value="${s.nombre}">${s.nombre} (${s.telefono||'?'})</option>`;
+      sel.innerHTML+=`<option value="${esc(s.nombre)}">${esc(s.nombre)} (${esc(s.telefono||'?')})</option>`;
     });
   }
   $('emGrupo').innerHTML='<option value="">-- Carga grupos primero --</option>';
@@ -3514,7 +3514,7 @@ async function loadPromoCuentas(){
   const sel2=$('promoGrupoCuenta');
   if(sel2)sel2.innerHTML='<option value="">-- Selecciona cuenta --</option>';
   if(r.ok&&r.sesiones){r.sesiones.forEach(s=>{
-    const opt='<option value="'+s.nombre+'">'+s.nombre+(s.telefono?' ('+s.telefono+')':'')+'</option>';
+    const opt='<option value="'+esc(s.nombre)+'">'+esc(s.nombre)+(s.telefono?' ('+esc(s.telefono)+')':'')+'</option>';
     sel.innerHTML+=opt;
     if(sel2)sel2.innerHTML+=opt;
   })}

@@ -1210,8 +1210,9 @@ poll();
                         return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros validos para enviar (todos filtrados)" }));
                     }
                     const grupoNombre = meta.subject || body.grupo;
-                    const batchSize = parseInt(body.batch_size) || 0;
-                    const delayMinutes = parseInt(body.delay_minutes) || 5;
+                    const envioConfig = db.getUserEnvioConfig(body.u);
+                    const batchSize = parseInt(body.batch_size) || envioConfig.lote_tamano || 0;
+                    const delayMinutes = parseInt(body.delay_minutes) || Math.ceil((envioConfig.lote_pausa_seg || 300) / 60);
                     const startIndex = parseInt(body.start_index) || 0;
                     // Handle image (base64)
                     let imagenPath = null;
@@ -1411,8 +1412,9 @@ poll();
                     } else {
                         res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
                     }
-                    const batchSize = parseInt(body.batch_size) || 0;
-                    const delayMinutes = parseInt(body.delay_minutes) || 5;
+                    const envioConfig = db.getUserEnvioConfig(body.u);
+                    const batchSize = parseInt(body.batch_size) || envioConfig.lote_tamano || 0;
+                    const delayMinutes = parseInt(body.delay_minutes) || Math.ceil((envioConfig.lote_pausa_seg || 300) / 60);
                     motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
                     res.writeHead(200);
                     return res.end(JSON.stringify({
@@ -1833,11 +1835,31 @@ poll();
                     }
                     const meta = await grupSock.groupMetadata(body.grupo);
                     const grupoNombre = meta.subject || body.grupo;
-                    let jids = (meta.participants || [])
-                        .map(p => (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id)
-                        .filter(j => j && j.endsWith("@s.whatsapp.net"));
-                    if (body.filtro_pais) {
-                        jids = jids.filter(j => j.replace(/@s\.whatsapp\.net$/, '').startsWith(body.filtro_pais));
+                    const rawParticipants = meta.participants || [];
+                    const myJid = sock.user?.id || "";
+                    const myNum = jidToNumber(myJid);
+                    const blacklist = db.getBlacklist(body.u);
+                    const blNums = new Set(blacklist.map(b => (b.grupo_link || "").replace(/[^0-9]/g, "")));
+                    const blNumeros = db.getBlacklistNumeros(body.u);
+                    blNumeros.forEach(b => blNums.add(b.numero));
+                    const seen = new Set();
+                    let jids = [];
+                    for (const p of rawParticipants) {
+                        let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
+                        if (!jid) continue;
+                        if (jid.includes(":") && (jid.endsWith("@s.whatsapp.net") || jid.endsWith("@lid"))) {
+                            const suffix = jid.endsWith("@s.whatsapp.net") ? "@s.whatsapp.net" : "@lid";
+                            jid = jid.split(":")[0] + suffix;
+                        }
+                        if (jid.endsWith("@lid")) continue;
+                        const num = jidToNumber(jid);
+                        if (!num || !/^\d{7,15}$/.test(num)) continue;
+                        if (num === myNum) continue;
+                        if (blNums.has(num)) continue;
+                        if (body.filtro_pais && !num.startsWith(body.filtro_pais)) continue;
+                        if (seen.has(num)) continue;
+                        seen.add(num);
+                        jids.push(jid);
                     }
                     if (!jids.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros en el grupo" + (body.filtro_pais ? " con codigo +" + body.filtro_pais : "") })); }
                     const envioConfig = db.getUserEnvioConfig(body.u);

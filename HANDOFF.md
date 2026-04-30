@@ -293,6 +293,16 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 16. **Fix promoResumeBar CSS duplicado**: El div tenia `display:none` dos veces en el style, la segunda pisaba `align-items:center`. Corregido.
 17. **Anti-duplicado mejorado entre campanas**: `grupoTieneActividadNueva` ahora tiene ventana de 30 min — si la misma campana envio al grupo en los ultimos 30 min, no reenvia (incluso despues de restart). Campanas diferentes con mensajes distintos SI envian al mismo grupo sin problemas.
 
+#### Escaneo Exhaustivo Linea por Linea (Bugfixes adicionales)
+18. **Socket leak en connectClientAccount timeout**: El timeout de 60s en `connectClientAccount` disparaba reject sin cerrar el socket, dejando conexiones fantasma. Fix: se agrego `sock.end()` antes del reject. (`motor_wsp.js:121`)
+19. **esGrupoReal filtraba announce groups**: Filtraba grupos de solo-admin (announce) impidiendo que admins los vean en la lista. Fix: se quito el filtro ya que `sendToGroup` verifica permisos al enviar. (`motor_wsp.js:466`)
+20. **Scheduler hardcodeaba "America/Lima"**: Dos funciones en el scheduler usaban `"America/Lima"` en vez de `config.TIMEZONE`, rompiendo para usuarios con timezone diferente. Fix: se cambio a `config.TIMEZONE`. (`motor_wsp.js:1379,1396`)
+21. **Delivery handler leak en sendToGroup**: El handler de `messages.update` no se removia del socket en la rama exitosa (solo en timeout). Fix: se reordeno para hacer `off()` en ambas ramas. (`motor_wsp.js:418-422`)
+22. **enviar_miembros ignoraba config de lotes del usuario**: Endpoint usaba defaults hardcodeados (batch=0, delay=5min) en vez de leer `getUserEnvioConfig()`. Fix: ahora lee config del usuario. (`index_wsp.js:1213-1215`)
+23. **enviar_miembros_reanudar ignoraba config de lotes**: Igual que #22 pero en el endpoint de reanudar. Fix: ahora lee `getUserEnvioConfig()`. (`index_wsp.js:1414-1416`)
+24. **Promo enviar_y_escuchar no procesaba JIDs correctamente**: A diferencia de `enviar_miembros`, el endpoint promo no filtraba @lid, no quitaba sufijos de dispositivo, no deduplicaba, no checkeaba blacklist ni se saltaba el propio JID del sender. Fix: se agrego procesamiento completo de JIDs con blacklist, dedup, LID filter, self-skip. (`index_wsp.js:1838-1863`)
+25. **XSS en 4 secciones de innerHTML sin esc()**: Nombres de sesion (`s.nombre`, `s.telefono`) se insertaban sin escapar en `<option>` tags, permitiendo XSS si un nombre contenia HTML. Fix: se agrego `esc()` en loadTgDetectar, loadEnvioPersonal, loadEnvioMiembros, loadPromoCuentas. (`panel.html:2273,2787,2881,3517`)
+
 ## Notas Importantes para la Siguiente IA
 1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.
 2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).

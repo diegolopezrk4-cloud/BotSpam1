@@ -116,7 +116,11 @@ async function connectClientAccount(userId, nombre, telefono) {
             }
         });
         setTimeout(() => {
-            if (!resolved) { resolved = true; reject(new Error("Timeout conectando cuenta (60s)")); }
+            if (!resolved) {
+                resolved = true;
+                try { sock.end(); } catch (e) {}
+                reject(new Error("Timeout conectando cuenta (60s)"));
+            }
         }, 60000);
     });
 }
@@ -417,8 +421,8 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
             };
             sock.ev.on("messages.update", handler);
             setTimeout(() => {
-                try { sock.ev.off("messages.update", handler); } catch (e) {}
                 if (!done) { done = true; resolve({ delivered: false, reason: "pending" }); }
+                try { sock.ev.off("messages.update", handler); } catch (e) {}
             }, 15000);
         });
 
@@ -462,8 +466,7 @@ function esGrupoReal(groupId, groupMetadata) {
     if (groupMetadata) {
         if (groupMetadata.isCommunityAnnounce) return false;
         if (groupMetadata.isCommunity && groupMetadata.linkedParent) return false;
-        // Filtrar grupos de solo lectura (solo admins pueden escribir)
-        if (groupMetadata.announce === true) return false;
+        // Nota: NO filtrar announce (solo-admin) aqui — sendToGroup ya verifica si somos admin
         // Filtrar newsletters/canales
         if (groupMetadata.isNewsletter) return false;
     }
@@ -1376,7 +1379,7 @@ function iniciarSchedulerMiembros(botSock) {
     _schedulerInterval = setInterval(async () => {
         try {
             const now = new Date();
-            const peruTime = new Date(now.toLocaleString("en-US", { timeZone: "America/Lima" }));
+            const peruTime = new Date(now.toLocaleString("en-US", { timeZone: config.TIMEZONE }));
             const horaActual = String(peruTime.getHours()).padStart(2, "0") + ":" + String(peruTime.getMinutes()).padStart(2, "0");
             const diaActual = peruTime.getDay();
 
@@ -1393,7 +1396,7 @@ function iniciarSchedulerMiembros(botSock) {
                     if (prog.ultimo_envio) {
                         const lastSend = new Date(prog.ultimo_envio + "Z");
                         const hoyPeru = peruTime.toISOString().split("T")[0];
-                        const lastSendPeru = new Date(lastSend.toLocaleString("en-US", { timeZone: "America/Lima" }));
+                        const lastSendPeru = new Date(lastSend.toLocaleString("en-US", { timeZone: config.TIMEZONE }));
                         const lastSendDate = lastSendPeru.toISOString().split("T")[0];
                         if (lastSendDate === hoyPeru) continue;
                     }
