@@ -599,12 +599,36 @@ Cuando un pago es confirmado (automatico por Binance webhook o manual por admin)
 
 ## Bugs Conocidos (Pendientes de Corregir)
 
-### BUG-001: Comprobante imagen no carga en panel admin — CORREGIDO
-- **Donde**: Admin > Gestion Pagos > Pendientes > click "Ver" en comprobante
-- **Sintoma**: Modal muestra "Error al cargar imagen" en vez de la foto del comprobante
-- **Causa**: 3 problemas combinados:
-  1. Directorio `comprobantes/` no se creaba automaticamente antes de escribir archivos
-  2. Rutas de archivo se guardaban relativas (`comprobantes/...`) pero el servidor las leia sin resolver la ruta absoluta
-  3. Los planes custom editados por admin no se consultaban en el endpoint de subir comprobante (solo buscaba en config.PLANES)
-- **Fix**: Ahora se usa `path.join(__dirname, "comprobantes")` para rutas absolutas, se crea el directorio si no existe, y se consultan planes desde DB ademas de config
-- **NOTA**: Los comprobantes subidos ANTES del fix tienen path relativo y seguiran fallando. Nuevos comprobantes funcionaran correctamente.
+### BUG-001: Comprobante/QR imagen no carga en panel — CORREGIDO
+- **Donde**: Admin > Gestion Pagos > Pendientes > click "Ver" en comprobante (y QR de metodos de pago)
+- **Sintoma**: Modal muestra "Error al cargar imagen" en vez de la foto
+- **Causa**: 4 problemas combinados:
+  1. **Auth en img tags**: Los tags `<img src="/api/...">` NO envian el header `Authorization`. El middleware devuelve 401 y la imagen nunca carga. Fix: agregar `?token=...` en la URL de cada `<img>` que apunta a endpoints protegidos.
+  2. **Directorio no existia**: `comprobantes/` no se creaba automaticamente antes de escribir archivos. Fix: `fs.mkdirSync(compDir, { recursive: true })`.
+  3. **Rutas relativas**: Se guardaban como `comprobantes/...` (relativo) pero el servidor podia leerlas desde otro CWD. Fix: usar `path.join(__dirname, "comprobantes")` para rutas absolutas.
+  4. **Planes custom no consultados**: El endpoint de subir comprobante solo buscaba en `config.PLANES`, no en la DB de planes editables. Fix: helper `resolvePlan()` que consulta DB primero.
+- **Archivos modificados**: `index_wsp.js` (endpoints subir/imagen comprobante + QR), `panel.html` (verComprobante, verQrMetodo, actualizarQrPago)
+- **NOTA**: Los comprobantes subidos ANTES del fix tienen path relativo y pueden fallar. Nuevos comprobantes funcionan correctamente.
+
+### BUG-002: Reconnect handler de WSP no reintenta conexion — CORREGIDO
+- **Donde**: `motor_wsp.js` — `connectClientAccount()`
+- **Sintoma**: Despues de una reconexion exitosa, si la cuenta se desconecta de nuevo, se pierde silenciosamente sin reintento
+- **Causa**: El handler de `connection.update` para el socket reconectado (`newSock`) no tenia logica de reconexion, solo limpiaba `clientSessions`
+- **Fix**: Refactorizado en funcion `attachConnectionHandler(currentSock)` que se llama recursivamente para cada nuevo socket
+
+### BUG-003: detenerEnvioPersonal no libera slot — CORREGIDO
+- **Donde**: `motor_wsp.js` — `detenerEnvioPersonal()`
+- **Sintoma**: Despues de cancelar un envio, no se podia iniciar uno nuevo ("already active")
+- **Causa**: `task.cancel()` se llamaba pero no se hacia `delete envioPersonalActivo[userId]`, dejando el slot ocupado hasta que el `finally` del task se ejecutara (podia tardar minutos si estaba en un `delay()`)
+- **Fix**: Agregar `delete envioPersonalActivo[userId]` inmediatamente despues de `task.cancel()`
+
+### BUG-004: enviarASeleccionados sin await — CORREGIDO
+- **Donde**: `index_wsp.js` — endpoints promo send-and-listen (linea ~2091) y resume (linea ~1619)
+- **Sintoma**: Si el envio estaba bloqueado, la API respondia `ok: true` en vez de reportar el error
+- **Causa**: `motor.enviarASeleccionados()` es async y retorna `{ blocked: true }` cuando hay envio activo, pero se llamaba sin `await` — el resultado era un promise flotante que nunca se chequeaba
+- **Fix**: Agregar `await` y chequear `.blocked` antes de responder
+
+### BUG-005: Bot token en documentacion — CORREGIDO
+- **Donde**: `HANDOFF.md` linea 31, `handoff_updated.md` linea 11
+- **Sintoma**: Token del bot de Telegram commiteado en texto plano en archivos de documentacion
+- **Fix**: Reemplazado con referencia a `bot.py` linea 34. Idealmente el token de bot.py tambien deberia moverse a variable de entorno en una futura iteracion.
