@@ -1,8 +1,8 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay, fetchLatestBaileysVersion, Browsers } = require("@whiskeysockets/baileys");
 const path = require("path");
 const fs = require("fs");
-const db = require("./db");
-const config = require("./config");
+const db = require("./db_wsp");
+const config = require("./config_wsp");
 
 const tareasActivas = {};    // { campanaId: { running, cancel } }
 const responderActivos = {}; // { userId: { running, cancel } }
@@ -10,8 +10,18 @@ const clientSessions = {};   // { "userId_nombre": socket }
 const pendingLinks = {};     // { "userId_nombre": { qr, status, error } }
 const reporteInterval = {};  // { userId: intervalId }
 
+// Track last activity per group: { grupoJid: timestamp }
+// Updated by message listeners — used to detect if someone else posted after our spam
+const grupoUltimaActividad = {};
+
 // Limite de envios diarios por cuenta (proteccion anti-ban)
 const LIMITE_ENVIOS_DIARIOS = 500;
+
+// Whole-word matching to avoid partial matches (e.g. 'no' in 'noches')
+function matchWholeWord(text, word) {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('(?:^|\\s|[^a-zA-Z\\u00C0-\\u024F])' + escaped + '(?:$|\\s|[^a-zA-Z\\u00C0-\\u024F])', 'i').test(text) || text === word;
+}
 
 let _botSock = null;
 let _botNombre = "Bot_Principal";
@@ -25,45 +35,102 @@ function getSessionDir(userId, nombre) {
     return path.join(config.SESSIONS_DIR, safe);
 }
 
+// Lock to prevent simultaneous reconnection attempts per account
+const reconnectLocks = {};
+
 async function connectClientAccount(userId, nombre, telefono) {
     const sessionDir = getSessionDir(userId, nombre);
+    const key = `${userId}_${nombre}`;
+    // Prevent parallel reconnection attempts for the same account
+    if (reconnectLocks[key]) {
+        throw new Error("Ya se esta reconectando esta cuenta. Espera un momento.");
+    }
     fs.mkdirSync(sessionDir, { recursive: true });
-    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
 
-    let version;
-    try {
-        const { version: v } = await fetchLatestBaileysVersion();
-        version = v;
-    } catch (e) {}
+    async function createSocket() {
+        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+        let version;
+        try {
+            const { version: v } = await fetchLatestBaileysVersion();
+            version = v;
+        } catch (e) {}
 
-    const sock = makeWASocket({
-        auth: state,
-        logger: require("pino")({ level: "silent" }),
-        browser: Browsers.ubuntu("Chrome"),
-        version,
-        connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 30000,
-        retryRequestDelayMs: 2000,
-    });
-    sock.ev.on("creds.update", saveCreds);
+        const sock = makeWASocket({
+            auth: state,
+            logger: require("pino")({ level: "silent" }),
+            browser: Browsers.ubuntu("Chrome"),
+            version,
+            connectTimeoutMs: 60000,
+            keepAliveIntervalMs: 10000,
+            retryRequestDelayMs: 2000,
+        });
+        sock.ev.on("creds.update", saveCreds);
+        // Track group activity from other users for anti-duplicate spam
+        sock.ev.on("messages.upsert", ({ messages }) => {
+            for (const msg of messages) {
+                const jid = msg.key?.remoteJid;
+                if (jid && jid.endsWith("@g.us") && !msg.key.fromMe && msg.message) {
+                    registrarActividadGrupo(jid);
+                }
+            }
+        });
+        return sock;
+    }
+
+    const sock = await createSocket();
 
     return new Promise((resolve, reject) => {
         let resolved = false;
-        sock.ev.on("connection.update", (update) => {
-            const { connection, lastDisconnect } = update;
-            if (connection === "open" && !resolved) {
-                resolved = true;
-                const key = `${userId}_${nombre}`;
-                clientSessions[key] = sock;
-                resolve(sock);
-            }
-            if (connection === "close" && !resolved) {
-                resolved = true;
-                reject(new Error("Conexion cerrada"));
-            }
-        });
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT = 5;
+
+        function attachConnectionHandler(currentSock) {
+            currentSock.ev.on("connection.update", async (update) => {
+                const { connection, lastDisconnect } = update;
+                if (connection === "open") {
+                    reconnectAttempts = 0;
+                    clientSessions[key] = currentSock;
+                    if (!resolved) {
+                        resolved = true;
+                        resolve(currentSock);
+                    }
+                }
+                if (connection === "close") {
+                    const code = lastDisconnect?.error?.output?.statusCode;
+                    if (clientSessions[key] === currentSock) {
+                        delete clientSessions[key];
+                    }
+                    if (code === 401 || code === DisconnectReason.loggedOut) {
+                        try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
+                        if (!resolved) {
+                            resolved = true;
+                            reject(new Error("Sesion WSP expirada o cerrada. Re-vincula tu cuenta desde Cuentas WSP."));
+                        }
+                    } else if (resolved && reconnectAttempts < MAX_RECONNECT) {
+                        reconnectAttempts++;
+                        console.log(`[WSP] Cuenta ${nombre} desconectada (code ${code}). Reconectando intento ${reconnectAttempts}/${MAX_RECONNECT}...`);
+                        await delay(3000 * reconnectAttempts);
+                        try {
+                            const newSock = await createSocket();
+                            clientSessions[key] = newSock;
+                            attachConnectionHandler(newSock);
+                        } catch (e) {
+                            console.log(`[WSP] Reconexion fallida para ${nombre}: ${e.message}`);
+                        }
+                    } else if (!resolved) {
+                        resolved = true;
+                        reject(new Error("Conexion cerrada" + (code ? ` (code ${code})` : "") + ". Intenta de nuevo."));
+                    }
+                }
+            });
+        }
+        attachConnectionHandler(sock);
         setTimeout(() => {
-            if (!resolved) { resolved = true; reject(new Error("Timeout conectando cuenta")); }
+            if (!resolved) {
+                resolved = true;
+                try { sock.end(); } catch (e) {}
+                reject(new Error("Timeout conectando cuenta (60s)"));
+            }
         }, 60000);
     });
 }
@@ -156,6 +223,7 @@ async function linkAccount(userId, nombre) {
                         clearTimeout(globalTimeout);
                         reject(new Error("Sesion rechazada"));
                     } else {
+                        try { sock.end(); } catch (e) {}
                         linkData.status = "conectando";
                         await delay(3000);
                         tryConnect();
@@ -190,8 +258,16 @@ async function getOrConnectClient(userId, nombre) {
     const key = `${userId}_${nombre}`;
     if (clientSessions[key]) {
         try {
-            if (clientSessions[key].user) return clientSessions[key];
-        } catch (e) {}
+            const sock = clientSessions[key];
+            if (sock.user && sock.ws && sock.ws.readyState === sock.ws.OPEN) {
+                return sock;
+            }
+            // Connection is stale, clean up and reconnect
+            try { sock.end(); } catch (e) {}
+            delete clientSessions[key];
+        } catch (e) {
+            delete clientSessions[key];
+        }
     }
     const sesiones = db.getSesiones(userId);
     const sesion = sesiones.find(s => s.nombre === nombre);
@@ -266,27 +342,68 @@ function escapeRegex(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Track group activity from other users (called from index_wsp.js message listener)
+// Now persists to DB so it survives restarts
+function registrarActividadGrupo(grupoJid) {
+    grupoUltimaActividad[grupoJid] = Date.now();
+    try { db.registrarActividadGrupoDB(grupoJid); } catch (e) {}
+}
+
+// Record when campaign sends to a group (persists to DB)
+function registrarEnvioCampana(campanaId, grupoJid) {
+    db.registrarEnvioCampanaDB(campanaId, grupoJid);
+}
+
+// Check if group had activity from others since our last campaign send
+function grupoTieneActividadNueva(campanaId, grupoJid) {
+    const row = db.getUltimoEnvioCampana(campanaId, grupoJid);
+    if (!row) return true; // never sent = treat as new
+    const envioTime = new Date(row.ultimo_envio + "Z").getTime();
+    // Check in-memory first, then DB for persistence across restarts
+    let ultimaActividad = grupoUltimaActividad[grupoJid];
+    if (ultimaActividad === undefined) {
+        ultimaActividad = db.getUltimaActividadGrupo(grupoJid);
+    }
+    // If we sent recently (last 30 min) from THIS campaign, skip even without activity data
+    const minutesSinceSend = (Date.now() - envioTime) / 60000;
+    if (minutesSinceSend < 30) return false;
+    if (ultimaActividad === undefined) return true; // truly no data — allow send
+    return ultimaActividad > envioTime;
+}
+
 // ============================================================
 // sendToGroup con verificacion de entrega
 // ============================================================
 async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
     const textoFinal = addInvisibleChars(mensaje);
     try {
-        try {
-            const metadata = await sock.groupMetadata(groupJid);
-            if (metadata.announce) {
-                const myJid = sock.user?.id;
-                const myNum = myJid ? myJid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "") : "";
-                const meParticipant = metadata.participants?.find(p => {
-                    const pNum = p.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
-                    return pNum === myNum;
-                });
-                if (!meParticipant || (meParticipant.admin !== "admin" && meParticipant.admin !== "superadmin")) {
-                    return { sent: false, delivered: false, reason: "readonly" };
+        let metadata = null;
+        for (let metaRetry = 0; metaRetry < 2; metaRetry++) {
+            try {
+                metadata = await sock.groupMetadata(groupJid);
+                break;
+            } catch (metaErr) {
+                const errMsg = (metaErr.message || "").toLowerCase();
+                if (errMsg.includes("not-authorized") || errMsg.includes("forbidden") || errMsg.includes("item-not-found") || errMsg.includes("404")) {
+                    return { sent: false, delivered: false, reason: "not_member" };
                 }
+                if (metaRetry === 0) {
+                    await delay(2000);
+                    continue;
+                }
+                return { sent: false, delivered: false, reason: "metadata_error" };
             }
-        } catch (metaErr) {
-            return { sent: false, delivered: false, reason: "not_member" };
+        }
+        if (metadata && metadata.announce) {
+            const myJid = sock.user?.id;
+            const myNum = myJid ? myJid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "") : "";
+            const meParticipant = metadata.participants?.find(p => {
+                const pNum = p.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+                return pNum === myNum;
+            });
+            if (!meParticipant || (meParticipant.admin !== "admin" && meParticipant.admin !== "superadmin")) {
+                return { sent: false, delivered: false, reason: "readonly" };
+            }
         }
 
         let result;
@@ -305,23 +422,23 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
 
         const deliveryResult = await new Promise((resolve) => {
             let done = false;
+            const cleanup = () => { try { sock.ev.off("messages.update", handler); } catch (e) {} };
             const handler = (updates) => {
                 for (const upd of updates) {
                     if (upd.key?.id === msgId) {
                         const status = upd.update?.status;
                         if (status >= 2) {
-                            if (!done) { done = true; resolve({ delivered: true }); }
+                            if (!done) { done = true; cleanup(); resolve({ delivered: true }); }
                         }
                         if (status === 0) {
-                            if (!done) { done = true; resolve({ delivered: false, reason: "rejected" }); }
+                            if (!done) { done = true; cleanup(); resolve({ delivered: false, reason: "rejected" }); }
                         }
                     }
                 }
             };
             sock.ev.on("messages.update", handler);
             setTimeout(() => {
-                try { sock.ev.off("messages.update", handler); } catch (e) {}
-                if (!done) { done = true; resolve({ delivered: false, reason: "pending" }); }
+                if (!done) { done = true; cleanup(); resolve({ delivered: false, reason: "pending" }); }
             }, 15000);
         });
 
@@ -365,8 +482,7 @@ function esGrupoReal(groupId, groupMetadata) {
     if (groupMetadata) {
         if (groupMetadata.isCommunityAnnounce) return false;
         if (groupMetadata.isCommunity && groupMetadata.linkedParent) return false;
-        // Filtrar grupos de solo lectura (solo admins pueden escribir)
-        if (groupMetadata.announce === true) return false;
+        // Nota: NO filtrar announce (solo-admin) aqui — sendToGroup ya verifica si somos admin
         // Filtrar newsletters/canales
         if (groupMetadata.isNewsletter) return false;
     }
@@ -410,9 +526,6 @@ function iniciarCampana(campanaId, userId, botSock) {
             let gruposLinks = db.getGruposCampana(campanaId);
             const conf = db.getCampanaConfig(campanaId);
             const horario = db.getCampanaHorario(campanaId);
-
-            // MEJORA 4: Cargar templates para rotacion
-            const templates = db.getTemplates(userId);
 
             if (!sesionesNombres.length || !gruposLinks.length) {
                 await botSock.sendMessage(userId, { text: "\u26A0 Campana sin cuentas o grupos asignados." });
@@ -459,10 +572,8 @@ function iniciarCampana(campanaId, userId, botSock) {
                 if (horario.hora_inicio !== 0 || horario.hora_fin !== 24) {
                     horarioMsg = `\n\u{1F553} Horario: ${horario.hora_inicio}:00 - ${horario.hora_fin}:00`;
                 }
-                let templateMsg = templates.length ? `\n\u{1F4DD} ${templates.length} template(s) para rotacion` : "";
-
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}${templateMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`,
+                    text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`,
                 });
             } catch (e) {}
 
@@ -525,9 +636,13 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                     const gruposActuales = [...gruposLinks];
 
+                    let consecutiveErrors = 0;
+                    const MAX_CONSECUTIVE_ERRORS = 5;
+
                     for (const grupoLink of gruposActuales) {
                         if (cancelled) break;
 
+                        try {
                         // Verificar limite diario en cada iteracion
                         const enviosActuales = db.getEnviosDiarios(userId, currentSock.nombre);
                         if (enviosActuales >= LIMITE_ENVIOS_DIARIOS) {
@@ -547,51 +662,40 @@ function iniciarCampana(campanaId, userId, botSock) {
                             continue;
                         }
 
-                        // MEJORA 1 + 4: Variar mensaje o usar template rotativo
+                        // Skip group if no new activity since our last send (avoid duplicate spam)
+                        if (!grupoTieneActividadNueva(campanaId, groupJid)) {
+                            console.log(`   [Anti-dup] Grupo ${grupoLink}: sin actividad nueva, saltando`);
+                            continue;
+                        }
+
+                        // Use campaign's own message (don't override with shared templates)
                         let mensajeAEnviar = campana.mensaje;
                         let imagenAEnviar = campana.imagen_path;
 
-                        if (templates.length > 0) {
-                            // Rotar templates aleatoriamente
-                            const tmpl = templates[Math.floor(Math.random() * templates.length)];
-                            mensajeAEnviar = tmpl.mensaje;
-                            if (tmpl.imagen_path) imagenAEnviar = tmpl.imagen_path;
-                        }
-
-                        // Aplicar variacion de sinonimos
                         mensajeAEnviar = variarMensaje(mensajeAEnviar, userId);
 
                         const result = await sendToGroup(currentSock.sock, groupJid, mensajeAEnviar, imagenAEnviar);
 
-                        if (result.sent && result.delivered) {
+                        if (result.sent && (result.delivered || result.reason === "pending" || result.reason === "no_id")) {
+                            registrarEnvioCampana(campanaId, groupJid);
                             db.actualizarStatsCampana(campanaId, 1, 0);
-                            db.registrarEnvio(userId, campanaId, grupoLink, "enviado");
+                            db.registrarEnvio(userId, campanaId, grupoLink, result.delivered ? "enviado" : "enviado_pending");
                             db.actualizarGrupoStats(userId, grupoLink, "enviado");
                             db.incrementarEnvioDiario(userId, currentSock.nombre);
-                            consecutivePending = 0;
-                            if (delayMultiplier > 1.0) {
-                                delayMultiplier = Math.max(1.0, delayMultiplier - 0.2);
-                            }
-                        } else if (result.sent && result.reason === "pending") {
-                            db.actualizarStatsCampana(campanaId, 0, 1);
-                            db.registrarEnvio(userId, campanaId, grupoLink, "pending_no_entregado");
-                            db.actualizarGrupoStats(userId, grupoLink, "pending");
-                            consecutivePending++;
-                            delayMultiplier = Math.min(3.0, delayMultiplier + 0.5);
-
-                            if (consecutivePending >= MAX_CONSECUTIVE_PENDING) {
-                                console.log(`   \u{1F6D1} ${consecutivePending} pending seguidos. Pausando ${PAUSA_RATE_LIMIT}s...`);
-                                try {
-                                    await botSock.sendMessage(userId, {
-                                        text: `\u26A0 *${campana.nombre}*: ${consecutivePending} mensajes pendientes seguidos con '${currentSock.nombre}'.\n\u23F3 Pausando ${Math.round(PAUSA_RATE_LIMIT/60)} min...`,
-                                    });
-                                } catch (e) {}
-                                await delay(PAUSA_RATE_LIMIT * 1000);
+                            consecutiveErrors = 0;
+                            if (result.delivered) {
                                 consecutivePending = 0;
-                                delayMultiplier = 2.0;
+                                if (delayMultiplier > 1.0) {
+                                    delayMultiplier = Math.max(1.0, delayMultiplier - 0.2);
+                                }
+                            } else {
+                                consecutivePending++;
+                                if (consecutivePending >= MAX_CONSECUTIVE_PENDING) {
+                                    delayMultiplier = Math.min(2.0, delayMultiplier + 0.3);
+                                    consecutivePending = 0;
+                                }
                             }
                         } else if (!result.sent) {
-                            // MEJORA 8: Deteccion de ban
                             if (result.reason === "ban_detected") {
                                 console.log(`   \u{1F6A8} BAN DETECTADO en cuenta '${currentSock.nombre}'`);
                                 db.marcarCuentaBaneada(userId, currentSock.nombre);
@@ -600,10 +704,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                                         text: `\u{1F6A8} *BAN DETECTADO*\n\nLa cuenta *${currentSock.nombre}* ha sido baneada/desconectada por WhatsApp.\n\nSe ha marcado como baneada y no se usara mas.\n\nSigue con las demas cuentas si hay.`,
                                     });
                                 } catch (e) {}
-                                break; // Salir del loop de grupos para esta cuenta
+                                break;
                             }
 
-                            // MEJORA 6: Auto-reconexion si se desconecto
                             if (result.reason === "disconnected") {
                                 console.log(`   [Reconexion] Intentando reconectar '${currentSock.nombre}'...`);
                                 try {
@@ -620,7 +723,8 @@ function iniciarCampana(campanaId, userId, botSock) {
                                             text: `\u2705 Cuenta '${currentSock.nombre}' reconectada. Continuando...`,
                                         });
                                     } catch (e) {}
-                                    continue; // Reintentar este grupo
+                                    consecutiveErrors = 0;
+                                    continue;
                                 } else {
                                     try {
                                         await botSock.sendMessage(userId, {
@@ -631,7 +735,6 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 }
                             }
 
-                            // Eliminar grupo si es error permanente
                             if (result.reason === "readonly" || result.reason === "not_member" || result.reason === "forbidden") {
                                 db.eliminarGrupoPorLink(userId, grupoLink);
                                 db.eliminarGrupoCampana(campanaId, grupoLink);
@@ -640,18 +743,54 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 gruposEliminados.push(grupoLink);
                                 const idx = gruposLinks.indexOf(grupoLink);
                                 if (idx !== -1) gruposLinks.splice(idx, 1);
+                            } else if (result.reason === "metadata_error") {
+                                db.registrarEnvio(userId, campanaId, grupoLink, "error_temporal");
+                                db.actualizarGrupoStats(userId, grupoLink, "fallido");
+                                console.log(`[Campana] Grupo ${grupoLink}: error temporal de metadata, NO eliminado`);
                             }
                             db.actualizarStatsCampana(campanaId, 0, 1);
+                            consecutiveErrors++;
                         } else {
                             db.actualizarStatsCampana(campanaId, 0, 1);
                             db.registrarEnvio(userId, campanaId, grupoLink, result.reason || "error");
                             db.actualizarGrupoStats(userId, grupoLink, "fallido");
+                            consecutiveErrors++;
+                        }
+
+                        // Too many consecutive errors: pause and try to reconnect
+                        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                            console.log(`   [ErrorRecovery] ${consecutiveErrors} errores consecutivos, pausando 60s...`);
+                            try {
+                                await botSock.sendMessage(userId, {
+                                    text: `\u26A0 *${campana.nombre}*: ${consecutiveErrors} errores seguidos. Pausando 60s para recuperarse...`,
+                                });
+                            } catch (e) {}
+                            await delay(60000);
+                            const newSock = await reconectarCuenta(userId, currentSock.nombre);
+                            if (newSock) {
+                                currentSock.sock = newSock;
+                                socks[si].sock = newSock;
+                            }
+                            consecutiveErrors = 0;
                         }
 
                         // Espera entre grupos (adaptativa)
                         const baseWait = randomDelay(conf.intervalo_min, conf.intervalo_max);
                         const actualWait = Math.round(baseWait * delayMultiplier);
                         await delay(actualWait * 1000);
+
+                        } catch (groupErr) {
+                            console.error(`   [Campana] Error inesperado en grupo ${grupoLink}: ${groupErr.message}`);
+                            db.actualizarStatsCampana(campanaId, 0, 1);
+                            db.registrarEnvio(userId, campanaId, grupoLink, "error_inesperado");
+                            consecutiveErrors++;
+                            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                                console.log(`   [ErrorRecovery] Demasiados errores, pausando 60s...`);
+                                await delay(60000);
+                                consecutiveErrors = 0;
+                            }
+                            await delay(5000);
+                        }
                     }
 
                     // Espera entre cuentas (2+)
@@ -687,6 +826,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                         ? `\u23F0 Esperando 10 min...`
                         : `\u23F0 Esperando ${conf.espera_ciclo || 600}s...`;
 
+                    // Mark campaign as "en_reposo" during the pause
+                    db.setCampanaEstadoDetalle(campanaId, 'en_reposo');
+
                     try {
                         await botSock.sendMessage(userId, {
                             text: `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c.enviados} env | \u274C ${c.errores} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`,
@@ -699,6 +841,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                         await delay((conf.espera_ciclo || 600) * 1000);
                     }
                     delayMultiplier = Math.max(1.0, delayMultiplier - 0.5);
+
+                    // Back to active after pause ends
+                    if (!cancelled) db.setCampanaEstadoDetalle(campanaId, 'activa');
                 }
             }
         } catch (e) {
@@ -793,6 +938,13 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
             if (!socks.length) return;
 
             const keywordsLower = palabras.map(p => p.toLowerCase().trim());
+            const autoReglas = db.getAutoRespuestas(userId);
+            const autoReglasMap = {};
+            for (const r of autoReglas) {
+                const kw = (r.palabra || "").toLowerCase().trim();
+                if (kw) autoReglasMap[kw] = (r.respuesta || "").split("|").map(s => s.trim()).filter(s => s);
+            }
+            const autoRespCounters = {};
 
             for (const { nombre, sock } of socks) {
                 sock.ev.on("messages.upsert", async ({ messages }) => {
@@ -806,9 +958,33 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
                             || msg.message.extendedTextMessage?.text
                             || "";
                         const lower = text.toLowerCase();
+                        const pushName = msg.pushName || "";
 
+                        // Check auto_respuestas rules first (varied responses)
+                        let matched = false;
+                        for (const [kw, respuestas] of Object.entries(autoReglasMap)) {
+                            if (matchWholeWord(lower, kw) && respuestas.length > 0) {
+                                if (!autoRespCounters[kw]) autoRespCounters[kw] = 0;
+                                const idx = autoRespCounters[kw] % respuestas.length;
+                                autoRespCounters[kw]++;
+                                let respText = respuestas[idx]
+                                    .replace(/\{usuario\}/gi, pushName || contacto)
+                                    .replace(/\{contacto\}/gi, contacto);
+                                try {
+                                    await sock.sendMessage(jid, { text: respText }, { quoted: msg });
+                                    db.registrarRespuesta(userId, jid, kw);
+                                } catch (e) {
+                                    console.error(`Responder error: ${e.message}`);
+                                }
+                                matched = true;
+                                break;
+                            }
+                        }
+                        if (matched) continue;
+
+                        // Fallback to simple keyword match
                         for (const kw of keywordsLower) {
-                            if (lower.includes(kw)) {
+                            if (matchWholeWord(lower, kw)) {
                                 try {
                                     await sock.sendMessage(jid, {
                                         text: `Hola! Te recomiendo contactar a ${contacto} \u{1F4F1}`,
@@ -882,8 +1058,13 @@ async function listarChatsPersonales(botSock) {
     return chats;
 }
 
-async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
-    if (envioPersonalActivo[userId]) return false;
+async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, batchSize, delayMinutes) {
+    if (envioPersonalActivo[userId]) return { blocked: true, error: "Ya hay un envio personal activo. Espera que termine o cancelalo." };
+    if (!batchSize) {
+        const envioConfig = db.getUserEnvioConfig(userId);
+        batchSize = envioConfig.lote_tamano || 0;
+        delayMinutes = batchSize ? Math.ceil((envioConfig.lote_pausa_seg || 300) / 60) : 0;
+    }
 
     let cancelled = false;
     const task = {
@@ -896,6 +1077,20 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
         try {
             // Obtener la lista de chats personales
             const chats = await listarChatsPersonales(botSock);
+            // Incluir numeros manuales subidos por el usuario
+            if (cuenta) {
+                try {
+                    const manuales = db.getNumerosManuales(userId, cuenta);
+                    const existingJids = new Set(chats.map(c => c.jid));
+                    for (const m of manuales) {
+                        if (!existingJids.has(m.jid)) {
+                            chats.push({ jid: m.jid, nombre: m.nombre || m.numero, numero: m.numero, manual: true });
+                        }
+                    }
+                } catch (e) {
+                    console.error(`Error cargando numeros manuales: ${e.message}`);
+                }
+            }
             if (!chats.length) {
                 try {
                     await botSock.sendMessage(userId, {
@@ -908,11 +1103,14 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
             const total = chats.length;
             let enviados = 0;
             let errores = 0;
-            const DELAY_ENTRE_ENVIOS = 10000; // 10 segundos
+            // Random cooldown between 3-8 seconds
+            const DELAY_MIN_P = 3000;
+            const DELAY_MAX_P = 8000;
 
+            const batchInfo = batchSize ? `\n\u{1F4E6} Lotes de ${batchSize} mensajes, pausa ${delayMinutes} min entre lotes` : '';
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 10 segundos entre cada envio\n\u23F3 Tiempo estimado: ~${Math.round(total * 10 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`,
+                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round(total * 5.5 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`,
                 });
             } catch (e) {}
 
@@ -931,10 +1129,13 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
                     }
                     enviados++;
                     db.registrarEnvio(userId, 0, chat.jid, "enviado_personal");
+                    if (_promoListeners[userId]) _promoListeners[userId].promoSentJids.add(chat.jid);
                 } catch (e) {
                     errores++;
                     console.error(`Error enviando a ${chat.numero}: ${e.message}`);
                     db.registrarEnvio(userId, 0, chat.jid, "error_personal");
+                    // Add to retry queue (Mejora 4)
+                    try { db.agregarRetryQueue(userId, chat.jid, mensaje, imagenPath); } catch (re) {}
                 }
 
                 // Progreso cada 10 envios
@@ -946,9 +1147,23 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
                     } catch (e) {}
                 }
 
-                // Esperar 10 segundos entre cada envio
+                // Batch pause: if batch_size configured, pause every N messages
+                if (batchSize && enviados > 0 && enviados % batchSize === 0 && !cancelled) {
+                    try {
+                        await botSock.sendMessage(userId, {
+                            text: `\u23F8 Pausa de lote: ${enviados}/${total} enviados. Esperando ${delayMinutes} min...`,
+                        });
+                    } catch (e) {}
+                    // Save progress in case of cancel during pause
+                    db.guardarProgresoEnvio(userId, 'personal_' + userId, enviados, total, mensaje, chats.map(c => c.jid), 'Chats personales');
+                    await delay((delayMinutes || 5) * 60 * 1000);
+                    if (cancelled) break;
+                }
+
+                // Esperar entre cada envio
                 if (!cancelled) {
-                    await delay(DELAY_ENTRE_ENVIOS);
+                    const cooldownP = DELAY_MIN_P + Math.floor(Math.random() * (DELAY_MAX_P - DELAY_MIN_P));
+                    await delay(cooldownP);
                 }
             }
 
@@ -974,72 +1189,193 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
     return true;
 }
 
-async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock) {
-    if (envioPersonalActivo[userId]) return false;
+let _taskIdCounter = 0;
+async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes, grupoNombre, grupoJid, startIndex) {
+    if (envioPersonalActivo[userId]) return { blocked: true, error: "Ya hay un envio personal/miembros activo. Espera que termine o cancelalo." };
 
     let cancelled = false;
+    const taskId = ++_taskIdCounter;
     const task = {
         running: true,
+        taskId,
         cancel: () => { cancelled = true; },
     };
     envioPersonalActivo[userId] = task;
+
+    batchSize = parseInt(batchSize) || 0;
+    delayMinutes = parseInt(delayMinutes) || 5;
+    startIndex = parseInt(startIndex) || 0;
 
     (async () => {
         try {
             const total = jids.length;
             let enviados = 0;
             let errores = 0;
-            const DELAY_ENTRE_ENVIOS = 10000; // 10 segundos
+            // Random cooldown between 3-8 seconds (more human-like)
+            const DELAY_MIN = 3000;
+            const DELAY_MAX = 8000;
+            const DELAY_ENTRE_LOTES = batchSize ? delayMinutes * 60 * 1000 : 0;
+            const displayName = grupoNombre || grupoJid || "seleccionados";
 
+            const batchInfo = batchSize ? `\n📦 Lotes: ${batchSize} por lote, pausa ${delayMinutes} min entre lotes` : "";
+            const resumeInfo = startIndex > 0 ? `\n🔄 Reanudando desde #${startIndex + 1}` : "";
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} contacto(s) seleccionados\n\u23F1 Delay: 10 segundos entre cada envio\n\u23F3 Tiempo estimado: ~${Math.round(total * 10 / 60)} min`,
+                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 5.5 / 60)} min`,
                 });
             } catch (e) {}
 
-            for (const jid of jids) {
-                if (cancelled) break;
+            // Save progress at the start so we can resume if interrupted
+            if (grupoJid) {
+                db.guardarProgresoEnvio(userId, grupoJid, startIndex, total, mensaje, jids, grupoNombre);
+            }
+
+            for (let i = startIndex; i < jids.length; i++) {
+                if (cancelled) {
+                    // Save progress for resume
+                    if (grupoJid) {
+                        db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
+                    }
+                    break;
+                }
+                const jid = jids[i];
+
+                // Pausa entre lotes (anti-ban)
+                if (batchSize && enviados > 0 && enviados % batchSize === 0) {
+                    // Save progress before pause
+                    if (grupoJid) {
+                        db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
+                    }
+                    try {
+                        await botSock.sendMessage(userId, {
+                            text: `⏸ Lote de ${batchSize} completado (${i}/${total}). Pausando ${delayMinutes} minutos...`,
+                        });
+                    } catch (e) {}
+                    await delay(DELAY_ENTRE_LOTES);
+                    if (cancelled) {
+                        if (grupoJid) {
+                            db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
+                        }
+                        break;
+                    }
+                    try {
+                        await botSock.sendMessage(userId, {
+                            text: `▶️ Reanudando envio... (${i}/${total})`,
+                        });
+                    } catch (e) {}
+                }
 
                 try {
+                    // Verify number has WhatsApp before sending
+                    const numToCheck = jid.replace(/@s\.whatsapp\.net$/, "");
+                    try {
+                        const [onWa] = await botSock.onWhatsApp(jid);
+                        if (!onWa || !onWa.exists) {
+                            console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid} NO TIENE WSP, saltando`);
+                            errores++;
+                            db.registrarEnvio(userId, 0, jid, "sin_whatsapp", grupoNombre, "personal");
+                            continue;
+                        }
+                    } catch (verifyErr) {
+                        // If verification fails, continue sending anyway
+                        console.log(`[EnvioMiembros] Verificacion WSP fallo para ${jid}: ${verifyErr.message}, enviando igual...`);
+                    }
+
+                    // Check if number is in individual blacklist
+                    if (db.estaEnBlacklistNumero(userId, numToCheck)) {
+                        console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid} en blacklist, saltando`);
+                        continue;
+                    }
+
                     const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
+                    console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid}`);
+                    let result;
                     if (imagenPath && fs.existsSync(imagenPath)) {
-                        await botSock.sendMessage(jid, {
+                        result = await botSock.sendMessage(jid, {
                             image: fs.readFileSync(imagenPath),
                             caption: textoFinal,
                         });
                     } else {
-                        await botSock.sendMessage(jid, { text: textoFinal });
+                        result = await botSock.sendMessage(jid, { text: textoFinal });
                     }
+
+                    // Track delivery status
+                    const msgId = result?.key?.id;
+                    let estadoEntrega = null;
+                    if (msgId) {
+                        try {
+                            const deliveryResult = await new Promise((resolve) => {
+                                let done = false;
+                                const cleanup = () => { try { botSock.ev.off("messages.update", handler); } catch (e) {} };
+                                const handler = (updates) => {
+                                    for (const upd of updates) {
+                                        if (upd.key?.id === msgId) {
+                                            const status = upd.update?.status;
+                                            if (status >= 3) { if (!done) { done = true; cleanup(); resolve("leido"); } }
+                                            else if (status >= 2) { if (!done) { done = true; cleanup(); resolve("entregado"); } }
+                                            else if (status === 0) { if (!done) { done = true; cleanup(); resolve("rechazado"); } }
+                                        }
+                                    }
+                                };
+                                botSock.ev.on("messages.update", handler);
+                                setTimeout(() => {
+                                    cleanup();
+                                    if (!done) { done = true; resolve("pendiente"); }
+                                }, 8000);
+                            });
+                            estadoEntrega = deliveryResult;
+                        } catch (e) {}
+                    }
+
+                    console.log(`[EnvioMiembros]   OK → key.id=${msgId || "?"} entrega=${estadoEntrega || "?"}`);
                     enviados++;
-                    db.registrarEnvio(userId, 0, jid, "enviado_personal");
+                    db.registrarEnvio(userId, 0, jid, "enviado_personal", grupoNombre, "personal", estadoEntrega, (mensaje || "").substring(0, 50));
+                    if (_promoListeners[userId]) _promoListeners[userId].promoSentJids.add(jid);
                 } catch (e) {
+                    console.log(`[EnvioMiembros]   ERROR → ${e.message}`);
                     errores++;
-                    db.registrarEnvio(userId, 0, jid, "error_personal");
+                    db.registrarEnvio(userId, 0, jid, "error_personal", grupoNombre, "personal");
+                    // Add to retry queue (Mejora 4)
+                    try { db.agregarRetryQueue(userId, jid, mensaje, imagenPath); } catch (re) {}
                 }
 
-                if (enviados % 10 === 0 && enviados > 0) {
+                // Save progress periodically (every 5 sends)
+                if (grupoJid && (enviados + errores) % 5 === 0) {
+                    db.guardarProgresoEnvio(userId, grupoJid, i + 1, total, mensaje, jids, grupoNombre);
+                }
+
+                if (enviados % 10 === 0 && enviados > 0 && !(batchSize && enviados % batchSize === 0)) {
                     try {
                         await botSock.sendMessage(userId, {
-                            text: `\u{1F4E8} Progreso: ${enviados}/${total} enviados (${errores} errores)...`,
+                            text: `\u{1F4E8} Progreso: ${i + 1}/${total} (${enviados} ok, ${errores} err)...`,
                         });
                     } catch (e) {}
                 }
 
                 if (!cancelled) {
-                    await delay(DELAY_ENTRE_ENVIOS);
+                    // Random cooldown between 3-8 seconds (human-like)
+                    const cooldown = DELAY_MIN + Math.floor(Math.random() * (DELAY_MAX - DELAY_MIN));
+                    await delay(cooldown);
                 }
+            }
+
+            // If completed (not cancelled), remove progress
+            if (!cancelled && grupoJid) {
+                db.eliminarProgresoEnvio(userId, grupoJid);
             }
 
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u2705 *ENVIO PERSONAL COMPLETADO*\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Cancelado por el usuario" : ""}`,
+                    text: `\u2705 *ENVIO A MIEMBROS ${cancelled ? "PAUSADO" : "COMPLETADO"}*\n📂 Grupo: ${displayName}\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Pausado — puedes reanudar desde el panel" : ""}`,
                 });
             } catch (e) {}
 
         } catch (e) {
             console.error(`Error envio personal ${userId}: ${e.message}`);
         } finally {
-            delete envioPersonalActivo[userId];
+            if (envioPersonalActivo[userId]?.taskId === taskId) {
+                delete envioPersonalActivo[userId];
+            }
         }
     })();
 
@@ -1054,6 +1390,263 @@ function detenerEnvioPersonal(userId) {
         return true;
     }
     return false;
+}
+
+// ============================================================
+// Scheduled member sends checker
+// ============================================================
+let _schedulerInterval = null;
+
+function iniciarSchedulerMiembros(botSock) {
+    if (_schedulerInterval) return;
+    // Check every minute for scheduled sends
+    _schedulerInterval = setInterval(async () => {
+        try {
+            const now = new Date();
+            const peruTime = new Date(now.toLocaleString("en-US", { timeZone: config.TIMEZONE }));
+            const horaActual = String(peruTime.getHours()).padStart(2, "0") + ":" + String(peruTime.getMinutes()).padStart(2, "0");
+            const diaActual = peruTime.getDay();
+
+            // Get all active scheduled sends from all users
+            const allUsers = db.getTodosUsuarios();
+            for (const user of allUsers) {
+                const programados = db.getProgramadosMiembros(user.wsp_id);
+                for (const prog of programados) {
+                    if (!prog.activo) continue;
+                    const diasPermitidos = (prog.dias_semana || "0,1,2,3,4,5,6").split(",").map(Number);
+                    if (!diasPermitidos.includes(diaActual)) continue;
+                    if (prog.hora_envio !== horaActual) continue;
+                    // Check if already sent today
+                    if (prog.ultimo_envio) {
+                        const lastSend = new Date(prog.ultimo_envio + "Z");
+                        const hoyPeru = peruTime.toISOString().split("T")[0];
+                        const lastSendPeru = new Date(lastSend.toLocaleString("en-US", { timeZone: config.TIMEZONE }));
+                        const lastSendDate = lastSendPeru.toISOString().split("T")[0];
+                        if (lastSendDate === hoyPeru) continue;
+                    }
+                    // Execute the scheduled send
+                    console.log(`[Scheduler] Ejecutando envio programado #${prog.id} para ${user.wsp_id}`);
+                    db.actualizarUltimoEnvioProgramado(prog.id);
+                    try {
+                        let sock;
+                        if (prog.cuenta) {
+                            sock = await getOrConnectClient(user.wsp_id, prog.cuenta);
+                        } else if (botSock) {
+                            sock = botSock;
+                        } else continue;
+
+                        const meta = await sock.groupMetadata(prog.grupo_jid);
+                        const rawParticipants = meta.participants || [];
+                        const myJid = sock.user?.id || "";
+                        const myNum = myJid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+                        const blNumeros = db.getBlacklistNumeros(user.wsp_id);
+                        const blSet = new Set(blNumeros.map(b => b.numero));
+                        const seen = new Set();
+                        const jids = [];
+                        for (const p of rawParticipants) {
+                            let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
+                            if (!jid || jid.endsWith("@lid")) continue;
+                            if (jid.includes(":")) {
+                                const suffix = jid.endsWith("@s.whatsapp.net") ? "@s.whatsapp.net" : "@lid";
+                                jid = jid.split(":")[0] + suffix;
+                            }
+                            const num = jid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+                            if (!num || !/^\d{7,15}$/.test(num) || num === myNum || blSet.has(num) || seen.has(num)) continue;
+                            if (prog.country_code && !num.startsWith(prog.country_code)) continue;
+                            if (prog.admin_filter === "admin" && p.admin !== "admin" && p.admin !== "superadmin") continue;
+                            if (prog.admin_filter === "noadmin" && (p.admin === "admin" || p.admin === "superadmin")) continue;
+                            seen.add(num);
+                            jids.push(jid);
+                        }
+                        if (jids.length) {
+                            const grupoNombre = meta.subject || prog.grupo_nombre || prog.grupo_jid;
+                            enviarASeleccionados(user.wsp_id, jids, prog.mensaje, prog.imagen_path, sock, prog.batch_size || 0, prog.delay_minutes || 5, grupoNombre, prog.grupo_jid, 0);
+                        }
+                    } catch (e) {
+                        console.error(`[Scheduler] Error envio programado #${prog.id}: ${e.message}`);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error(`[Scheduler] Error general: ${e.message}`);
+        }
+    }, 60000);
+}
+
+// --- PROMO ESCUCHA (Envio Interactivo) ---
+const _promoListeners = {}; // { userId: { handlers: [], cancel: fn, respondedJids, startTime } }
+
+function iniciarPromoEscucha(userId, sock, palabraAceptar, palabraRechazar, respAceptar, respRechazar, respAceptarImagen, respRechazarImagen) {
+    if (!_promoListeners[userId]) {
+        _promoListeners[userId] = { handlers: [], cancelled: false, respondedJids: new Set(), promoSentJids: new Set(), startTime: Date.now() };
+        try {
+            const existing = db.getPromoRespuestas(userId);
+            for (const r of existing) {
+                if (r.jid) _promoListeners[userId].respondedJids.add(r.jid);
+            }
+        } catch (e) {}
+        try {
+            const sentJids = db.getPromoSentJids(userId);
+            for (const jid of sentJids) {
+                if (jid) _promoListeners[userId].promoSentJids.add(jid);
+            }
+        } catch (e) {}
+    }
+    const state = _promoListeners[userId];
+    const acLower = (palabraAceptar || 'si').toLowerCase().trim();
+    const reLower = (palabraRechazar || 'no').toLowerCase().trim();
+
+    // Load multi-keywords if configured (Mejora 7)
+    let extraKeywords = [];
+    try { extraKeywords = db.getPromoKeywords(userId); } catch (e) {}
+
+    const handler = async ({ messages }) => {
+        if (state.cancelled) return;
+        for (const msg of messages) {
+            if (!msg.message || msg.key.fromMe) continue;
+            const jid = msg.key.remoteJid;
+            if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") continue;
+            if (state.respondedJids.has(jid)) continue;
+            if (state.promoSentJids.size > 0 && !state.promoSentJids.has(jid)) continue;
+
+            const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase().trim();
+            const pushName = msg.pushName || "";
+            const numero = jid.replace(/@s\.whatsapp\.net$/, "");
+
+            // Check extra keywords first (Mejora 7)
+            let matched = false;
+            for (const kw of extraKeywords) {
+                if (matchWholeWord(text, kw.palabra.toLowerCase().trim())) {
+                    state.respondedJids.add(jid);
+                    db.registrarPromoRespuesta(userId, jid, numero, pushName, kw.tipo || 'aceptado');
+                    db.agregarLog(userId, 'promo', `${numero} (${pushName}) respondio "${text}" -> keyword "${kw.palabra}"`);
+                    console.log(`[Promo] ${numero} (${pushName}) keyword "${kw.palabra}" con "${text}" (respuesta unica)`);
+                    if (kw.respuesta_imagen && fs.existsSync(kw.respuesta_imagen)) {
+                        try { await sock.sendMessage(jid, { image: fs.readFileSync(kw.respuesta_imagen), caption: kw.respuesta_texto || '' }); } catch (e) {}
+                    } else if (kw.respuesta_texto) {
+                        try { await sock.sendMessage(jid, { text: kw.respuesta_texto }); } catch (e) {}
+                    }
+                    matched = true;
+                    break;
+                }
+            }
+            if (matched) continue;
+
+            // Default accept/reject keywords
+            if (matchWholeWord(text, acLower)) {
+                state.respondedJids.add(jid);
+                db.registrarPromoRespuesta(userId, jid, numero, pushName, 'aceptado');
+                db.agregarLog(userId, 'promo', `${numero} (${pushName}) ACEPTO con "${text}"`);
+                console.log(`[Promo] ${numero} (${pushName}) ACEPTO con "${text}" (respuesta unica)`);
+                // Mejora 8: respond with image if configured
+                if (respAceptarImagen && fs.existsSync(respAceptarImagen)) {
+                    try { await sock.sendMessage(jid, { image: fs.readFileSync(respAceptarImagen), caption: respAceptar || '' }); } catch (e) {}
+                } else if (respAceptar) {
+                    try { await sock.sendMessage(jid, { text: respAceptar }); } catch (e) {}
+                }
+            } else if (matchWholeWord(text, reLower)) {
+                state.respondedJids.add(jid);
+                db.registrarPromoRespuesta(userId, jid, numero, pushName, 'rechazado');
+                db.agregarLog(userId, 'promo', `${numero} (${pushName}) RECHAZO con "${text}"`);
+                console.log(`[Promo] ${numero} (${pushName}) RECHAZO con "${text}" (respuesta unica)`);
+                if (respRechazarImagen && fs.existsSync(respRechazarImagen)) {
+                    try { await sock.sendMessage(jid, { image: fs.readFileSync(respRechazarImagen), caption: respRechazar || '' }); } catch (e) {}
+                } else if (respRechazar) {
+                    try { await sock.sendMessage(jid, { text: respRechazar }); } catch (e) {}
+                }
+            }
+        }
+    };
+    sock.ev.on("messages.upsert", handler);
+    state.handlers.push({ sock, handler });
+}
+
+function detenerPromoEscuchaFn(userId) {
+    const state = _promoListeners[userId];
+    if (state) {
+        state.cancelled = true;
+        for (const { sock, handler } of state.handlers) {
+            try { sock.ev.off("messages.upsert", handler); } catch (e) {}
+        }
+        delete _promoListeners[userId];
+    }
+}
+
+// --- RETRY QUEUE PROCESSOR (Mejora 4) ---
+let _retryInterval = null;
+function iniciarRetryProcessor() {
+    if (_retryInterval) return;
+    _retryInterval = setInterval(async () => {
+        try {
+            const pendientes = db.getRetryPendientesGlobal();
+            for (const item of pendientes) {
+                try {
+                    const sesiones = db.getSesiones(item.user_id);
+                    if (!sesiones.length) continue;
+                    const sock = await getOrConnectClient(item.user_id, sesiones[0].nombre);
+                    if (!sock) continue;
+
+                    if (item.imagen_path && fs.existsSync(item.imagen_path)) {
+                        await sock.sendMessage(item.jid, { image: fs.readFileSync(item.imagen_path), caption: item.mensaje || '' });
+                    } else {
+                        await sock.sendMessage(item.jid, { text: item.mensaje });
+                    }
+                    db.actualizarRetry(item.id, item.intentos + 1, 'enviado', '');
+                    db.agregarLog(item.user_id, 'retry', `Retry exitoso para ${item.jid} (intento ${item.intentos + 1})`);
+                    console.log(`[Retry] Enviado a ${item.jid} (intento ${item.intentos + 1})`);
+                    await delay(2000);
+                } catch (e) {
+                    const newIntentos = item.intentos + 1;
+                    const estado = newIntentos >= item.max_intentos ? 'fallido' : 'pendiente';
+                    db.actualizarRetry(item.id, newIntentos, estado, e.message);
+                    db.agregarLog(item.user_id, 'retry_error', `Retry fallido para ${item.jid}: ${e.message} (intento ${newIntentos})`);
+                    console.log(`[Retry] Error ${item.jid}: ${e.message} (intento ${newIntentos}/${item.max_intentos})`);
+                }
+            }
+        } catch (e) {
+            console.error(`[Retry] Error general: ${e.message}`);
+        }
+    }, 60000); // Check every minute
+}
+
+// --- PROMO TIMEOUT CHECKER (Mejora 3) ---
+let _timeoutInterval = null;
+function iniciarPromoTimeoutChecker() {
+    if (_timeoutInterval) return;
+    _timeoutInterval = setInterval(async () => {
+        try {
+            // Check all active promo listeners for timeouts
+            for (const userId of Object.keys(_promoListeners)) {
+                const state = _promoListeners[userId];
+                if (!state || state.cancelled) continue;
+
+                const timeoutConfig = db.getPromoTimeout(userId);
+                if (!timeoutConfig) continue;
+
+                const timeoutMs = (timeoutConfig.timeout_horas || 24) * 3600 * 1000;
+                const elapsed = Date.now() - state.startTime;
+
+                if (elapsed >= timeoutMs) {
+                    // Mark unresponded contacts and optionally send reminders
+                    const escucha = db.getPromoEscucha(userId);
+                    if (timeoutConfig.recordatorio_activo && timeoutConfig.mensaje_recordatorio && state.handlers.length > 0) {
+                        const sock = state.handlers[0].sock;
+                        // Get all contacts that received the promo but didn't respond
+                        // We don't have a list of who received it, so we just log the timeout
+                        db.agregarLog(userId, 'promo_timeout', `Promo timeout alcanzado (${timeoutConfig.timeout_horas}h). Respondieron: ${state.respondedJids.size}`);
+                    }
+
+                    // Auto-stop after timeout
+                    db.agregarLog(userId, 'promo_timeout', `Escucha promo detenida automaticamente por timeout (${timeoutConfig.timeout_horas}h)`);
+                    console.log(`[Promo] Timeout para ${userId} (${timeoutConfig.timeout_horas}h). Deteniendo escucha.`);
+                    db.detenerPromoEscucha(userId);
+                    detenerPromoEscuchaFn(userId);
+                }
+            }
+        } catch (e) {
+            console.error(`[PromoTimeout] Error: ${e.message}`);
+        }
+    }, 60000); // Check every minute
 }
 
 module.exports = {
@@ -1086,4 +1679,12 @@ module.exports = {
     enviarAPersonales,
     enviarASeleccionados,
     detenerEnvioPersonal,
+    sendToGroup,
+    resolveGroupJid,
+    registrarActividadGrupo,
+    iniciarSchedulerMiembros,
+    iniciarPromoEscucha,
+    detenerPromoEscucha: detenerPromoEscuchaFn,
+    iniciarRetryProcessor,
+    iniciarPromoTimeoutChecker,
 };

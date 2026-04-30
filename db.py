@@ -132,6 +132,14 @@ async def init_db():
         """)
         await db.commit()
 
+    # Migrations
+    async with _connect() as db:
+        try:
+            await db.execute("ALTER TABLE responder_keywords ADD COLUMN respuesta TEXT DEFAULT ''")
+            await db.commit()
+        except Exception:
+            pass
+
 # ─────────────────────────────────────────
 #   USUARIOS
 # ─────────────────────────────────────────
@@ -443,6 +451,16 @@ async def agregar_grupo_campana(campana_id, grupo_link):
         )
         await db.commit()
 
+async def limpiar_sesiones_campana(campana_id):
+    async with _connect() as db:
+        await db.execute("DELETE FROM campana_sesiones WHERE campana_id=?", (campana_id,))
+        await db.commit()
+
+async def limpiar_grupos_campana(campana_id):
+    async with _connect() as db:
+        await db.execute("DELETE FROM campana_grupos WHERE campana_id=?", (campana_id,))
+        await db.commit()
+
 # ─────────────────────────────────────────
 #   CONFIGURACIÓN DE CAMPAÑA (INTERVALO)
 # ─────────────────────────────────────────
@@ -525,15 +543,31 @@ async def get_keywords(user_id):
         ) as cur:
             return [r[0] for r in await cur.fetchall()]
 
-async def agregar_keywords(user_id, palabras):
+async def agregar_keywords(user_id, palabras, respuesta=""):
     async with _connect() as db:
         for p in palabras:
             p = p.strip().lower()
             if p:
                 await db.execute(
-                    "INSERT OR IGNORE INTO responder_keywords (user_id, palabra) VALUES (?,?)",
-                    (user_id, p)
+                    "INSERT OR IGNORE INTO responder_keywords (user_id, palabra, respuesta) VALUES (?,?,?)",
+                    (user_id, p, respuesta)
                 )
+        await db.commit()
+
+async def get_keywords_full(user_id):
+    async with _connect() as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, palabra, respuesta FROM responder_keywords WHERE user_id=?", (user_id,)
+        ) as cur:
+            return await cur.fetchall()
+
+async def eliminar_keyword(kw_id, user_id=None):
+    async with _connect() as db:
+        if user_id:
+            await db.execute("DELETE FROM responder_keywords WHERE id=? AND user_id=?", (kw_id, user_id))
+        else:
+            await db.execute("DELETE FROM responder_keywords WHERE id=?", (kw_id,))
         await db.commit()
 
 async def limpiar_keywords(user_id):
@@ -647,4 +681,13 @@ async def get_dashboard(user_id):
         "responder_activo": bool(config and config['activo']),
         "keywords": len(keywords),
     }
+
+
+async def get_all_users_with_active_campaigns():
+    """Retorna lista de (user_id, campana_id) de campanas activas."""
+    async with _connect() as db:
+        async with db.execute(
+            "SELECT user_id, id FROM campanas WHERE activa=1"
+        ) as cur:
+            return await cur.fetchall()
 

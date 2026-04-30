@@ -1,0 +1,17 @@
+{
+  "name": "botspam1-wsp",
+  "version": "1.0.0",
+  "description": "WhatsApp spam bot engine",
+  "main": "index_wsp.js",
+  "scripts": {
+    "start": "node index_wsp.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.16",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^11.0.0",
+    "pino": "^9.0.0",
+    "qrcode": "^1.5.4",
+    "web-push": "^3.6.7"
+  }
+}
