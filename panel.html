@@ -4166,7 +4166,8 @@ function actualizarQrPago(){
   const metodo=_metodosPagoCache.find(m=>m.id==metodoId);
   const wrap=$('pagoQrWrap');
   if(metodo&&metodo.qr_imagen){
-    $('pagoQrImg').src='/api/metodos_pago/qr?id='+metodo.id;
+    const tk=localStorage.getItem('panel_token')||'';
+    $('pagoQrImg').src='/api/metodos_pago/qr?id='+metodo.id+'&token='+encodeURIComponent(tk);
     wrap.style.display='';
   }else{
     wrap.style.display='none';
@@ -4333,7 +4334,8 @@ async function adminPagosTab(tab){
 }
 
 function verComprobante(id){
-  showModal(`<h3>📷 Comprobante #${id}</h3><div style="text-align:center"><img src="/api/comprobante/imagen?id=${id}&admin=${userId}" style="max-width:100%;max-height:70vh;border-radius:8px" onerror="this.src='';this.alt='Error al cargar imagen'"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
+  const token=localStorage.getItem('panel_token')||'';
+  showModal(`<h3>📷 Comprobante #${id}</h3><div style="text-align:center"><img src="/api/comprobante/imagen?id=${id}&admin=${userId}&token=${encodeURIComponent(token)}" style="max-width:100%;max-height:70vh;border-radius:8px" onerror="this.src='';this.alt='Error al cargar imagen'"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
 }
 
 async function aprobarComp(id){
@@ -4426,7 +4428,8 @@ async function eliminarQrMetodo(id){
 }
 
 function verQrMetodo(id){
-  showModal(`<h3>📷 QR del Metodo de Pago</h3><div style="text-align:center;padding:20px"><img src="/api/metodos_pago/qr?id=${id}" style="max-width:100%;max-height:70vh;border-radius:12px;border:3px solid var(--accent)" onerror="this.alt='Error al cargar QR';this.style.display='none'"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
+  const token=localStorage.getItem('panel_token')||'';
+  showModal(`<h3>📷 QR del Metodo de Pago</h3><div style="text-align:center;padding:20px"><img src="/api/metodos_pago/qr?id=${id}&token=${encodeURIComponent(token)}" style="max-width:100%;max-height:70vh;border-radius:12px;border:3px solid var(--accent)" onerror="this.alt='Error al cargar QR';this.style.display='none'"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
 }
 
 // --- EDITAR PLANES ---

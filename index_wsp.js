@@ -3021,7 +3021,9 @@ poll();
                 if (!checkAdmin(fields.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 if (!fields.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
                 if (fileBuffer && fileBuffer.length > 0) {
-                    const fname = `comprobantes/qr_metodo_${fields.id}_${Date.now()}.${fileExt}`;
+                    const qrDir = path.join(__dirname, "comprobantes");
+                    if (!fs.existsSync(qrDir)) fs.mkdirSync(qrDir, { recursive: true });
+                    const fname = path.join(qrDir, `qr_metodo_${fields.id}_${Date.now()}.${fileExt}`);
                     fs.writeFileSync(fname, fileBuffer);
                     db.setMetodoPagoQr(parseInt(fields.id), fname);
                 }
@@ -3036,8 +3038,10 @@ poll();
                 const metodo = db.getMetodoPago(id);
                 if (!metodo || !metodo.qr_imagen) { res.writeHead(404); return res.end("QR no encontrado"); }
                 try {
-                    const imgBuf = fs.readFileSync(metodo.qr_imagen);
-                    const ext = metodo.qr_imagen.split(".").pop().toLowerCase();
+                    let qrPath = metodo.qr_imagen;
+                    if (!path.isAbsolute(qrPath)) qrPath = path.join(__dirname, qrPath);
+                    const imgBuf = fs.readFileSync(qrPath);
+                    const ext = qrPath.split(".").pop().toLowerCase();
                     const mimeMap = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
                     res.writeHead(200, { "Content-Type": mimeMap[ext] || "image/jpeg" });
                     return res.end(imgBuf);
