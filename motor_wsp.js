@@ -500,21 +500,15 @@ function dentroDeHorario(campanaId) {
 // CAMPANA ENGINE con las 10 mejoras
 // ============================================================
 
-// Safe notification helper — handles null botSock and resolves userId to JID
+// Safe notification helper — sends WhatsApp notification with timeout
 async function notificarUsuario(botSock, userId, text) {
     if (!botSock) return;
     try {
-        // If userId looks like a JID already, use it directly
-        let jid = userId;
-        if (!userId.includes("@")) {
-            const results = await botSock.onWhatsApp(userId + "@s.whatsapp.net");
-            if (results && results.length > 0) {
-                jid = results[0].jid;
-            } else {
-                jid = userId + "@s.whatsapp.net";
-            }
-        }
-        await botSock.sendMessage(jid, { text });
+        const jid = userId.includes("@") ? userId : userId + "@s.whatsapp.net";
+        await Promise.race([
+            botSock.sendMessage(jid, { text }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout 10s")), 10000))
+        ]);
     } catch (e) {
         console.log(`[Notif] No se pudo notificar a ${userId}: ${e.message}`);
     }
