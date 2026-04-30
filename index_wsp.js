@@ -1588,7 +1588,7 @@ poll();
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const maxG = db.getMaxGrupos(userId);
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, max_grupos: maxG }));
+                return res.end(JSON.stringify({ ok: true, limites: { max_grupos: maxG, max_envios_dia: 999999 } }));
             }
 
             // ─── ENVIOS CHART ───
@@ -1829,10 +1829,13 @@ poll();
                     }
                     const meta = await grupSock.groupMetadata(body.grupo);
                     const grupoNombre = meta.subject || body.grupo;
-                    const jids = (meta.participants || [])
+                    let jids = (meta.participants || [])
                         .map(p => (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id)
                         .filter(j => j && j.endsWith("@s.whatsapp.net"));
-                    if (!jids.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros en el grupo" })); }
+                    if (body.filtro_pais) {
+                        jids = jids.filter(j => j.replace(/@s\.whatsapp\.net$/, '').startsWith(body.filtro_pais));
+                    }
+                    if (!jids.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros en el grupo" + (body.filtro_pais ? " con codigo +" + body.filtro_pais : "") })); }
                     motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, 0, 5, grupoNombre, body.grupo);
                     db.agregarLog(body.u, 'promo', `Promo enviada a ${jids.length} miembros de ${grupoNombre} + escucha activada`);
                     res.writeHead(200);

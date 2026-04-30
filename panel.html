@@ -7,6 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#7c3aed">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="J&D Bot">
@@ -733,6 +734,13 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Cancelar Envio</button>
       </div>
       <div class="form-group">
+        <label>📋 Cargar mensaje guardado</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select id="epPlantillaSelect" style="flex:1" onchange="cargarPlantillaEn('epPlantillaSelect','epMensaje')"><option value="">-- Escribir manualmente --</option></select>
+          <button class="btn btn-outline btn-sm" onclick="refreshPlantillasSelect('epPlantillaSelect')">🔄</button>
+        </div>
+      </div>
+      <div class="form-group">
         <label>Mensaje a enviar</label>
         <textarea id="epMensaje" rows="4" placeholder="Escribe el mensaje que se enviara a tus contactos..."></textarea>
       </div>
@@ -784,6 +792,13 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <span id="emPaisCount" style="color:var(--text2);font-size:13px"></span>
         <button class="btn btn-success" onclick="exportarMiembrosCSV()">📥 Exportar CSV</button>
         <button class="btn btn-primary" onclick="exportarMiembrosTXT()">📄 Exportar TXT</button>
+      </div>
+      <div class="form-group">
+        <label>📋 Cargar mensaje guardado</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select id="emPlantillaSelect" style="flex:1" onchange="cargarPlantillaEn('emPlantillaSelect','emMensaje')"><option value="">-- Escribir manualmente --</option></select>
+          <button class="btn btn-outline btn-sm" onclick="refreshPlantillasSelect('emPlantillaSelect')">🔄</button>
+        </div>
       </div>
       <div class="form-group">
         <label>Mensaje DM (dejar vacio si solo quieres agregar miembros)</label>
@@ -988,6 +1003,13 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           </div>
         </div>
         <div class="form-group">
+          <label>📋 Cargar mensaje guardado</label>
+          <div style="display:flex;gap:10px;align-items:center">
+            <select id="promoPlantillaSelect" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" onchange="cargarPlantillaEn('promoPlantillaSelect','promoMensaje')"><option value="">-- Escribir manualmente --</option></select>
+            <button class="btn btn-outline btn-sm" onclick="refreshPlantillasSelect('promoPlantillaSelect')">🔄</button>
+          </div>
+        </div>
+        <div class="form-group">
           <label>📝 Mensaje de la promo</label>
           <textarea id="promoMensaje" rows="3" placeholder="Ej: Hola! Tenemos una oferta especial para ti. Responde SI si te interesa o NO si no." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:14px;resize:vertical"></textarea>
         </div>
@@ -1007,7 +1029,14 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           </div>
           <div class="form-group">
             <label>👥 Grupo (de donde tomar miembros)</label>
-            <select id="promoGrupo" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%"><option value="">-- Carga grupos primero --</option></select>
+            <select id="promoGrupo" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%" onchange="cargarMiembrosPromo()"><option value="">-- Carga grupos primero --</option></select>
+          </div>
+          <div class="form-group">
+            <label>🌍 Filtrar miembros por pais</label>
+            <div style="display:flex;gap:10px;align-items:center">
+              <select id="promoPais" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" onchange="filtrarMiembrosPromo()"><option value="">-- Todos los paises --</option></select>
+              <span id="promoPaisCount" style="color:var(--text2);font-size:13px"></span>
+            </div>
           </div>
         </div>
         <div class="form-group">
@@ -1741,7 +1770,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){}};
+    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoPlantillaSelect')},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){}};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -1836,9 +1865,14 @@ async function loadTgGrupos(){
   const r=await api('/api/tg/grupos?u='+userId);
   if(!r.ok){$('tgGruposContent').innerHTML='<div class="empty-state"><p>Error al cargar grupos</p></div>';return}
   const g=r.grupos||[];
+  _tgGruposData=g;
   if(!g.length){$('tgGruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos registrados.<br>Usa el formulario de arriba para agregar.</p></div>';return}
+  // Populate seccion filter dropdown
+  const secciones=[...new Set(g.map(x=>x.seccion).filter(Boolean))];
+  const secSelect=$('tgGrupoSeccionFilter');
+  if(secSelect){secSelect.innerHTML='<option value="">Todas las secciones</option>';secciones.forEach(s=>{secSelect.innerHTML+=`<option value="${esc(s)}">${esc(s)}</option>`})}
   let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+')</h3></div><table><thead><tr><th>#</th><th>Link del Grupo</th><th>Acciones</th></tr></thead><tbody>';
-  g.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><a href="${esc(x.link)}" target="_blank" style="color:var(--accent2)">${esc(x.link)}</a></td><td><button class="btn btn-danger btn-sm" onclick="delTgGrupoPanel('${encodeURIComponent(x.link)}')">🗑</button></td></tr>`});
+  g.forEach((x,i)=>{const name=x.nombre||x.link||'';const sec=x.seccion||'';h+=`<tr data-name="${esc(name)}" data-seccion="${esc(sec)}"><td>${i+1}</td><td><a href="${esc(x.link)}" target="_blank" style="color:var(--accent2)">${esc(x.link)}</a></td><td><button class="btn btn-danger btn-sm" onclick="delTgGrupoPanel('${encodeURIComponent(x.link)}')">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('tgGruposContent').innerHTML=h;
 }
 async function addTgGrupoPanel(){
@@ -2595,6 +2629,30 @@ async function ejecutarAutoJoin(){
 
 // --- ENVIO PERSONAL ---
 let epCuentaActual='';
+// --- Cargar mensajes/plantillas guardados en un select ---
+async function refreshPlantillasSelect(selectId){
+  const sel=$(selectId);if(!sel)return;
+  sel.innerHTML='<option value="">-- Escribir manualmente --</option>';
+  const [mr,pr]=await Promise.all([api('/api/mensajes?u='+userId),api('/api/plantillas?u='+userId)]);
+  const msgs=(mr.ok?mr.mensajes:[])||[];
+  const plts=(pr.ok?pr.plantillas:[])||[];
+  if(msgs.length){
+    const og=document.createElement('optgroup');og.label='Mensajes';
+    msgs.forEach(m=>{const o=document.createElement('option');o.value='msg:'+m.id;o.textContent='✉ '+m.nombre;o.dataset.texto=m.texto||'';og.appendChild(o)});
+    sel.appendChild(og);
+  }
+  if(plts.length){
+    const og=document.createElement('optgroup');og.label='Plantillas';
+    plts.forEach(p=>{const o=document.createElement('option');o.value='plt:'+p.id;o.textContent='📋 '+p.nombre;o.dataset.texto=p.mensaje||'';og.appendChild(o)});
+    sel.appendChild(og);
+  }
+}
+function cargarPlantillaEn(selectId,textareaId){
+  const sel=$(selectId);if(!sel||!sel.value)return;
+  const opt=sel.options[sel.selectedIndex];
+  if(opt&&opt.dataset.texto){$(textareaId).value=opt.dataset.texto}
+}
+
 async function loadEnvioPersonal(){
   const r=await api('/api/sesiones?u='+userId);
   const sel=$('epCuenta');
@@ -2604,6 +2662,7 @@ async function loadEnvioPersonal(){
       sel.innerHTML+=`<option value="${s.nombre}">${s.nombre} (${s.telefono||'?'})</option>`;
     });
   }
+  refreshPlantillasSelect('epPlantillaSelect');
 }
 async function cargarChatsPersonales(){
   const cuenta=$('epCuenta').value;
@@ -2699,6 +2758,7 @@ async function loadEnvioMiembros(){
   }
   $('emGrupo').innerHTML='<option value="">-- Carga grupos primero --</option>';
   $('emDestino').innerHTML='<option value="">-- Opcional: grupo destino --</option>';
+  refreshPlantillasSelect('emPlantillaSelect');
   // Check for pending resume
   checkEnvioProgreso();
   // Load scheduled member sends
@@ -3157,6 +3217,8 @@ async function enviarPromoTodoEnUno(){
   if(tipoEnvio==='miembros'){
     payload.grupo=$('promoGrupo').value;
     payload.grupo_cuenta=$('promoGrupoCuenta').value;
+    const paisFilter=$('promoPais')?.value||null;
+    if(paisFilter)payload.filtro_pais=paisFilter;
   }
   if(imagenB64){payload.imagen_b64=imagenB64;payload.imagen_nombre=imagenNombre}
   if(respAceptarImgB64)payload.resp_aceptar_imagen_b64=respAceptarImgB64;
@@ -3296,6 +3358,38 @@ async function cargarGruposPromoMiembros(forceRefresh){
     const cacheMsg=r.from_cache?' (desde cache)':' (actualizado)';
     toast(grupos.length+' grupos cargados'+cacheMsg,'success');
   }else{toast('Error: '+(r.error||''),'error')}
+}
+let _promoMiembrosCache=[];
+async function cargarMiembrosPromo(){
+  const grupoJid=$('promoGrupo').value;
+  const cuenta=$('promoGrupoCuenta').value;
+  if(!grupoJid){$('promoPais').innerHTML='<option value="">-- Todos los paises --</option>';$('promoPaisCount').textContent='';_promoMiembrosCache=[];return}
+  const r=await api('/api/miembros_grupo?u='+userId+'&grupo='+encodeURIComponent(grupoJid)+'&cuenta='+encodeURIComponent(cuenta));
+  if(!r.ok){toast('Error cargando miembros','error');_promoMiembrosCache=[];return}
+  const m=r.miembros||[];
+  _promoMiembrosCache=m;
+  const countryCounts={};
+  m.forEach(x=>{
+    const num=x.numero||(x.id?x.id.split('@')[0]:'');
+    const cc=detectCountryCode(num);
+    if(cc){countryCounts[cc]=(countryCounts[cc]||0)+1;}
+  });
+  const sel=$('promoPais');
+  sel.innerHTML='<option value="">Todos los paises ('+m.length+' miembros)</option>';
+  Object.keys(countryCounts).sort((a,b)=>countryCounts[b]-countryCounts[a]).forEach(cc=>{
+    const name=COUNTRY_NAMES[cc]||'';
+    sel.innerHTML+=`<option value="${cc}">+${cc} ${name} (${countryCounts[cc]} miembros)</option>`;
+  });
+  $('promoPaisCount').textContent=m.length+' miembros total';
+}
+function filtrarMiembrosPromo(){
+  const cc=$('promoPais').value;
+  if(!cc){$('promoPaisCount').textContent=_promoMiembrosCache.length+' miembros total';return}
+  const filtered=_promoMiembrosCache.filter(x=>{
+    const num=x.numero||(x.id?x.id.split('@')[0]:'');
+    return num.startsWith(cc);
+  });
+  $('promoPaisCount').textContent=filtered.length+' de '+_promoMiembrosCache.length+' miembros';
 }
 
 // --- LOGS (Mejora 6) ---
@@ -3559,6 +3653,8 @@ async function loadLimites(){
     const maxE=l.max_envios_dia>=999999?'Ilimitado':l.max_envios_dia;
     const maxG=l.max_grupos>=999999?'Ilimitado':l.max_grupos;
     $('limitesInfo').innerHTML=`<p>📤 Max envios/dia: <b style="color:var(--accent2)">${maxE}</b></p><p style="margin-top:5px">🌐 Max grupos: <b style="color:var(--accent2)">${maxG}</b></p>`;
+  }else{
+    $('limitesInfo').innerHTML='<p style="color:var(--text2)">No disponible</p>';
   }
 }
 
@@ -3763,7 +3859,7 @@ async function loadDmDashboard(){
     h+='<div class="table-wrap"><div class="table-header"><h3>📊 Top Grupos (por envios DM)</h3></div>';
     h+='<table><thead><tr><th>Grupo</th><th>Total</th><th>OK</th><th>Error</th><th>Tasa</th></tr></thead><tbody>';
     porGrupo.forEach(g=>{
-      const tasa=g.total?(g.ok/g.total*100).toFixed(0):0;
+      const tasa=g.total?((g.ok||0)/g.total*100).toFixed(0):0;
       h+=`<tr><td style="font-size:12px">${esc(g.grupo_nombre||'?')}</td><td>${g.total}</td><td style="color:var(--success)">${g.ok}</td><td style="color:var(--danger)">${g.err}</td><td>${tasa}%</td></tr>`;
     });
     h+='</tbody></table></div>';
@@ -3928,13 +4024,13 @@ async function loadDashboardExtended(){
   // Weekly summary
   if(r.semana){
     const s=r.semana;
-    const tasa=s.total?(s.ok/s.total*100).toFixed(1):0;
+    const tasa=s.total?((s.ok||0)/s.total*100).toFixed(1):0;
     $('resumenSemanal').innerHTML=`<p>📤 Total: <b style="color:var(--accent2)">${s.total||0}</b></p><p style="margin-top:5px">✅ Exitosos: <b style="color:var(--success)">${s.ok||0}</b></p><p style="margin-top:5px">❌ Fallidos: <b style="color:var(--danger)">${s.err||0}</b></p><p style="margin-top:5px">📊 Tasa: <b style="color:var(--accent2)">${tasa}%</b></p>`;
   }
   // Monthly summary
   if(r.mes){
     const m=r.mes;
-    const tasa=m.total?(m.ok/m.total*100).toFixed(1):0;
+    const tasa=m.total?((m.ok||0)/m.total*100).toFixed(1):0;
     $('resumenMensual').innerHTML=`<p>📤 Total: <b style="color:var(--accent2)">${m.total||0}</b></p><p style="margin-top:5px">✅ Exitosos: <b style="color:var(--success)">${m.ok||0}</b></p><p style="margin-top:5px">❌ Fallidos: <b style="color:var(--danger)">${m.err||0}</b></p><p style="margin-top:5px">📊 Tasa: <b style="color:var(--accent2)">${tasa}%</b></p>`;
   }
   // Success rate donut
@@ -3942,21 +4038,35 @@ async function loadDashboardExtended(){
   if(tasaCanvas&&r.semana){
     if(_tasaChartInstance){_tasaChartInstance.destroy();_tasaChartInstance=null}
     const ok=r.semana.ok||0,err=r.semana.err||0;
-    _tasaChartInstance=new Chart(tasaCanvas,{type:'doughnut',data:{labels:['Exitosos','Fallidos'],datasets:[{data:[ok,err],backgroundColor:['rgba(0,184,148,0.8)','rgba(233,69,96,0.8)'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:textColor}}}}});
+    if(ok===0&&err===0){
+      tasaCanvas.parentElement.querySelector('.empty-donut')?.remove();
+      const msg=document.createElement('div');msg.className='empty-donut';msg.style.cssText='text-align:center;padding:20px;color:var(--text2);font-size:13px';msg.textContent='Sin datos de envios esta semana';
+      tasaCanvas.style.display='none';tasaCanvas.parentElement.appendChild(msg);
+    }else{
+      tasaCanvas.style.display='';tasaCanvas.parentElement.querySelector('.empty-donut')?.remove();
+      _tasaChartInstance=new Chart(tasaCanvas,{type:'doughnut',data:{labels:['Exitosos','Fallidos'],datasets:[{data:[ok,err],backgroundColor:['rgba(0,184,148,0.8)','rgba(233,69,96,0.8)'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:textColor}}}}});
+    }
   }
   // Activity by hour
   const horaCanvas=$('horaChart');
-  if(horaCanvas&&r.porHora&&r.porHora.length){
-    if(_horaChartInstance){_horaChartInstance.destroy();_horaChartInstance=null}
-    const labels=Array.from({length:24},(_,i)=>String(i).padStart(2,'0')+':00');
-    const data=Array(24).fill(0);
-    r.porHora.forEach(h=>{const idx=parseInt(h.hora);if(idx>=0&&idx<24)data[idx]=h.total});
-    _horaChartInstance=new Chart(horaCanvas,{type:'line',data:{labels,datasets:[{label:'Envios',data,borderColor:'rgba(108,92,231,0.8)',backgroundColor:'rgba(108,92,231,0.1)',fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:textColor}}},scales:{x:{ticks:{color:textColor,maxTicksLimit:12}},y:{ticks:{color:textColor},beginAtZero:true}}}});
+  if(horaCanvas){
+    if(!r.porHora||!r.porHora.length){
+      horaCanvas.parentElement.querySelector('.empty-hora')?.remove();
+      const msg=document.createElement('div');msg.className='empty-hora';msg.style.cssText='text-align:center;padding:20px;color:var(--text2);font-size:13px';msg.textContent='Sin actividad esta semana';
+      horaCanvas.style.display='none';horaCanvas.parentElement.appendChild(msg);
+    }else{
+      horaCanvas.style.display='';horaCanvas.parentElement.querySelector('.empty-hora')?.remove();
+      if(_horaChartInstance){_horaChartInstance.destroy();_horaChartInstance=null}
+      const labels=Array.from({length:24},(_,i)=>String(i).padStart(2,'0')+':00');
+      const data=Array(24).fill(0);
+      r.porHora.forEach(h=>{const idx=parseInt(h.hora);if(idx>=0&&idx<24)data[idx]=h.total});
+      _horaChartInstance=new Chart(horaCanvas,{type:'line',data:{labels,datasets:[{label:'Envios',data,borderColor:'rgba(108,92,231,0.8)',backgroundColor:'rgba(108,92,231,0.1)',fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:textColor}}},scales:{x:{ticks:{color:textColor,maxTicksLimit:12}},y:{ticks:{color:textColor},beginAtZero:true}}}});
+    }
   }
   // Top groups
   if(r.topGrupos&&r.topGrupos.length){
     let h='';r.topGrupos.forEach((g,i)=>{
-      const tasa=g.total?(g.ok/g.total*100).toFixed(0):0;
+      const tasa=g.total?((g.ok||0)/g.total*100).toFixed(0):0;
       h+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)"><span style="flex:1">${i+1}. ${esc(g.grupo_nombre||'?')}</span><span style="color:var(--accent2);font-weight:bold">${g.total}</span><span style="margin-left:8px;color:${parseInt(tasa)>=70?'var(--success)':'var(--danger)'}">${tasa}%</span></div>`;
     });
     $('topGruposContent').innerHTML=h;
