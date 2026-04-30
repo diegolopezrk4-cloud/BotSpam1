@@ -937,6 +937,23 @@ poll();
                     req._authToken = authToken;
                 }
 
+                // ═══ ACCOUNT VERIFICATION CHECK ═══
+                if (req._authUser && !(isLocalhost && hasInternalHeader)) {
+                    const SKIP_VERIFY_ENDPOINTS = [
+                        "/api/panel_logout", "/api/verificar_cuenta", "/api/check_membresia",
+                        "/api/dashboard", "/api/notificaciones"
+                    ];
+                    if (!SKIP_VERIFY_ENDPOINTS.includes(url.pathname)) {
+                        const isVerified = db.isUsuarioVerificado(req._authUser);
+                        const u2 = db.getUsuario(req._authUser) || db.findUserByNumber(req._authUser);
+                        const isAdminUser2 = u2 && u2.es_admin === 1;
+                        if (!isVerified && !isAdminUser2) {
+                            res.writeHead(403);
+                            return res.end(JSON.stringify({ ok: false, error: "cuenta_no_verificada", msg: "Tu cuenta no esta verificada. Usa /registro en el bot de Telegram para obtener tu codigo de verificacion." }));
+                        }
+                    }
+                }
+
                 // ═══ MEMBERSHIP VALIDATION ═══
                 // Skip membership check for internal service calls
                 if (!(isLocalhost && hasInternalHeader)) {

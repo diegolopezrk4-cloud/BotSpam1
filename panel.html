@@ -1695,6 +1695,12 @@ async function api(path,opts){
     }
     if(r.status===403){
       const d=await r.json().catch(()=>({}));
+      if(d.error==='cuenta_no_verificada'){
+        toast('Tu cuenta no esta verificada. Usa /registro en el bot de Telegram.','error');
+        localStorage.setItem('panel_verificado','0');
+        showVerificationAlert();
+        return{ok:false,error:d.error};
+      }
       if(d.error==='membresia_requerida'){
         toast('Necesitas una membresia activa para usar esta funcion.','error');
       }
@@ -5567,7 +5573,7 @@ window.addEventListener('load',()=>{
   if(uid&&token){
     userId=uid;
     if(savedPlatform)currentPlatform=savedPlatform;
-    const isVerified=localStorage.getItem('panel_verificado')!=='0';
+    const isVerified=localStorage.getItem('panel_verificado')==='1';
     if(!isVerified){showVerificationAlert()}else{showApp()}
   } else if(savedPlatform){
     currentPlatform=savedPlatform;
