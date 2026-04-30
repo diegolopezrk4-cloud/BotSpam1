@@ -667,6 +667,8 @@ poll();
                     const ua = req.headers["user-agent"] || "";
                     db.createSession(body.telegram_id, token, ip, ua);
                     r.token = token;
+                    const sellerInfo = db.isSellerUser(body.telegram_id);
+                    r.es_seller = !!sellerInfo;
                 }
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
@@ -740,6 +742,8 @@ poll();
                 const userId = url.searchParams.get("u");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const r = db.checkMembresia(userId);
+                const sellerInfo = db.isSellerUser(userId);
+                r.es_seller = !!sellerInfo;
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
             }
@@ -2065,6 +2069,96 @@ poll();
                 if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const data = db.getDashboardExtended(uid);
                 res.writeHead(200); return res.end(JSON.stringify({ ok: true, ...data }));
+            }
+
+            // ─── SELLERS (Revendedores) ENDPOINTS ───
+            // GET /api/admin/sellers — Lista todos los sellers (solo admin)
+            if (url.pathname === "/api/admin/sellers" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const sellers = db.getTodosSellers();
+                const sellersWithStats = sellers.map(s => {
+                    const usados = db.getSellerInvitesCount(s.id, s.periodo);
+                    const invites = db.getSellerInvites(s.id);
+                    return { ...s, invites_usados: usados, invites_total: invites.length, invites };
+                });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, sellers: sellersWithStats }));
+            }
+            // POST /api/admin/sellers/crear — Crear seller (solo admin)
+            if (url.pathname === "/api/admin/sellers/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                db.crearSeller(body.telegram_id, body.nombre || '', body.max_invites || 10, body.periodo || 'semanal', body.plan_dias || 7, body.plan_tipo || 'semanal');
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            // POST /api/admin/sellers/editar — Editar seller (solo admin)
+            if (url.pathname === "/api/admin/sellers/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.editarSeller(body.id, body.max_invites || 10, body.periodo || 'semanal', body.plan_dias || 7, body.plan_tipo || 'semanal', body.activo !== undefined ? body.activo : true);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            // POST /api/admin/sellers/eliminar — Eliminar seller (solo admin)
+            if (url.pathname === "/api/admin/sellers/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                db.eliminarSeller(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            // GET /api/seller/info — Info del seller actual
+            if (url.pathname === "/api/seller/info" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const seller = db.isSellerUser(uid);
+                if (!seller) { res.writeHead(200); return res.end(JSON.stringify({ ok: true, es_seller: false })); }
+                const usados = db.getSellerInvitesCount(seller.id, seller.periodo);
+                const invites = db.getSellerInvites(seller.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, es_seller: true, seller: { ...seller, invites_usados: usados }, invites }));
+            }
+            // POST /api/seller/invitar — Seller activa membresia a un usuario
+            if (url.pathname === "/api/seller/invitar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const seller = db.isSellerUser(body.u);
+                if (!seller) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No eres seller autorizado" })); }
+                if (!body.invitado_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta invitado_id" })); }
+                const usados = db.getSellerInvitesCount(seller.id, seller.periodo);
+                if (usados >= seller.max_invites) {
+                    const periodoLabel = seller.periodo === 'semanal' ? 'esta semana' : 'este mes';
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: `Limite alcanzado: ${usados}/${seller.max_invites} invitaciones ${periodoLabel}` }));
+                }
+                let user = db.getUsuario(body.invitado_id);
+                if (!user) user = db.findUserByNumber(body.invitado_id);
+                if (!user) {
+                    db.crearUsuario(body.invitado_id, body.invitado_nombre || "");
+                    user = db.getUsuario(body.invitado_id);
+                }
+                if (seller.plan_tipo === "permanente") {
+                    db.getDb().prepare("UPDATE usuarios SET plan='permanente', activo=1, fecha_expira=NULL WHERE wsp_id=?").run(user.wsp_id);
+                } else {
+                    db.activarMembresia(user.wsp_id, seller.plan_dias);
+                }
+                db.registrarSellerInvite(seller.id, body.invitado_id, seller.plan_dias, seller.plan_tipo);
+                // Sync to TG
+                try {
+                    const http = require("http");
+                    const syncData = JSON.stringify({ telegram_id: body.invitado_id, dias: seller.plan_dias, plan: seller.plan_tipo, username: body.invitado_nombre || "" });
+                    const syncReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                    syncReq.on("error", () => {});
+                    syncReq.write(syncData);
+                    syncReq.end();
+                } catch (_) {}
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, invites_usados: usados + 1, max_invites: seller.max_invites }));
             }
 
             // Endpoint no encontrado

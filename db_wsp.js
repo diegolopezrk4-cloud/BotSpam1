@@ -506,6 +506,31 @@ function init() {
             PRIMARY KEY(user_id, semana)
         );
     `);
+    // --- SELLERS (Revendedores) ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS sellers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id TEXT NOT NULL UNIQUE,
+            nombre TEXT DEFAULT '',
+            max_invites INTEGER DEFAULT 10,
+            periodo TEXT DEFAULT 'semanal',
+            plan_dias INTEGER DEFAULT 7,
+            plan_tipo TEXT DEFAULT 'semanal',
+            activo INTEGER DEFAULT 1,
+            fecha_creado TEXT DEFAULT (datetime('now'))
+        );
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS seller_invites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            seller_id INTEGER NOT NULL,
+            invitado_telegram_id TEXT NOT NULL,
+            plan_dias INTEGER DEFAULT 7,
+            plan_tipo TEXT DEFAULT 'semanal',
+            fecha_invitacion TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(seller_id) REFERENCES sellers(id)
+        );
+    `);
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -1862,6 +1887,59 @@ function getDashboardExtended(userId) {
     return { semana: semana || {}, mes: mes || {}, porHora, topGrupos };
 }
 
+// --- SELLERS (Revendedores) ---
+function crearSeller(telegramId, nombre, maxInvites, periodo, planDias, planTipo) {
+    db.prepare(`INSERT OR REPLACE INTO sellers (telegram_id, nombre, max_invites, periodo, plan_dias, plan_tipo, activo, fecha_creado)
+        VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'))`).run(String(telegramId), nombre || '', maxInvites || 10, periodo || 'semanal', planDias || 7, planTipo || 'semanal');
+}
+
+function getSeller(telegramId) {
+    return db.prepare("SELECT * FROM sellers WHERE telegram_id = ?").get(String(telegramId));
+}
+
+function getSellerById(id) {
+    return db.prepare("SELECT * FROM sellers WHERE id = ?").get(id);
+}
+
+function getTodosSellers() {
+    return db.prepare("SELECT * FROM sellers ORDER BY fecha_creado DESC").all();
+}
+
+function editarSeller(id, maxInvites, periodo, planDias, planTipo, activo) {
+    db.prepare("UPDATE sellers SET max_invites = ?, periodo = ?, plan_dias = ?, plan_tipo = ?, activo = ? WHERE id = ?")
+        .run(maxInvites, periodo, planDias, planTipo, activo ? 1 : 0, id);
+}
+
+function eliminarSeller(id) {
+    db.prepare("DELETE FROM seller_invites WHERE seller_id = ?").run(id);
+    db.prepare("DELETE FROM sellers WHERE id = ?").run(id);
+}
+
+function getSellerInvitesCount(sellerId, periodo) {
+    let desde;
+    if (periodo === 'semanal') {
+        desde = new Date(Date.now() - 7 * 86400000).toISOString();
+    } else {
+        desde = new Date(Date.now() - 30 * 86400000).toISOString();
+    }
+    const row = db.prepare("SELECT COUNT(*) as total FROM seller_invites WHERE seller_id = ? AND fecha_invitacion >= ?").get(sellerId, desde);
+    return row ? row.total : 0;
+}
+
+function getSellerInvites(sellerId) {
+    return db.prepare("SELECT * FROM seller_invites WHERE seller_id = ? ORDER BY fecha_invitacion DESC").all(sellerId);
+}
+
+function registrarSellerInvite(sellerId, invitadoTelegramId, planDias, planTipo) {
+    db.prepare("INSERT INTO seller_invites (seller_id, invitado_telegram_id, plan_dias, plan_tipo) VALUES (?, ?, ?, ?)")
+        .run(sellerId, String(invitadoTelegramId), planDias || 7, planTipo || 'semanal');
+}
+
+function isSellerUser(telegramId) {
+    const s = db.prepare("SELECT * FROM sellers WHERE telegram_id = ? AND activo = 1").get(String(telegramId));
+    return s || null;
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -1932,4 +2010,7 @@ module.exports = {
     exportFullConfig, importFullConfig,
     // Dashboard extended
     getDashboardExtended,
+    // Sellers (Revendedores)
+    crearSeller, getSeller, getSellerById, getTodosSellers, editarSeller, eliminarSeller,
+    getSellerInvitesCount, getSellerInvites, registrarSellerInvite, isSellerUser,
 };

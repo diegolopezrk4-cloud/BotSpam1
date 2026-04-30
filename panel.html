@@ -442,8 +442,11 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div class="nav-group">General</div>
       <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas y DMs</span></a>
       <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
+      <div class="nav-group seller-only" style="display:none">Seller</div>
+      <a href="#" data-section="sellerpanel" class="seller-only" style="display:none"><span class="icon">🏪</span><span>Panel Seller</span></a>
       <div class="nav-group admin-only" style="display:none">Admin</div>
       <a href="#" data-section="admin" class="admin-only" style="display:none"><span class="icon">👑</span><span>Admin Panel</span></a>
+      <a href="#" data-section="sellers" class="admin-only" style="display:none"><span class="icon">🏪</span><span>Sellers</span></a>
       <a href="#" data-section="adminlogs" class="admin-only" style="display:none"><span class="icon">📋</span><span>Logs Global</span></a>
     </nav>
     <div class="bottom-actions">
@@ -1190,6 +1193,73 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div id="adminContent" class="empty-state"><div class="icon">👑</div><p>Cargando usuarios...</p></div>
     </div>
 
+    <!-- SELLERS ADMIN -->
+    <div class="section" id="sec-sellers">
+      <h2>🏪 Gestion de Sellers (Revendedores)</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Crea sellers que pueden activar membresias a otros usuarios dentro de su limite.</p>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent)">
+        <h3 style="margin-bottom:10px">➕ Crear Nuevo Seller</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:140px">
+            <label>Telegram ID</label>
+            <input type="text" id="sellerNewId" placeholder="Ej: 123456789">
+          </div>
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:140px">
+            <label>Nombre</label>
+            <input type="text" id="sellerNewNombre" placeholder="Nombre del seller">
+          </div>
+          <div class="form-group" style="margin-bottom:0;min-width:100px">
+            <label>Max Invitaciones</label>
+            <input type="number" id="sellerNewMax" value="10" min="1" style="width:80px">
+          </div>
+          <div class="form-group" style="margin-bottom:0;min-width:120px">
+            <label>Periodo</label>
+            <select id="sellerNewPeriodo" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+              <option value="semanal">Semanal</option>
+              <option value="mensual">Mensual</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom:0;min-width:120px">
+            <label>Plan que otorga</label>
+            <select id="sellerNewPlanTipo" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+              <option value="semanal">Semanal (7d)</option>
+              <option value="mensual">Mensual (30d)</option>
+              <option value="permanente">Permanente</option>
+            </select>
+          </div>
+          <button class="btn btn-success" onclick="crearSellerAdmin()">✅ Crear Seller</button>
+        </div>
+      </div>
+      <div style="margin-bottom:15px">
+        <button class="btn btn-primary" onclick="loadSellersAdmin()">🔄 Actualizar Lista</button>
+      </div>
+      <div id="sellersAdminContent" class="empty-state"><div class="icon">🏪</div><p>Cargando sellers...</p></div>
+    </div>
+
+    <!-- SELLER PANEL (para sellers) -->
+    <div class="section" id="sec-sellerpanel">
+      <h2>🏪 Panel de Seller</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Activa membresias para tus clientes desde aqui.</p>
+      <div id="sellerInfoBox" style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent)">
+        <div class="loading-overlay"><span class="spinner"></span> Cargando info de seller...</div>
+      </div>
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--success)">
+        <h3 style="margin-bottom:10px;color:var(--success)">🎟️ Activar Membresia a Cliente</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:180px">
+            <label>Telegram ID del cliente</label>
+            <input type="text" id="sellerInvitadoId" placeholder="Ej: 987654321">
+          </div>
+          <div class="form-group" style="margin-bottom:0;flex:1;min-width:120px">
+            <label>Nombre (opcional)</label>
+            <input type="text" id="sellerInvitadoNombre" placeholder="Nombre">
+          </div>
+          <button class="btn btn-success" onclick="sellerInvitar()">🎟️ Activar Membresia</button>
+        </div>
+      </div>
+      <div id="sellerInvitesContent" class="empty-state"><div class="icon">🎟️</div><p>Sin invitaciones aun</p></div>
+    </div>
+
     <!-- CUENTAS TELEGRAM -->
     <div class="section" id="sec-cuentastg">
       <h2>✈️ Cuentas Telegram</h2>
@@ -1647,6 +1717,7 @@ async function doRecoverReset(){
 }
 
 let esAdmin=false;
+let esSeller=false;
 let membresiaActiva=true;
 
 let _login2faId='';
@@ -1674,8 +1745,10 @@ async function doLogin(){
   }
   userId=id;
   esAdmin=r.es_admin||false;
+  esSeller=r.es_seller||false;
   localStorage.setItem('panel_uid',id);localStorage.setItem('panel_token',r.token);
   localStorage.setItem('panel_admin',esAdmin?'1':'0');
+  localStorage.setItem('panel_seller',esSeller?'1':'0');
   showApp();
 }
 
@@ -1696,7 +1769,7 @@ async function doRegister(){
   setTimeout(()=>{showLogin();$('loginId').value=id},2000);
 }
 
-function doLogout(){localStorage.removeItem('panel_uid');localStorage.removeItem('panel_token');localStorage.removeItem('panel_admin');location.reload()}
+function doLogout(){localStorage.removeItem('panel_uid');localStorage.removeItem('panel_token');localStorage.removeItem('panel_admin');localStorage.removeItem('panel_seller');location.reload()}
 
 function showErr(id,msg){const el=$(id);el.style.display='block';el.textContent=msg;el.className='auth-error';el.style.display='block'}
 function showMsg(id,msg){const el=$(id);el.style.display='block';el.textContent=msg}
@@ -1728,6 +1801,13 @@ async function showApp(){
   if(esAdmin){
     document.querySelectorAll('.admin-only').forEach(el=>el.style.display='');
     localStorage.setItem('panel_admin','1');
+  }
+  // Mostrar items seller
+  esSeller=localStorage.getItem('panel_seller')==='1';
+  if(m.ok && m.es_seller) esSeller=true;
+  if(esSeller || esAdmin){
+    document.querySelectorAll('.seller-only').forEach(el=>el.style.display='');
+    localStorage.setItem('panel_seller','1');
   }
   initPlatformSwitch();
   loadDashboard();
@@ -1770,7 +1850,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoPlantillaSelect')},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){}};
+    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoPlantillaSelect')},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -3518,6 +3598,141 @@ async function adminSetAdmin(tid,val){
   if(r.ok)loadAdminUsuarios();
 }
 
+// --- SELLERS ADMIN ---
+async function loadSellersAdmin(){
+  if(!esAdmin){$('sellersAdminContent').innerHTML='<div class="empty-state"><p>No tienes permisos</p></div>';return}
+  $('sellersAdminContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Cargando sellers...</div>';
+  const r=await api('/api/admin/sellers?u='+userId);
+  if(!r.ok){$('sellersAdminContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
+  const sellers=r.sellers||[];
+  if(!sellers.length){$('sellersAdminContent').innerHTML='<div class="empty-state"><div class="icon">\ud83c\udfea</div><p>No hay sellers creados</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>\ud83c\udfea '+sellers.length+' Sellers</h3></div>';
+  h+='<table><thead><tr><th>ID</th><th>Nombre</th><th>Limite</th><th>Periodo</th><th>Plan Otorga</th><th>Usadas/Max</th><th>Estado</th><th>Creado</th><th>Acciones</th></tr></thead><tbody>';
+  sellers.forEach(s=>{
+    const estadoBadge=s.activo?'<span class="badge badge-success">Activo</span>':'<span class="badge badge-danger">Inactivo</span>';
+    const periodoLabel=s.periodo==='semanal'?'Semanal':'Mensual';
+    const planLabel=s.plan_tipo==='permanente'?'Permanente':s.plan_tipo==='mensual'?'Mensual (30d)':'Semanal (7d)';
+    const usadas=s.invites_usados||0;
+    const pct=s.max_invites>0?Math.round(usadas/s.max_invites*100):0;
+    const barColor=pct>=90?'var(--danger)':pct>=60?'var(--warn)':'var(--success)';
+    const fecha=s.fecha_creado?new Date(s.fecha_creado).toLocaleDateString('es'):'?';
+    h+=`<tr>`;
+    h+=`<td style="font-size:11px">${s.telegram_id}</td>`;
+    h+=`<td>${s.nombre||'-'}</td>`;
+    h+=`<td>${s.max_invites}</td>`;
+    h+=`<td>${periodoLabel}</td>`;
+    h+=`<td>${planLabel}</td>`;
+    h+=`<td><div style="display:flex;align-items:center;gap:6px"><div style="flex:1;background:var(--bg3);border-radius:4px;height:8px;min-width:60px"><div style="width:${pct}%;background:${barColor};height:100%;border-radius:4px"></div></div><span style="font-size:12px">${usadas}/${s.max_invites}</span></div></td>`;
+    h+=`<td>${estadoBadge}</td>`;
+    h+=`<td style="font-size:11px">${fecha}</td>`;
+    h+=`<td style="display:flex;gap:4px;flex-wrap:wrap">`;
+    h+=`<button class="btn btn-sm btn-primary" onclick="showEditSeller(${s.id},${s.max_invites},'${s.periodo}','${s.plan_tipo}',${s.activo})" title="Editar">\u270f\ufe0f</button>`;
+    h+=`<button class="btn btn-sm btn-danger" onclick="eliminarSellerAdmin(${s.id})" title="Eliminar">\u274c</button>`;
+    h+=`</td></tr>`;
+    if(s.invites&&s.invites.length){
+      h+=`<tr><td colspan="9" style="padding:5px 15px;background:var(--bg3)"><details><summary style="cursor:pointer;color:var(--accent2);font-size:12px">\ud83c\udf9f\ufe0f ${s.invites.length} invitaciones totales</summary>`;
+      h+=`<table style="margin-top:5px;font-size:12px"><thead><tr><th>Cliente ID</th><th>Plan</th><th>Fecha</th></tr></thead><tbody>`;
+      s.invites.forEach(inv=>{
+        const invFecha=inv.fecha_invitacion?new Date(inv.fecha_invitacion).toLocaleString('es'):'?';
+        const invPlan=inv.plan_tipo==='permanente'?'Permanente':inv.plan_tipo==='mensual'?'Mensual':'Semanal';
+        h+=`<tr><td>${inv.invitado_telegram_id}</td><td>${invPlan} (${inv.plan_dias}d)</td><td>${invFecha}</td></tr>`;
+      });
+      h+=`</tbody></table></details></td></tr>`;
+    }
+  });
+  h+='</tbody></table></div>';
+  $('sellersAdminContent').innerHTML=h;
+}
+
+async function crearSellerAdmin(){
+  const tid=$('sellerNewId').value.trim();
+  const nombre=$('sellerNewNombre').value.trim();
+  const maxInv=parseInt($('sellerNewMax').value)||10;
+  const periodo=$('sellerNewPeriodo').value;
+  const planTipo=$('sellerNewPlanTipo').value;
+  const planDias=planTipo==='permanente'?36500:planTipo==='mensual'?30:7;
+  if(!tid){toast('Ingresa el Telegram ID del seller','error');return}
+  const r=await api('/api/admin/sellers/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid,nombre,max_invites:maxInv,periodo,plan_dias:planDias,plan_tipo:planTipo})});
+  toast(r.ok?'Seller creado exitosamente':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok){$('sellerNewId').value='';$('sellerNewNombre').value='';loadSellersAdmin();}
+}
+
+function showEditSeller(id,maxInv,periodo,planTipo,activo){
+  showModal(`<h3>\u270f\ufe0f Editar Seller #${id}</h3>
+    <div class="form-group"><label>Max Invitaciones</label><input type="number" id="editSellerMax" value="${maxInv}" min="1"></div>
+    <div class="form-group"><label>Periodo</label><select id="editSellerPeriodo" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)"><option value="semanal" ${periodo==='semanal'?'selected':''}>Semanal</option><option value="mensual" ${periodo==='mensual'?'selected':''}>Mensual</option></select></div>
+    <div class="form-group"><label>Plan que otorga</label><select id="editSellerPlanTipo" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)"><option value="semanal" ${planTipo==='semanal'?'selected':''}>Semanal (7d)</option><option value="mensual" ${planTipo==='mensual'?'selected':''}>Mensual (30d)</option><option value="permanente" ${planTipo==='permanente'?'selected':''}>Permanente</option></select></div>
+    <div class="form-group"><label><input type="checkbox" id="editSellerActivo" ${activo?'checked':''}> Activo</label></div>
+    <div class="modal-actions"><button class="btn btn-success" onclick="guardarEditSeller(${id})">Guardar</button><button class="btn btn-outline" onclick="closeModal()">Cancelar</button></div>`);
+}
+
+async function guardarEditSeller(id){
+  const maxInv=parseInt($('editSellerMax').value)||10;
+  const periodo=$('editSellerPeriodo').value;
+  const planTipo=$('editSellerPlanTipo').value;
+  const planDias=planTipo==='permanente'?36500:planTipo==='mensual'?30:7;
+  const activo=$('editSellerActivo').checked;
+  closeModal();
+  const r=await api('/api/admin/sellers/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id,max_invites:maxInv,periodo,plan_dias:planDias,plan_tipo:planTipo,activo})});
+  toast(r.ok?'Seller actualizado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadSellersAdmin();
+}
+
+async function eliminarSellerAdmin(id){
+  if(!confirm('Eliminar este seller y todas sus invitaciones?'))return;
+  const r=await api('/api/admin/sellers/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id})});
+  toast(r.ok?'Seller eliminado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadSellersAdmin();
+}
+
+// --- SELLER PANEL (for sellers) ---
+async function loadSellerPanel(){
+  const r=await api('/api/seller/info?u='+userId);
+  if(!r.ok||!r.es_seller){
+    $('sellerInfoBox').innerHTML='<div class="empty-state"><p>No eres un seller autorizado.</p></div>';
+    $('sellerInvitesContent').innerHTML='';
+    return;
+  }
+  const s=r.seller;
+  const usadas=s.invites_usados||0;
+  const pct=s.max_invites>0?Math.round(usadas/s.max_invites*100):0;
+  const barColor=pct>=90?'var(--danger)':pct>=60?'var(--warn)':'var(--success)';
+  const periodoLabel=s.periodo==='semanal'?'esta semana':'este mes';
+  const planLabel=s.plan_tipo==='permanente'?'Permanente':s.plan_tipo==='mensual'?'Mensual (30d)':'Semanal (7d)';
+  let h=`<div style="display:flex;gap:15px;flex-wrap:wrap;align-items:center">`;
+  h+=`<div style="flex:1;min-width:200px"><h3 style="color:var(--accent2)">\ud83c\udfea ${s.nombre||'Seller'}</h3><p style="color:var(--text2);font-size:13px">Plan que otorgas: <b>${planLabel}</b> | Periodo: <b>${s.periodo}</b></p></div>`;
+  h+=`<div style="min-width:200px;text-align:center"><div style="font-size:11px;color:var(--text2);margin-bottom:4px">Invitaciones usadas ${periodoLabel}</div>`;
+  h+=`<div style="font-size:28px;font-weight:bold;color:${barColor}">${usadas} / ${s.max_invites}</div>`;
+  h+=`<div style="background:var(--bg3);border-radius:6px;height:10px;margin-top:6px"><div style="width:${pct}%;background:${barColor};height:100%;border-radius:6px;transition:width 0.3s"></div></div></div></div>`;
+  $('sellerInfoBox').innerHTML=h;
+  const invites=r.invites||[];
+  if(!invites.length){$('sellerInvitesContent').innerHTML='<div class="empty-state"><div class="icon">\ud83c\udf9f\ufe0f</div><p>Aun no has activado membresias</p></div>';return}
+  let t='<div class="table-wrap"><div class="table-header"><h3>\ud83c\udf9f\ufe0f '+invites.length+' Membresias Activadas</h3></div>';
+  t+='<table><thead><tr><th>#</th><th>Cliente ID</th><th>Plan</th><th>Dias</th><th>Fecha</th></tr></thead><tbody>';
+  invites.forEach((inv,i)=>{
+    const fecha=inv.fecha_invitacion?new Date(inv.fecha_invitacion).toLocaleString('es'):'?';
+    const plan=inv.plan_tipo==='permanente'?'Permanente':inv.plan_tipo==='mensual'?'Mensual':'Semanal';
+    t+=`<tr><td>${i+1}</td><td>${inv.invitado_telegram_id}</td><td>${plan}</td><td>${inv.plan_dias}</td><td>${fecha}</td></tr>`;
+  });
+  t+='</tbody></table></div>';
+  $('sellerInvitesContent').innerHTML=t;
+}
+
+async function sellerInvitar(){
+  const invId=$('sellerInvitadoId').value.trim();
+  const invNombre=$('sellerInvitadoNombre').value.trim();
+  if(!invId){toast('Ingresa el Telegram ID del cliente','error');return}
+  if(!confirm('Activar membresia para '+invId+'?'))return;
+  const r=await api('/api/seller/invitar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,invitado_id:invId,invitado_nombre:invNombre})});
+  if(r.ok){
+    toast('Membresia activada! ('+r.invites_usados+'/'+r.max_invites+' usadas)','success');
+    $('sellerInvitadoId').value='';$('sellerInvitadoNombre').value='';
+    loadSellerPanel();
+  }else{
+    toast('Error: '+(r.error||'No se pudo activar'),'error');
+  }
+}
+
 // --- THEME TOGGLE ---
 function toggleTheme(){
   const cur=document.documentElement.getAttribute('data-theme');
@@ -3535,9 +3750,9 @@ function toggleTheme(){
 // --- MULTI-LANGUAGE ---
 let currentLang='es';
 const LANG={
-  es:{dashboard:'Dashboard',cuentas:'Cuentas WSP',grupos:'Grupos',mensajes:'Mensajes',envios:'Envio Unico',enviopersonal:'Envio Personal',campanas:'Campanas',config:'Config Envio',stats:'Estadisticas',admin:'Admin Panel',plantillas:'Plantillas',historial:'Historial',actividad:'Actividad',logout:'Cerrar Sesion',login:'Iniciar Sesion',register:'Registrarse',send:'Enviar',cancel:'Cancelar',delete:'Eliminar',save:'Guardar',create:'Crear',loading:'Cargando...',nodata:'Sin datos',seguridad:'2FA y Sesiones',backup:'Backup / Restaurar',enviomiembros:'Envio a Miembros',enviointeractivo:'Envio Interactivo',programados:'Programados',listanegra:'Lista Negra',autoresp:'Auto-Responder',logs:'Logs del Bot',retry:'Cola de Reintentos',tggrupos:'Grupos TG',tgmensajes:'Mensajes TG',tgcampanas:'Campanas TG',tgprogramados:'Programados TG',tghistorial:'Historial TG',tgdetectar:'Detectar Grupos TG',tgstats:'Stats TG',tgautoresp:'Auto-Responder TG',tgconfig:'Config Envio TG',tglistanegra:'Lista Negra TG',cuentastg:'Cuentas TG'},
-  en:{dashboard:'Dashboard',cuentas:'WSP Accounts',grupos:'Groups',mensajes:'Messages',envios:'Single Send',enviopersonal:'Personal Send',campanas:'Campaigns',config:'Send Config',stats:'Statistics',admin:'Admin Panel',plantillas:'Templates',historial:'History',actividad:'Activity',logout:'Logout',login:'Login',register:'Register',send:'Send',cancel:'Cancel',delete:'Delete',save:'Save',create:'Create',loading:'Loading...',nodata:'No data',seguridad:'2FA & Sessions',backup:'Backup / Restore',enviomiembros:'Member Send',enviointeractivo:'Interactive Send',programados:'Scheduled',listanegra:'Blacklist',autoresp:'Auto-Responder',logs:'Bot Logs',retry:'Retry Queue',tggrupos:'TG Groups',tgmensajes:'TG Messages',tgcampanas:'TG Campaigns',tgprogramados:'TG Scheduled',tghistorial:'TG History',tgdetectar:'Detect TG Groups',tgstats:'TG Stats',tgautoresp:'TG Auto-Responder',tgconfig:'TG Send Config',tglistanegra:'TG Blacklist',cuentastg:'TG Accounts'},
-  pt:{dashboard:'Painel',cuentas:'Contas WSP',grupos:'Grupos',mensajes:'Mensagens',envios:'Envio Unico',enviopersonal:'Envio Pessoal',campanas:'Campanhas',config:'Config Envio',stats:'Estatisticas',admin:'Admin',plantillas:'Modelos',historial:'Historico',actividad:'Atividade',logout:'Sair',login:'Entrar',register:'Registrar',send:'Enviar',cancel:'Cancelar',delete:'Excluir',save:'Salvar',create:'Criar',loading:'Carregando...',nodata:'Sem dados',seguridad:'2FA e Sessoes',backup:'Backup / Restaurar'}
+  es:{dashboard:'Dashboard',cuentas:'Cuentas WSP',grupos:'Grupos',mensajes:'Mensajes',envios:'Envio Unico',enviopersonal:'Envio Personal',campanas:'Campanas',config:'Config Envio',stats:'Estadisticas',admin:'Admin Panel',plantillas:'Plantillas',historial:'Historial',actividad:'Actividad',logout:'Cerrar Sesion',login:'Iniciar Sesion',register:'Registrarse',send:'Enviar',cancel:'Cancelar',delete:'Eliminar',save:'Guardar',create:'Crear',loading:'Cargando...',nodata:'Sin datos',seguridad:'2FA y Sesiones',backup:'Backup / Restaurar',enviomiembros:'Envio a Miembros',enviointeractivo:'Envio Interactivo',programados:'Programados',listanegra:'Lista Negra',autoresp:'Auto-Responder',logs:'Logs del Bot',retry:'Cola de Reintentos',tggrupos:'Grupos TG',tgmensajes:'Mensajes TG',tgcampanas:'Campanas TG',tgprogramados:'Programados TG',tghistorial:'Historial TG',tgdetectar:'Detectar Grupos TG',tgstats:'Stats TG',tgautoresp:'Auto-Responder TG',tgconfig:'Config Envio TG',tglistanegra:'Lista Negra TG',cuentastg:'Cuentas TG',sellers:'Sellers',sellerpanel:'Panel Seller'},
+  en:{dashboard:'Dashboard',cuentas:'WSP Accounts',grupos:'Groups',mensajes:'Messages',envios:'Single Send',enviopersonal:'Personal Send',campanas:'Campaigns',config:'Send Config',stats:'Statistics',admin:'Admin Panel',plantillas:'Templates',historial:'History',actividad:'Activity',logout:'Logout',login:'Login',register:'Register',send:'Send',cancel:'Cancel',delete:'Delete',save:'Save',create:'Create',loading:'Loading...',nodata:'No data',seguridad:'2FA & Sessions',backup:'Backup / Restore',enviomiembros:'Member Send',enviointeractivo:'Interactive Send',programados:'Scheduled',listanegra:'Blacklist',autoresp:'Auto-Responder',logs:'Bot Logs',retry:'Retry Queue',tggrupos:'TG Groups',tgmensajes:'TG Messages',tgcampanas:'TG Campaigns',tgprogramados:'TG Scheduled',tghistorial:'TG History',tgdetectar:'Detect TG Groups',tgstats:'TG Stats',tgautoresp:'TG Auto-Responder',tgconfig:'TG Send Config',tglistanegra:'TG Blacklist',cuentastg:'TG Accounts',sellers:'Sellers',sellerpanel:'Seller Panel'},
+  pt:{dashboard:'Painel',cuentas:'Contas WSP',grupos:'Grupos',mensajes:'Mensagens',envios:'Envio Unico',enviopersonal:'Envio Pessoal',campanas:'Campanhas',config:'Config Envio',stats:'Estatisticas',admin:'Admin',plantillas:'Modelos',historial:'Historico',actividad:'Atividade',logout:'Sair',login:'Entrar',register:'Registrar',send:'Enviar',cancel:'Cancelar',delete:'Excluir',save:'Salvar',create:'Criar',loading:'Carregando...',nodata:'Sem dados',seguridad:'2FA e Sessoes',backup:'Backup / Restaurar',sellers:'Revendedores',sellerpanel:'Painel Revendedor'}
 };
 function toggleLang(){
   currentLang=currentLang==='es'?'en':'es';
