@@ -573,6 +573,14 @@ function init() {
             fecha TEXT DEFAULT (datetime('now'))
         );
     `);
+    // --- MIGRATION: verificado column in panel_users ---
+    try {
+        db.prepare("SELECT verificado FROM panel_users LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE panel_users ADD COLUMN verificado INTEGER DEFAULT 0");
+        console.log("   Columna 'verificado' agregada a panel_users (existentes = 0, no verificados)");
+    }
+
     // --- REGISTRATION CODES (verificacion para crear cuenta) ---
     db.exec(`
         CREATE TABLE IF NOT EXISTS registration_codes (
@@ -1462,7 +1470,8 @@ function panelLogin(telegramId, password) {
             if (cfg.ADMIN_TELEGRAM_IDS && cfg.ADMIN_TELEGRAM_IDS.includes(String(telegramId))) esAdmin = true;
         } catch (e) {}
     }
-    return { ok: true, telegram_id: user.telegram_id, username: user.username, es_admin: esAdmin };
+    const verificado = user.verificado === 1 || esAdmin;
+    return { ok: true, telegram_id: user.telegram_id, username: user.username, es_admin: esAdmin, verificado };
 }
 
 function panelRegistro(telegramId, password, username) {
@@ -1470,7 +1479,8 @@ function panelRegistro(telegramId, password, username) {
     const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
     if (existing) return { ok: false, error: "ya_registrado" };
     const hashed = bcrypt.hashSync(password, 10);
-    db.prepare("INSERT INTO panel_users (telegram_id, username, password) VALUES (?, ?, ?)").run(String(telegramId), username || '', hashed);
+    // New registrations via code are automatically verified (verificado = 1)
+    db.prepare("INSERT INTO panel_users (telegram_id, username, password, verificado) VALUES (?, ?, ?, 1)").run(String(telegramId), username || '', hashed);
     // Crear usuario principal si no existe y darle 1 dia demo
     const user = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(String(telegramId));
     if (!user) {
@@ -2548,9 +2558,9 @@ function getAnalyticsClientesActivos(dias = 7) {
 
 // ─── REGISTRATION CODES (verificacion para crear cuenta) ───
 function generarCodigoRegistro(telegramId) {
-    // Check if user already has an account
-    const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
-    if (existing) return { ok: false, error: "ya_registrado" };
+    // Check if user already has a VERIFIED account
+    const existing = db.prepare("SELECT verificado FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+    if (existing && existing.verificado === 1) return { ok: false, error: "ya_registrado" };
     // Invalidate any previous unused codes for this user
     db.prepare("DELETE FROM registration_codes WHERE telegram_id = ? AND used = 0").run(String(telegramId));
     // Generate unique 6-char alphanumeric code
@@ -2585,6 +2595,15 @@ function marcarCodigoRegistroUsado(code) {
 
 function limpiarCodigosRegistroExpirados() {
     db.prepare("DELETE FROM registration_codes WHERE created_at < datetime('now', '-30 minutes')").run();
+}
+
+function verificarCuentaExistente(telegramId) {
+    db.prepare("UPDATE panel_users SET verificado = 1 WHERE telegram_id = ?").run(String(telegramId));
+}
+
+function isUsuarioVerificado(telegramId) {
+    const user = db.prepare("SELECT verificado FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+    return user ? user.verificado === 1 : false;
 }
 
 module.exports = {
@@ -2694,4 +2713,6 @@ module.exports = {
     getAnalyticsEnviosPorDia, getAnalyticsHorasActivas, getAnalyticsTasaPorCuenta, getAnalyticsClientesActivos,
     // Registration codes (verificacion)
     generarCodigoRegistro, verificarCodigoRegistro, marcarCodigoRegistroUsado, limpiarCodigosRegistroExpirados,
+    // Account verification
+    verificarCuentaExistente, isUsuarioVerificado,
 };

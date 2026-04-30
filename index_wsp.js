@@ -314,7 +314,7 @@ poll();
             "/api/panel_recuperar_solicitar", "/api/panel_recuperar_reset",
             "/api/canjear_codigo", "/api/check_membresia",
             "/api/pagos/webhook", "/api/metodos_pago", "/api/metodos_pago/qr", "/api/push/vapid_key", "/api/health",
-            "/api/registro/generar_codigo"
+            "/api/registro/generar_codigo", "/api/verificar_cuenta"
         ];
         const isPublicEndpoint = PUBLIC_ENDPOINTS.includes(url.pathname) || url.pathname === "/api/status";
 
@@ -783,6 +783,28 @@ poll();
                 const r = db.generarCodigoRegistro(String(body.telegram_id));
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
+            }
+
+            // ─── VERIFICAR CUENTA EXISTENTE (usuario no verificado ingresa codigo) ───
+            if (url.pathname === "/api/verificar_cuenta" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.codigo || !body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta codigo o telegram_id" })); }
+                const codeCheck = db.verificarCodigoRegistro(body.codigo);
+                if (!codeCheck.ok) {
+                    const msgs = { codigo_invalido: "Codigo invalido o ya usado", codigo_expirado: "Codigo expirado. Genera uno nuevo con /registro en el bot." };
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: msgs[codeCheck.error] || codeCheck.error }));
+                }
+                // Verify the code belongs to the same user who's trying to verify
+                if (codeCheck.telegram_id !== String(body.telegram_id)) {
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: "El codigo no corresponde a tu cuenta. Genera uno nuevo con /registro." }));
+                }
+                db.marcarCodigoRegistroUsado(body.codigo);
+                db.verificarCuentaExistente(body.telegram_id);
+                db.registrarAuditoria(body.telegram_id, 'verificar_cuenta', 'Cuenta verificada con codigo', getClientIp());
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
             }
 
             if (url.pathname === "/api/panel_registro" && req.method === "POST") {
