@@ -2016,16 +2016,20 @@ poll();
             if (url.pathname === "/api/2fa/status" && req.method === "GET") {
                 const uid = url.searchParams.get("u");
                 if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
-                const tfa = db.get2FA(uid);
-                res.writeHead(200); return res.end(JSON.stringify({ ok: true, enabled: !!(tfa && tfa.enabled), configured: !!tfa }));
+                try {
+                    const tfa = db.get2FA(uid);
+                    res.writeHead(200); return res.end(JSON.stringify({ ok: true, enabled: !!(tfa && tfa.enabled), configured: !!tfa }));
+                } catch(e) { res.writeHead(200); return res.end(JSON.stringify({ ok: true, enabled: false, configured: false })); }
             }
 
             // ─── ACTIVE SESSIONS ENDPOINTS ───
             if (url.pathname === "/api/panel_sessions" && req.method === "GET") {
                 const uid = url.searchParams.get("u");
                 if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
-                const sessions = db.getSessions(uid);
-                res.writeHead(200); return res.end(JSON.stringify({ ok: true, sessions }));
+                try {
+                    const sessions = db.getSessions(uid);
+                    res.writeHead(200); return res.end(JSON.stringify({ ok: true, sessions }));
+                } catch(e) { res.writeHead(200); return res.end(JSON.stringify({ ok: true, sessions: [] })); }
             }
             if (url.pathname === "/api/panel_sessions/close" && req.method === "POST") {
                 const body = await readBody();

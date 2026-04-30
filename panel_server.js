@@ -92,6 +92,14 @@ const server = http.createServer(async (req, res) => {
             return res.end(data);
         } catch (e) { res.writeHead(404); return res.end("Not found"); }
     }
+    // Serve PWA icon files
+    if (url.pathname === "/icon-192.png" || url.pathname === "/icon-512.png") {
+        try {
+            const data = fs.readFileSync(path.join(__dirname, url.pathname.slice(1)));
+            res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" });
+            return res.end(data);
+        } catch (e) { res.writeHead(404); return res.end("Not found"); }
+    }
 
     // Serve panel.html for everything else
     try {

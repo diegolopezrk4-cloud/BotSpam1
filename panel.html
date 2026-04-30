@@ -3966,7 +3966,10 @@ async function loadDashboardExtended(){
 // --- 2FA FUNCTIONS ---
 async function load2FAStatus(){
   const r=await api('/api/2fa/status?u='+userId);
-  if(!r.ok)return;
+  if(!r.ok){
+    $('twoFactorStatus').innerHTML=`<div style="display:flex;align-items:center;gap:10px;padding:15px;background:rgba(233,69,96,0.1);border:1px solid var(--danger);border-radius:10px"><span style="font-size:24px">⚠</span><div><b style="color:var(--danger)">2FA Desactivado</b><p style="color:var(--text2);font-size:12px;margin-top:4px">Activa la autenticacion de dos factores para mayor seguridad.</p></div></div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="setup2FA()">Configurar 2FA</button>`;
+    return;
+  }
   if(r.enabled){
     $('twoFactorStatus').innerHTML=`<div style="display:flex;align-items:center;gap:10px;padding:15px;background:rgba(0,184,148,0.1);border:1px solid var(--success);border-radius:10px"><span style="font-size:24px">🛡</span><div><b style="color:var(--success)">2FA Activado</b><p style="color:var(--text2);font-size:12px;margin-top:4px">Tu cuenta esta protegida con autenticacion de dos factores.</p></div></div><button class="btn btn-danger btn-sm" style="margin-top:12px" onclick="disable2FA()">Desactivar 2FA</button>`;
     $('twoFactorSetup').style.display='none';
@@ -4003,7 +4006,7 @@ async function confirmDisable2FA(){
 // --- ACTIVE SESSIONS ---
 async function loadSessions(){
   const r=await api('/api/panel_sessions?u='+userId);
-  if(!r.ok){$('sessionsList').innerHTML='<p>Error al cargar sesiones</p>';return}
+  if(!r.ok){$('sessionsList').innerHTML='<div class="empty-state"><p>Sin sesiones activas</p></div>';return}
   const s=r.sessions||[];
   if(!s.length){$('sessionsList').innerHTML='<div class="empty-state"><p>Sin sesiones activas</p></div>';return}
   let h='';s.forEach(sess=>{
