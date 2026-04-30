@@ -449,6 +449,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="admin" class="admin-only" style="display:none"><span class="icon">👑</span><span>Admin Panel</span></a>
       <a href="#" data-section="sellers" class="admin-only" style="display:none"><span class="icon">🏪</span><span>Sellers</span></a>
       <a href="#" data-section="adminlogs" class="admin-only" style="display:none"><span class="icon">📋</span><span>Logs Global</span></a>
+      <a href="#" data-section="auditoria" class="admin-only" style="display:none"><span class="icon">🔍</span><span>Auditoria</span></a>
     </nav>
     <div class="bottom-actions">
       <button onclick="showCambiarPass()">🔑 <span>Cambiar Contrasena</span></button>
@@ -1540,6 +1541,17 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div id="adminLogsContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
+    <!-- AUDITORIA -->
+    <div class="section" id="sec-auditoria">
+      <h2>🔍 Registro de Auditoria</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Registro de todas las acciones importantes del sistema (solo admin).</p>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="loadAuditoria()">🔄 Actualizar</button>
+        <input type="text" id="auditoriaFilter" placeholder="Filtrar por Telegram ID..." style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+      </div>
+      <div id="auditoriaContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
     <!-- SEGURIDAD (2FA + Sesiones Activas) -->
     <div class="section" id="sec-seguridad">
       <h2>🔐 Seguridad</h2>
@@ -1615,7 +1627,16 @@ let currentPlatform='wsp';
 function $(id){return document.getElementById(id)}
 async function api(path,opts){
   try{
-    const r=opts?await fetch(API+path,opts):await fetch(API+path);
+    const token=localStorage.getItem('panel_token');
+    if(!opts)opts={};
+    if(!opts.headers)opts.headers={};
+    if(token)opts.headers['Authorization']='Bearer '+token;
+    const r=await fetch(API+path,opts);
+    if(r.status===401){
+      toast('Sesion expirada. Inicia sesion nuevamente.','error');
+      setTimeout(()=>doLogout(),1500);
+      return{ok:false,error:'sesion_invalida'};
+    }
     const ct=r.headers.get('content-type')||'';
     if(!ct.includes('json')){const t=await r.text();return{ok:false,error:'Servidor no responde (HTTP '+r.status+')'}}
     return await r.json();
@@ -1630,7 +1651,7 @@ function toast(msg,type='success'){
 function showModal(html){$('modalContent').innerHTML=html;$('modal').classList.add('show')}
 function closeModal(){$('modal').classList.remove('show')}
 function requireMembresia(){
-  if(esAdmin)return true;
+  if(esAdmin||esSeller)return true;
   if(!membresiaActiva){
     toast('Necesitas una membresia activa para usar esta funcion. Contacta al creador.','error');
     return false;
@@ -1895,7 +1916,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoMsgSelect');checkPromoEnvioProgreso()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){}};
+    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoMsgSelect');checkPromoEnvioProgreso()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,auditoria:loadAuditoria,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){}};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -3902,11 +3923,11 @@ async function canjearCodigo(){
   const el=$('canjearResult');
   el.style.display='block';
   if(r.ok){
-    el.innerHTML=`<div style="background:var(--success);color:white;padding:15px;border-radius:8px;text-align:center"><div style="font-size:24px;margin-bottom:8px">\ud83c\udf89</div><div style="font-size:16px;font-weight:bold">Membresia Activada!</div><div style="margin-top:8px">Plan: <b>${r.plan}</b></div>${r.seller?'<div style="font-size:12px;margin-top:4px;opacity:0.8">Seller: '+r.seller+'</div>':''}</div>`;
+    el.innerHTML=`<div style="background:var(--success);color:white;padding:15px;border-radius:8px;text-align:center"><div style="font-size:24px;margin-bottom:8px">\ud83c\udf89</div><div style="font-size:16px;font-weight:bold">Membresia Activada!</div><div style="margin-top:8px">Plan: <b>${esc(r.plan||'')}</b></div>${r.seller?'<div style="font-size:12px;margin-top:4px;opacity:0.8">Seller: '+esc(r.seller)+'</div>':''}</div>`;
     $('canjearCodigoInput').value='';
     toast('Membresia activada exitosamente!','success');
   }else{
-    el.innerHTML=`<div style="background:var(--danger);color:white;padding:15px;border-radius:8px;text-align:center"><div style="font-size:24px;margin-bottom:8px">\u274c</div><div>${r.error||'Error al canjear codigo'}</div></div>`;
+    el.innerHTML=`<div style="background:var(--danger);color:white;padding:15px;border-radius:8px;text-align:center"><div style="font-size:24px;margin-bottom:8px">\u274c</div><div>${esc(r.error||'Error al canjear codigo')}</div></div>`;
   }
 }
 
@@ -4387,6 +4408,23 @@ function exportarAdminLogsCSV(){
   downloadCSV('admin_logs.csv',data);
 }
 
+// --- AUDITORIA ---
+async function loadAuditoria(){
+  if(!esAdmin)return;
+  const filter=$('auditoriaFilter')?.value?.trim()||'';
+  const url=filter?'/api/admin/auditoria?u='+userId+'&filter_user='+encodeURIComponent(filter)+'&limit=200':'/api/admin/auditoria?u='+userId+'&limit=200';
+  const r=await api(url);
+  if(!r.ok){$('auditoriaContent').innerHTML='<div class="empty-state"><p>Error: '+esc(r.error||'')+'</p></div>';return}
+  const logs=r.logs||[];
+  if(!logs.length){$('auditoriaContent').innerHTML='<div class="empty-state"><div class="icon">🔍</div><p>Sin registros</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>🔍 '+logs.length+' registros</h3></div>';
+  h+='<table><thead><tr><th>Fecha</th><th>Usuario</th><th>Accion</th><th>Detalle</th><th>IP</th></tr></thead><tbody>';
+  logs.forEach(l=>{
+    h+=`<tr><td style="font-size:11px">${esc(l.fecha||'?')}</td><td style="font-size:11px">${esc(l.user_id||'?')}</td><td><b>${esc(l.accion||'?')}</b></td><td style="font-size:12px;color:var(--text2)">${esc(l.detalle||'')}</td><td style="font-size:11px;color:var(--text2)">${esc(l.ip||'')}</td></tr>`;
+  });
+  h+='</tbody></table></div>';$('auditoriaContent').innerHTML=h;
+}
+
 // --- PWA INSTALL ---
 let _deferredPrompt=null;
 function initPWA(){
@@ -4489,7 +4527,7 @@ async function confirmSetup2FA(){
   const r=await api('/api/2fa/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId,password:pass})});
   if(!r.ok){toast(r.error||'Error al configurar 2FA','error');return}
   $('twoFactorSecret').textContent=r.secret;
-  $('twoFactorQR').innerHTML=`<div style="padding:20px;background:var(--bg);border-radius:8px;font-size:13px"><p>Clave secreta:</p><code style="font-size:16px;letter-spacing:3px;color:var(--accent2)">${r.secret}</code><p style="margin-top:10px;color:var(--text2);font-size:11px">Ingresa esta clave en tu app de autenticacion<br>(Google Authenticator, Authy, Microsoft Authenticator)</p></div>`;
+  $('twoFactorQR').innerHTML=`<div style="padding:20px;background:var(--bg);border-radius:8px;font-size:13px"><p>Clave secreta:</p><code style="font-size:16px;letter-spacing:3px;color:var(--accent2)">${esc(r.secret||'')}</code><p style="margin-top:10px;color:var(--text2);font-size:11px">Ingresa esta clave en tu app de autenticacion<br>(Google Authenticator, Authy, Microsoft Authenticator)</p></div>`;
   $('twoFactorSetup').style.display='block';
 }
 async function enable2FA(){
@@ -4500,13 +4538,15 @@ async function enable2FA(){
   else{toast(r.error||'Codigo invalido','error')}
 }
 async function disable2FA(){
-  showModal(`<h3>⚠ Desactivar 2FA</h3><p style="color:var(--text2);margin-bottom:15px">Ingresa tu contrasena para desactivar la autenticacion de dos factores.</p><div class="form-group"><label>Contrasena</label><input type="password" id="disable2faPass"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmDisable2FA()">Desactivar</button></div>`);
+  showModal(`<h3>⚠ Desactivar 2FA</h3><p style="color:var(--text2);margin-bottom:15px">Ingresa tu contrasena y tu codigo 2FA actual para desactivar.</p><div class="form-group"><label>Contrasena</label><input type="password" id="disable2faPass"></div><div class="form-group"><label>Codigo 2FA actual</label><input type="text" id="disable2faCode" maxlength="6" placeholder="123456"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmDisable2FA()">Desactivar</button></div>`);
 }
 async function confirmDisable2FA(){
   const pass=$('disable2faPass').value;
+  const code=$('disable2faCode').value;
   if(!pass){toast('Ingresa tu contrasena','error');return}
+  if(!code){toast('Ingresa tu codigo 2FA','error');return}
   closeModal();
-  const r=await api('/api/2fa/disable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId,password:pass})});
+  const r=await api('/api/2fa/disable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId,password:pass,totp_code:code})});
   if(r.ok){toast('2FA desactivado','success');load2FAStatus()}
   else{toast(r.error||'Error','error')}
 }
