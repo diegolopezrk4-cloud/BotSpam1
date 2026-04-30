@@ -4036,10 +4036,11 @@ async function loadPagos(){
     h+='<div style="background:var(--card);border-radius:10px;padding:15px;margin-bottom:20px;border:1px solid var(--accent)">';
     h+='<h3 style="margin-bottom:10px">📱 Metodos de Pago Manual</h3>';
     metodos.forEach(m=>{
-      h+=`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--accent)">
-        <span style="font-size:20px">${m.tipo==='yape'?'📲':m.tipo==='binance'?'🪙':'💳'}</span>
-        <div><b>${esc(m.nombre)}</b>: <code style="background:var(--bg);padding:2px 8px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText('${esc(m.valor)}');toast('Copiado!','success')">${esc(m.valor)}</code>
+      h+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--accent)">
+        <span style="font-size:24px">${m.tipo==='yape'?'📲':m.tipo==='binance'?'🪙':'💳'}</span>
+        <div style="flex:1"><b>${esc(m.nombre)}</b>: <code style="background:var(--bg);padding:2px 8px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText('${esc(m.valor)}');toast('Copiado!','success')">${esc(m.valor)}</code>
         ${m.instrucciones?`<div style="font-size:12px;color:var(--text2)">${esc(m.instrucciones)}</div>`:''}</div>
+        ${m.qr_imagen?`<button class="btn btn-outline btn-sm" onclick="verQrMetodo(${m.id})" style="white-space:nowrap">📷 Ver QR</button>`:''}
       </div>`;
     });
     h+='</div>';
@@ -4087,23 +4088,75 @@ function pollPagoStatus(merchantTradeNo){
   },5000);
 }
 
+let _metodosPagoCache=[];
 async function pagarManual(planKey){
   const metodosR=await api('/api/metodos_pago');
   const metodos=metodosR.ok?metodosR.metodos:[];
+  _metodosPagoCache=metodos;
   if(!metodos.length){toast('No hay metodos de pago configurados','error');return}
   const plan=_pagosPlanes?_pagosPlanes[planKey]:null;
   let mOpts='';
-  metodos.forEach(m=>{mOpts+=`<option value="${esc(m.nombre)}">${esc(m.nombre)} — ${esc(m.valor)}</option>`});
+  metodos.forEach(m=>{mOpts+=`<option value="${esc(m.nombre)}" data-metodo-id="${m.id}">${esc(m.nombre)} — ${esc(m.valor)}</option>`});
   showModal(`<h3>📱 Pago Manual — Plan ${esc(planKey)}</h3>
     <p style="margin-bottom:10px">Precio: <b>${plan?esc(plan.precio):'N/A'}</b></p>
-    <div class="form-group"><label>Metodo de pago</label><select id="pagoMetodoSel">${mOpts}</select></div>
+    <div class="form-group"><label>Metodo de pago</label><select id="pagoMetodoSel" onchange="actualizarQrPago()">${mOpts}</select></div>
+    <div id="pagoQrWrap" style="text-align:center;margin:10px 0;display:none;background:var(--bg);padding:15px;border-radius:12px;border:2px solid var(--accent)">
+      <p style="font-size:13px;color:var(--text2);margin-bottom:8px">Escanea el QR para pagar:</p>
+      <img id="pagoQrImg" style="max-width:250px;max-height:250px;border-radius:8px">
+    </div>
     <div class="form-group"><label>Monto pagado</label><input type="text" id="pagoMonto" value="${plan?esc(plan.precio):''}" placeholder="Monto"></div>
-    <div class="form-group"><label>Comprobante (imagen)</label><input type="file" id="pagoImagen" accept="image/*"></div>
-    <div class="form-group"><label>Nota (opcional)</label><input type="text" id="pagoNota" placeholder="Ej: Pague desde otro numero"></div>
+    <div style="background:var(--bg);border-radius:10px;padding:15px;margin:10px 0;border:1px solid var(--accent)">
+      <p style="font-weight:bold;margin-bottom:10px">¿Como envias tu comprobante?</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <label style="flex:1;min-width:140px;cursor:pointer;background:var(--card);padding:12px;border-radius:8px;border:2px solid var(--accent);text-align:center">
+          <input type="radio" name="pagoOpcion" value="subir" checked style="margin-bottom:5px"><br>
+          <span style="font-size:20px">📤</span><br>
+          <b style="font-size:13px">Subir foto aqui</b>
+        </label>
+        <label style="flex:1;min-width:140px;cursor:pointer;background:var(--card);padding:12px;border-radius:8px;border:2px solid var(--accent);text-align:center">
+          <input type="radio" name="pagoOpcion" value="wsp" style="margin-bottom:5px"><br>
+          <span style="font-size:20px">📱</span><br>
+          <b style="font-size:13px">Enviar por WhatsApp</b>
+        </label>
+      </div>
+    </div>
+    <div id="pagoSubirWrap">
+      <div class="form-group"><label>Comprobante (imagen)</label><input type="file" id="pagoImagen" accept="image/*"></div>
+      <div class="form-group"><label>Nota (opcional)</label><input type="text" id="pagoNota" placeholder="Ej: Pague desde otro numero"></div>
+    </div>
+    <div id="pagoWspWrap" style="display:none;background:var(--bg);border-radius:10px;padding:15px;margin:10px 0;text-align:center">
+      <p style="font-size:14px;margin-bottom:10px">Envia la foto de tu comprobante al numero:</p>
+      <p style="font-size:22px;font-weight:bold;color:var(--success)">+51 976 680 776</p>
+      <p style="font-size:12px;color:var(--text2);margin-top:8px">Escribe tu usuario y el plan que pagaste en el mensaje</p>
+      <a href="https://wa.me/51976680776?text=Hola, pague el plan ${encodeURIComponent(planKey)}. Mi usuario es ${encodeURIComponent(userId||'')}" target="_blank" class="btn btn-success" style="margin-top:10px">💬 Abrir WhatsApp</a>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-success" onclick="enviarComprobante('${esc(planKey)}')">📤 Enviar Comprobante</button>
+      <button class="btn btn-success" id="btnEnviarComp" onclick="enviarComprobante('${esc(planKey)}')">📤 Enviar Comprobante</button>
     </div>`);
+  setTimeout(()=>{
+    actualizarQrPago();
+    document.querySelectorAll('input[name=pagoOpcion]').forEach(r=>r.addEventListener('change',()=>{
+      const v=document.querySelector('input[name=pagoOpcion]:checked').value;
+      if(v==='subir'){$('pagoSubirWrap').style.display='';$('pagoWspWrap').style.display='none';$('btnEnviarComp').style.display=''}
+      else{$('pagoSubirWrap').style.display='none';$('pagoWspWrap').style.display='';$('btnEnviarComp').style.display='none'}
+    }));
+  },100);
+}
+
+function actualizarQrPago(){
+  const sel=$('pagoMetodoSel');
+  if(!sel)return;
+  const opt=sel.options[sel.selectedIndex];
+  const metodoId=opt?opt.getAttribute('data-metodo-id'):null;
+  const metodo=_metodosPagoCache.find(m=>m.id==metodoId);
+  const wrap=$('pagoQrWrap');
+  if(metodo&&metodo.qr_imagen){
+    $('pagoQrImg').src='/api/metodos_pago/qr?id='+metodo.id;
+    wrap.style.display='';
+  }else{
+    wrap.style.display='none';
+  }
 }
 
 async function enviarComprobante(planKey){
@@ -4211,17 +4264,20 @@ async function adminPagosTab(tab){
     let h='<div style="margin-bottom:15px"><button class="btn btn-success btn-sm" onclick="crearMetodoPago()">+ Agregar Metodo de Pago</button></div>';
     if(!metodos.length){h+='<div class="empty-state"><p>No hay metodos de pago. Agrega uno.</p></div>'}
     else{
-      h+='<div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Nombre</th><th>Valor</th><th>Instrucciones</th><th>Activo</th><th>Acciones</th></tr></thead><tbody>';
+      h+='<div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Nombre</th><th>Valor</th><th>QR</th><th>Instrucciones</th><th>Activo</th><th>Acciones</th></tr></thead><tbody>';
       metodos.forEach(m=>{
+        const qrCell=m.qr_imagen?`<a href="#" onclick="verQrMetodo(${m.id});return false" style="color:var(--primary)">📷 Ver QR</a>`:'<span style="color:var(--text2);font-size:12px">Sin QR</span>';
         h+=`<tr>
           <td>${esc(m.tipo)}</td>
           <td><b>${esc(m.nombre)}</b></td>
           <td><code>${esc(m.valor)}</code></td>
+          <td>${qrCell}</td>
           <td style="font-size:12px">${esc(m.instrucciones||'-')}</td>
           <td><span class="badge ${m.activo?'badge-success':'badge-danger'}">${m.activo?'Si':'No'}</span></td>
           <td>
-            <button class="btn btn-primary btn-sm" onclick="editarMetodo(${m.id},${JSON.stringify(esc(m.nombre))},${JSON.stringify(esc(m.valor))},${JSON.stringify(esc(m.instrucciones||''))},${m.activo})">✏️</button>
-            <button class="btn btn-danger btn-sm" onclick="eliminarMetodo(${m.id})">🗑</button>
+            <button class="btn btn-primary btn-sm" onclick="editarMetodo(${m.id},${JSON.stringify(esc(m.nombre))},${JSON.stringify(esc(m.valor))},${JSON.stringify(esc(m.instrucciones||''))},${m.activo})" title="Editar">✏️</button>
+            <button class="btn btn-outline btn-sm" onclick="subirQrMetodo(${m.id})" title="Subir QR">📷</button>
+            <button class="btn btn-danger btn-sm" onclick="eliminarMetodo(${m.id})" title="Eliminar">🗑</button>
           </td>
         </tr>`;
       });
@@ -4284,6 +4340,48 @@ async function eliminarMetodo(id){
   if(!confirm('Eliminar metodo de pago #'+id+'?'))return;
   const r=await api('/api/admin/metodos_pago/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id:id})});
   if(r.ok){toast('Eliminado','success');adminPagosTab('metodos')}else{toast(r.error||'Error','error')}
+}
+
+function subirQrMetodo(id){
+  showModal(`<h3>📷 Subir QR — Metodo #${id}</h3>
+    <p style="color:var(--text2);margin-bottom:15px;font-size:13px">Sube la imagen del codigo QR de tu metodo de pago (Yape, Plin, etc). Los clientes lo veran al momento de pagar.</p>
+    <div class="form-group"><label>Imagen QR</label><input type="file" id="qrFileInput" accept="image/*"></div>
+    <div id="qrPreviewWrap" style="text-align:center;margin:10px 0;display:none"><img id="qrPreviewImg" style="max-width:200px;max-height:200px;border-radius:8px;border:2px solid var(--accent)"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger btn-sm" onclick="eliminarQrMetodo(${id})">🗑 Quitar QR</button>
+      <button class="btn btn-success" onclick="enviarQrMetodo(${id})">📤 Subir QR</button>
+    </div>`);
+  setTimeout(()=>{
+    const inp=$('qrFileInput');
+    if(inp)inp.onchange=()=>{
+      const f=inp.files[0];
+      if(f){const r=new FileReader();r.onload=()=>{$('qrPreviewImg').src=r.result;$('qrPreviewWrap').style.display='block'};r.readAsDataURL(f)}
+    };
+  },100);
+}
+
+async function enviarQrMetodo(id){
+  const inp=$('qrFileInput');
+  const file=inp&&inp.files[0];
+  if(!file){toast('Selecciona una imagen','error');return}
+  const reader=new FileReader();
+  reader.onload=async function(){
+    const base64=reader.result.split(',')[1];
+    const r=await api('/api/admin/metodos_pago/qr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id:id,imagen_base64:base64})});
+    if(r.ok){closeModal();toast('QR subido correctamente','success');adminPagosTab('metodos')}else{toast(r.error||'Error','error')}
+  };
+  reader.readAsDataURL(file);
+}
+
+async function eliminarQrMetodo(id){
+  if(!confirm('Quitar QR del metodo #'+id+'?'))return;
+  const r=await api('/api/admin/metodos_pago/qr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id:id,qr_imagen:''})});
+  if(r.ok){closeModal();toast('QR eliminado','success');adminPagosTab('metodos')}else{toast(r.error||'Error','error')}
+}
+
+function verQrMetodo(id){
+  showModal(`<h3>📷 QR del Metodo de Pago</h3><div style="text-align:center;padding:20px"><img src="/api/metodos_pago/qr?id=${id}" style="max-width:100%;max-height:70vh;border-radius:12px;border:3px solid var(--accent)" onerror="this.alt='Error al cargar QR';this.style.display='none'"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
 }
 
 // ═══════════════════════════════════════

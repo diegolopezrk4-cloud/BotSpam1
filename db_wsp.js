@@ -349,6 +349,13 @@ function init() {
         db.exec("ALTER TABLE historial_envios ADD COLUMN mensaje_preview TEXT DEFAULT NULL");
         console.log("   Columna 'mensaje_preview' agregada a historial_envios");
     }
+    // Add qr_imagen column to metodos_pago if it doesn't exist
+    try {
+        db.prepare("SELECT qr_imagen FROM metodos_pago LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE metodos_pago ADD COLUMN qr_imagen TEXT DEFAULT ''");
+        console.log("   Columna 'qr_imagen' agregada a metodos_pago");
+    }
     // Table for manually added personal numbers
     db.exec(`
         CREATE TABLE IF NOT EXISTS numeros_manuales (
@@ -622,7 +629,8 @@ function init() {
             valor TEXT NOT NULL,
             instrucciones TEXT DEFAULT '',
             activo INTEGER DEFAULT 1,
-            orden INTEGER DEFAULT 0
+            orden INTEGER DEFAULT 0,
+            qr_imagen TEXT DEFAULT ''
         );
 
         -- Push subscriptions (Web Push)
@@ -2316,8 +2324,20 @@ function crearMetodoPago(tipo, nombre, valor, instrucciones) {
     return db.prepare("SELECT * FROM metodos_pago ORDER BY id DESC LIMIT 1").get();
 }
 
-function editarMetodoPago(id, nombre, valor, instrucciones, activo) {
-    db.prepare("UPDATE metodos_pago SET nombre = ?, valor = ?, instrucciones = ?, activo = ? WHERE id = ?").run(nombre, valor, instrucciones || '', activo ? 1 : 0, id);
+function editarMetodoPago(id, nombre, valor, instrucciones, activo, qrImagen) {
+    if (qrImagen !== undefined) {
+        db.prepare("UPDATE metodos_pago SET nombre = ?, valor = ?, instrucciones = ?, activo = ?, qr_imagen = ? WHERE id = ?").run(nombre, valor, instrucciones || '', activo ? 1 : 0, qrImagen, id);
+    } else {
+        db.prepare("UPDATE metodos_pago SET nombre = ?, valor = ?, instrucciones = ?, activo = ? WHERE id = ?").run(nombre, valor, instrucciones || '', activo ? 1 : 0, id);
+    }
+}
+
+function setMetodoPagoQr(id, qrImagen) {
+    db.prepare("UPDATE metodos_pago SET qr_imagen = ? WHERE id = ?").run(qrImagen || '', id);
+}
+
+function getMetodoPago(id) {
+    return db.prepare("SELECT * FROM metodos_pago WHERE id = ?").get(id);
 }
 
 function eliminarMetodoPago(id) {
@@ -2573,7 +2593,7 @@ module.exports = {
     crearComprobante, getComprobante, getComprobantesUsuario, getComprobantesPendientes,
     getTodosComprobantes, aprobarComprobante, rechazarComprobante, getComprobantesStats,
     // Metodos de pago (admin configurable)
-    getMetodosPago, getMetodosPagoActivos, crearMetodoPago, editarMetodoPago, eliminarMetodoPago, initDefaultMetodosPago,
+    getMetodosPago, getMetodosPagoActivos, crearMetodoPago, editarMetodoPago, eliminarMetodoPago, initDefaultMetodosPago, setMetodoPagoQr, getMetodoPago,
     // Push notifications
     addPushSubscription, getPushSubscriptions, removePushSubscription, getAllPushSubscriptions,
     // Tickets

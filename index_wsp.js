@@ -313,7 +313,7 @@ poll();
             "/api/status", "/api/panel_login", "/api/panel_registro",
             "/api/panel_recuperar_solicitar", "/api/panel_recuperar_reset",
             "/api/canjear_codigo", "/api/check_membresia",
-            "/api/pagos/webhook", "/api/metodos_pago", "/api/push/vapid_key", "/api/health"
+            "/api/pagos/webhook", "/api/metodos_pago", "/api/metodos_pago/qr", "/api/push/vapid_key", "/api/health"
         ];
         const isPublicEndpoint = PUBLIC_ENDPOINTS.includes(url.pathname) || url.pathname === "/api/status";
 
@@ -2955,6 +2955,77 @@ poll();
                 db.editarMetodoPago(parseInt(body.id), body.nombre, body.valor, body.instrucciones || "", body.activo !== false);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/admin/metodos_pago/qr — Admin sube QR de metodo de pago
+            if (url.pathname === "/api/admin/metodos_pago/qr" && req.method === "POST") {
+                const contentType = req.headers["content-type"] || "";
+                if (!contentType.includes("multipart")) {
+                    const body = await readBody();
+                    if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                    if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                    if (body.imagen_base64) {
+                        const fname = `comprobantes/qr_metodo_${body.id}_${Date.now()}.jpg`;
+                        fs.writeFileSync(fname, Buffer.from(body.imagen_base64, "base64"));
+                        db.setMetodoPagoQr(parseInt(body.id), fname);
+                    } else if (body.qr_imagen === "") {
+                        db.setMetodoPagoQr(parseInt(body.id), "");
+                    }
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true }));
+                }
+                // Multipart parsing for file upload
+                const rawBuf = await new Promise((resolve) => {
+                    const chunks = [];
+                    req.on("data", c => chunks.push(c));
+                    req.on("end", () => resolve(Buffer.concat(chunks)));
+                });
+                const boundaryMatch = contentType.match(/boundary=(.+)/);
+                if (!boundaryMatch) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Boundary not found" })); }
+                const boundary = boundaryMatch[1];
+                const parts = rawBuf.toString("binary").split("--" + boundary);
+                let fileBuffer = null, fileExt = "jpg";
+                const fields = {};
+                for (const part of parts) {
+                    if (part.includes("Content-Disposition")) {
+                        const nameMatch = part.match(/name="([^"]+)"/);
+                        const filenameMatch = part.match(/filename="([^"]+)"/);
+                        const headerEnd = part.indexOf("\r\n\r\n");
+                        if (headerEnd === -1) continue;
+                        const content = part.substring(headerEnd + 4).replace(/\r\n$/, "");
+                        if (filenameMatch) {
+                            fileBuffer = Buffer.from(content, "binary");
+                            const ext = filenameMatch[1].split(".").pop().toLowerCase();
+                            if (["jpg","jpeg","png","webp","gif"].includes(ext)) fileExt = ext;
+                        } else if (nameMatch) {
+                            fields[nameMatch[1]] = content;
+                        }
+                    }
+                }
+                if (!checkAdmin(fields.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!fields.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                if (fileBuffer && fileBuffer.length > 0) {
+                    const fname = `comprobantes/qr_metodo_${fields.id}_${Date.now()}.${fileExt}`;
+                    fs.writeFileSync(fname, fileBuffer);
+                    db.setMetodoPagoQr(parseInt(fields.id), fname);
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/metodos_pago/qr — Servir imagen QR del metodo de pago
+            if (url.pathname === "/api/metodos_pago/qr" && req.method === "GET") {
+                const id = parseInt(url.searchParams.get("id"));
+                if (!id) { res.writeHead(400); return res.end("Falta id"); }
+                const metodo = db.getMetodoPago(id);
+                if (!metodo || !metodo.qr_imagen) { res.writeHead(404); return res.end("QR no encontrado"); }
+                try {
+                    const imgBuf = fs.readFileSync(metodo.qr_imagen);
+                    const ext = metodo.qr_imagen.split(".").pop().toLowerCase();
+                    const mimeMap = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+                    res.writeHead(200, { "Content-Type": mimeMap[ext] || "image/jpeg" });
+                    return res.end(imgBuf);
+                } catch (e) { res.writeHead(404); return res.end("Imagen no encontrada"); }
             }
 
             // POST /api/admin/metodos_pago/eliminar — Admin elimina metodo
