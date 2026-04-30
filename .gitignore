@@ -10,3 +10,6 @@ admin_group.txt
 admin_jids.txt
 __pycache__/
 *.pyc
+comprobantes/
+backups/
+vapid_keys.json

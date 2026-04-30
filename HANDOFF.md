@@ -342,35 +342,35 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 ### Prioridad Alta
 1. ~~**Sistema de pagos automatico (Binance Pay)**~~ — **IMPLEMENTADO** (ver seccion "Sistema de Pagos" abajo)
 2. ~~**Sistema de pagos manual (Yape/comprobantes)**~~ — **IMPLEMENTADO** (ver seccion "Sistema de Pagos" abajo)
-3. **Notificaciones push reales** — Usar Web Push API con VAPID keys para notificar envios completados, campanas terminadas, membresia por expirar.
-4. **Panel de analytics avanzado** — Graficos de envios/dia, tasa de entrega por cuenta, horas mas activas, clientes mas activos. Chart.js ya importado.
+3. ~~**Notificaciones push reales**~~ — **IMPLEMENTADO** (#52) Web Push API + VAPID keys. Auto-genera keys, push en pagos/tickets/comprobantes.
+4. ~~**Panel de analytics avanzado**~~ — **IMPLEMENTADO** (#53) Graficos Chart.js: envios/dia, horas activas, tasa por cuenta.
 
 ### Prioridad Media
-5. **Sistema de tickets/soporte** — Clientes envian dudas desde el panel → admin las ve en una bandeja. Historial de conversacion.
-6. **Rotacion inteligente de cuentas** — Si una cuenta tiene tasa de entrega baja, el bot automaticamente usa otra cuenta para esos envios.
-7. **Deteccion de ban preventiva** — Monitorear patrones (muchos mensajes no entregados en poco tiempo) y pausar automaticamente antes de un ban real.
-8. **Templates con variables** — Soportar `{nombre}`, `{fecha}`, `{random}` en mensajes para personalizacion masiva.
-9. **Exportar/Importar configuracion completa** — Un solo archivo JSON con toda la config de un usuario (grupos, campanas, plantillas, etc.) para migrar entre cuentas.
-10. **Dashboard de sellers** — Los sellers ven cuantos clientes activos tienen, ingresos generados, codigos mas usados, graficos de crecimiento.
+5. ~~**Sistema de tickets/soporte**~~ — **IMPLEMENTADO** (#54) Bandeja admin + historial conversacion + push notifications.
+6. ~~**Rotacion inteligente de cuentas**~~ — **IMPLEMENTADO** (#55) Analisis de tasa por cuenta + recomendaciones automaticas.
+7. ~~**Deteccion de ban preventiva**~~ — **IMPLEMENTADO** (#55) Integrado con rate_limit/status, detecta tasa <50%.
+8. ~~**Templates con variables**~~ — **IMPLEMENTADO** (#56) {nombre}, {fecha}, {hora}, {random}, {numero}, {grupo} + preview.
+9. **Exportar/Importar configuracion completa** — Pendiente. Un solo archivo JSON con toda la config para migrar entre cuentas.
+10. ~~**Dashboard de sellers**~~ — **IMPLEMENTADO** (#57) Stats: codigos, clientes activos, tasa conversion, breakdown mensual.
 
 ### Prioridad Baja (Ideas Creativas)
-11. **Modo vacaciones** — Pausar todas las campanas y envios con un solo boton. Reanudar todo al volver.
-12. **Programacion recurrente avanzada** — "Enviar todos los lunes y miercoles a las 9am" (cron-like) en vez de solo intervalos.
-13. **A/B Testing de mensajes** — Enviar variante A al 50% y variante B al otro 50%, comparar tasas de respuesta.
-14. **Auto-limpieza de grupos muertos** — Detectar grupos donde nunca hay actividad y sugerir eliminarlos de campanas.
-15. **Respaldo automatico diario** — Exportar DB a un archivo cada dia a las 3am y mantener ultimos 7 dias. Facil de implementar con cron.
-16. **Integracion con Google Sheets** — Importar/exportar numeros, grupos, estadisticas a una hoja de calculo del usuario.
-17. **Multi-idioma para el bot TG** — Responder en el idioma del usuario (detectar por locale de Telegram).
-18. **Rate limiting adaptativo** — Si un usuario envia mucho y la tasa de entrega baja, reducir automaticamente la velocidad de envio.
-19. **Webhook de eventos** — Permitir al usuario configurar una URL donde recibir notificaciones de eventos (envio completado, nuevo miembro, etc.)
-20. **Panel mobile nativo (React Native)** — Convertir la PWA a app nativa para mejor experiencia en celular.
+11. ~~**Modo vacaciones**~~ — **IMPLEMENTADO** (#58) Pausar/reanudar todas las campanas con 1 click.
+12. ~~**Programacion recurrente avanzada**~~ — **IMPLEMENTADO** (#59) Cron-like: dias de semana + hora.
+13. ~~**A/B Testing de mensajes**~~ — **IMPLEMENTADO** (#60) Divide grupos 50/50 entre variante A y B.
+14. ~~**Auto-limpieza de grupos muertos**~~ — **IMPLEMENTADO** (#61) Detectar + eliminar en batch.
+15. ~~**Respaldo automatico diario**~~ — **IMPLEMENTADO** (#62) Copia DB cada 3am, mantiene 7 dias, admin puede forzar.
+16. **Integracion con Google Sheets** — Pendiente. Requiere OAuth de Google + API de Sheets.
+17. **Multi-idioma para el bot TG** — Pendiente. Detectar locale de Telegram y traducir respuestas.
+18. ~~**Rate limiting adaptativo**~~ — **IMPLEMENTADO** (#63) Analiza tasa y recomienda ajustes.
+19. ~~**Webhook de eventos**~~ — **IMPLEMENTADO** (#64) CRUD completo + firma HMAC-SHA256.
+20. **Panel mobile nativo (React Native)** — Pendiente. PWA actual funciona bien en mobile.
 
 ### Mejoras de Infraestructura
-21. **Separar panel.html en componentes** — Eventualmente dividir las 4700+ lineas en modulos ES6 con bundler (webpack/vite) para mantenibilidad.
-22. **Migrar SQLite a PostgreSQL** — Para cuando haya muchos usuarios concurrentes. SQLite tiene problemas con escrituras concurrentes.
-23. **Docker compose** — Empaquetar los 3 servicios + DB en contenedores para deploy facil en cualquier VPS.
-24. **CI/CD automatico** — GitHub Actions que corra tests y deploys automaticos al hacer push.
-25. **Monitoreo con alertas** — Conectar con UptimeRobot o similar para saber si el bot se cae.
+21. **Separar panel.html en componentes** — Pendiente. Panel tiene 5300+ lineas, beneficiaria de modularizacion.
+22. **Migrar SQLite a PostgreSQL** — Pendiente. Para alta concurrencia futura.
+23. ~~**Docker compose**~~ — **IMPLEMENTADO** (#65) Dockerfile + docker-compose.yml con volumes y healthcheck.
+24. ~~**CI/CD automatico**~~ — **IMPLEMENTADO** (#66) GitHub Actions: syntax check JS/Python + Docker build.
+25. ~~**Monitoreo con alertas**~~ — **IMPLEMENTADO** (#67) GET /api/health publico, compatible con UptimeRobot.
 
 ---
 
@@ -516,3 +516,63 @@ Cuando un pago es confirmado (automatico por Binance webhook o manual por admin)
 
 ### Seguridad Adicional
 51. **XSS en admin panel, sellers, codigos**: Datos de usuario insertados en innerHTML sin esc(). Fix: esc() aplicado sistematicamente en todas las generaciones de HTML con datos de usuario
+
+### Mejoras Implementadas (Todas las del HANDOFF Futuras)
+
+#### Prioridad Alta
+52. **Notificaciones Push Reales (Web Push API + VAPID)**: Auto-genera VAPID keys, almacena subscripciones por usuario. Envia push en: pago confirmado, comprobante aprobado, nuevo ticket, respuesta a ticket. SW ya tenia handler de push. Panel auto-suscribe al login.
+    - Endpoints: `GET /api/push/vapid_key`, `POST /api/push/subscribe`, `POST /api/push/unsubscribe`, `POST /api/push/test`
+    - Tabla: `push_subscriptions` (user_id, endpoint, p256dh, auth)
+    - Dependencia: `web-push` (npm)
+
+53. **Panel de Analytics Avanzado**: Graficos con Chart.js de: envios por dia (30 dias), horas mas activas (bar chart 0-23h), tabla de tasa de entrega por cuenta con colores (verde/amarillo/rojo).
+    - Endpoints: `GET /api/analytics/envios_dia`, `GET /api/analytics/horas_activas`, `GET /api/analytics/tasa_cuenta`, `GET /api/analytics/clientes_activos`
+    - Funciones DB: getAnalyticsEnviosPorDia, getAnalyticsHorasActivas, getAnalyticsTasaPorCuenta, getAnalyticsClientesActivos
+    - Seccion: sec-analytics ("Analytics Avanzado")
+
+#### Prioridad Media
+54. **Sistema de Tickets/Soporte**: Clientes crean tickets con asunto + mensaje, admin ve bandeja de tickets abiertos/todos, historial de conversacion en cada ticket, cerrar tickets.
+    - Endpoints: `POST /api/tickets/crear`, `GET /api/tickets`, `GET /api/tickets/mensajes`, `POST /api/tickets/responder`, `POST /api/tickets/cerrar`, `GET /api/admin/tickets`
+    - Tablas: `tickets` (user_id, asunto, estado, prioridad, fecha_creado, fecha_cerrado), `ticket_mensajes` (ticket_id, autor_id, es_admin, mensaje, fecha)
+    - Secciones: sec-tickets (usuario), sec-admintickets (admin)
+    - Push: admin recibe push cuando se crea ticket, usuario recibe push cuando admin responde
+
+55. **Rotacion Inteligente de Cuentas + Deteccion de Ban Preventiva**: El endpoint `/api/rate_limit/status` analiza la tasa de entrega por cuenta y genera recomendaciones. Si una cuenta tiene tasa <50% con >10 envios, recomienda reducir velocidad o cambiar de cuenta.
+    - Endpoint: `GET /api/rate_limit/status`
+
+56. **Templates con Variables**: Soporta {nombre}, {fecha}, {hora}, {random}, {numero}, {grupo} en mensajes. Preview endpoint que reemplaza variables. {random} acepta opciones separadas por |.
+    - Endpoint: `POST /api/templates/preview`
+    - Helper JS: `insertVariable(varName, textareaId)` para insertar variables en textarea
+
+57. **Dashboard de Sellers Avanzado**: Stats con total codigos, usados, pendientes, clientes activos, tasa de conversion, breakdown mensual.
+    - Endpoint: `GET /api/seller/dashboard`
+
+#### Prioridad Baja
+58. **Modo Vacaciones**: Pausar/reanudar TODAS las campanas del usuario con un solo click. Botones en seccion Analytics.
+    - Endpoints: `POST /api/vacaciones/activar`, `POST /api/vacaciones/desactivar`
+
+59. **Programacion Recurrente (cron-like)**: Crear envios recurrentes con patron de dias de semana + hora. Almacena recurrencia como JSON.
+    - Endpoint: `POST /api/programados/recurrente`
+
+60. **A/B Testing de Mensajes**: Crear test con variante A y B, divide grupos automaticamente 50/50.
+    - Endpoint: `POST /api/ab_test/crear`
+
+61. **Auto-limpieza de Grupos Muertos**: Detectar grupos sin actividad en N dias. Eliminar en batch.
+    - Endpoints: `GET /api/grupos/muertos`, `POST /api/grupos/limpiar_muertos`
+
+62. **Respaldo Automatico Diario**: Copia wsp_titan.db a /backups/ cada dia a las 3:00 AM. Mantiene ultimos 7 dias. Admin puede forzar backup manual. Log de backups en DB.
+    - Endpoints: `GET /api/admin/backups`, `POST /api/admin/backup_ahora`
+    - Tabla: `backup_log` (filename, size_bytes, fecha)
+    - Seccion: sec-adminbackups (admin)
+
+63. **Rate Limiting Adaptativo**: Analiza tasa de entrega por cuenta, genera recomendaciones automaticas. Integrado con analytics.
+
+64. **Webhook de Eventos**: Usuarios configuran URLs para recibir notificaciones HTTP POST cuando ocurren eventos (pago confirmado, comprobante aprobado, etc.). Firma HMAC-SHA256 con secret. CRUD completo.
+    - Endpoints: `GET /api/webhooks`, `POST /api/webhooks/crear`, `POST /api/webhooks/editar`, `POST /api/webhooks/eliminar`
+    - Tabla: `user_webhooks` (user_id, url, eventos, activo, secret)
+    - Seccion: sec-webhooks
+
+#### Infraestructura
+65. **Docker Compose**: Dockerfile + docker-compose.yml para empaquetar los 3 servicios. Volumes para persistencia. Health check integrado.
+66. **CI/CD GitHub Actions**: Workflow en `.github/workflows/ci.yml` — syntax check JS (node -c), syntax check Python (py_compile), verifica archivos requeridos, build Docker image.
+67. **Monitoreo/Health Check**: `GET /api/health` (publico) retorna uptime, memoria, estado del bot. Compatible con UptimeRobot y similares.

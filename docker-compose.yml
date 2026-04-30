@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  botspam:
+    build: .
+    container_name: botspam
+    restart: unless-stopped
+    ports:
+      - "3000:3000"  # WSP API
+      - "3001:3001"  # Panel Web
+      - "3002:3002"  # TG API
+    volumes:
+      - ./sessions:/app/sessions          # WSP sessions persist
+      - ./client_sessions:/app/client_sessions  # TG sessions persist
+      - ./media:/app/media                # Media files
+      - ./comprobantes:/app/comprobantes  # Payment proofs
+      - ./backups:/app/backups            # Auto-backups
+      - ./wsp_titan.db:/app/wsp_titan.db  # WSP database
+      - ./titan.db:/app/titan.db          # TG database
+    environment:
+      - NODE_ENV=production
+      - QR_PORT=3000
+      - PANEL_PORT=3001
+      - TG_PORT=3002
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

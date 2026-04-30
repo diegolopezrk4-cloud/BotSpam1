@@ -624,6 +624,59 @@ function init() {
             activo INTEGER DEFAULT 1,
             orden INTEGER DEFAULT 0
         );
+
+        -- Push subscriptions (Web Push)
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            endpoint TEXT NOT NULL UNIQUE,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+
+        -- Tickets de soporte
+        CREATE TABLE IF NOT EXISTS tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            asunto TEXT NOT NULL,
+            estado TEXT DEFAULT 'abierto',
+            prioridad TEXT DEFAULT 'normal',
+            fecha_creado TEXT DEFAULT (datetime('now')),
+            fecha_cerrado TEXT DEFAULT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id);
+        CREATE INDEX IF NOT EXISTS idx_tickets_estado ON tickets(estado);
+
+        CREATE TABLE IF NOT EXISTS ticket_mensajes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER NOT NULL,
+            autor_id TEXT NOT NULL,
+            es_admin INTEGER DEFAULT 0,
+            mensaje TEXT NOT NULL,
+            fecha TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(ticket_id) REFERENCES tickets(id)
+        );
+
+        -- Webhooks de eventos
+        CREATE TABLE IF NOT EXISTS user_webhooks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            eventos TEXT DEFAULT 'all',
+            activo INTEGER DEFAULT 1,
+            secret TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        -- Backups automaticos
+        CREATE TABLE IF NOT EXISTS backup_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            size_bytes INTEGER DEFAULT 0,
+            fecha TEXT DEFAULT (datetime('now'))
+        );
     `);
     console.log("\u2705 Base de datos WSP inicializada");
 }
@@ -2280,6 +2333,155 @@ function initDefaultMetodosPago() {
     }
 }
 
+// ─────────────────────────────────────────
+//   PUSH NOTIFICATIONS
+// ─────────────────────────────────────────
+
+function addPushSubscription(userId, endpoint, p256dh, auth) {
+    db.prepare("INSERT OR REPLACE INTO push_subscriptions (user_id, endpoint, p256dh, auth) VALUES (?, ?, ?, ?)").run(String(userId), endpoint, p256dh, auth);
+}
+
+function getPushSubscriptions(userId) {
+    return db.prepare("SELECT * FROM push_subscriptions WHERE user_id = ?").all(String(userId));
+}
+
+function removePushSubscription(endpoint) {
+    db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint);
+}
+
+function getAllPushSubscriptions() {
+    return db.prepare("SELECT * FROM push_subscriptions").all();
+}
+
+// ─────────────────────────────────────────
+//   TICKETS DE SOPORTE
+// ─────────────────────────────────────────
+
+function crearTicket(userId, asunto, mensajeInicial) {
+    const r = db.prepare("INSERT INTO tickets (user_id, asunto) VALUES (?, ?)").run(String(userId), asunto);
+    if (mensajeInicial) {
+        db.prepare("INSERT INTO ticket_mensajes (ticket_id, autor_id, es_admin, mensaje) VALUES (?, ?, 0, ?)").run(r.lastInsertRowid, String(userId), mensajeInicial);
+    }
+    return db.prepare("SELECT * FROM tickets WHERE id = ?").get(r.lastInsertRowid);
+}
+
+function getTicket(id) {
+    return db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
+}
+
+function getTicketsUsuario(userId) {
+    return db.prepare("SELECT * FROM tickets WHERE user_id = ? ORDER BY fecha_creado DESC").all(String(userId));
+}
+
+function getTicketsPendientes() {
+    return db.prepare("SELECT * FROM tickets WHERE estado = 'abierto' ORDER BY fecha_creado ASC").all();
+}
+
+function getTodosTickets(limit = 100) {
+    return db.prepare("SELECT * FROM tickets ORDER BY fecha_creado DESC LIMIT ?").all(limit);
+}
+
+function agregarMensajeTicket(ticketId, autorId, esAdmin, mensaje) {
+    db.prepare("INSERT INTO ticket_mensajes (ticket_id, autor_id, es_admin, mensaje) VALUES (?, ?, ?, ?)").run(ticketId, String(autorId), esAdmin ? 1 : 0, mensaje);
+    return db.prepare("SELECT * FROM ticket_mensajes WHERE ticket_id = ? ORDER BY id DESC LIMIT 1").get(ticketId);
+}
+
+function getMensajesTicket(ticketId) {
+    return db.prepare("SELECT * FROM ticket_mensajes WHERE ticket_id = ? ORDER BY fecha ASC").all(ticketId);
+}
+
+function cerrarTicket(id) {
+    db.prepare("UPDATE tickets SET estado = 'cerrado', fecha_cerrado = datetime('now') WHERE id = ?").run(id);
+}
+
+function getTicketsStats() {
+    const abiertos = db.prepare("SELECT COUNT(*) as c FROM tickets WHERE estado = 'abierto'").get();
+    const total = db.prepare("SELECT COUNT(*) as c FROM tickets").get();
+    const hoy = db.prepare("SELECT COUNT(*) as c FROM tickets WHERE fecha_creado >= date('now')").get();
+    return { abiertos: abiertos.c || 0, total: total.c || 0, hoy: hoy.c || 0 };
+}
+
+// ─────────────────────────────────────────
+//   WEBHOOKS DE EVENTOS
+// ─────────────────────────────────────────
+
+function crearWebhook(userId, url, eventos, secret) {
+    db.prepare("INSERT INTO user_webhooks (user_id, url, eventos, secret) VALUES (?, ?, ?, ?)").run(String(userId), url, eventos || 'all', secret || '');
+    return db.prepare("SELECT * FROM user_webhooks WHERE user_id = ? ORDER BY id DESC LIMIT 1").get(String(userId));
+}
+
+function getWebhooks(userId) {
+    return db.prepare("SELECT * FROM user_webhooks WHERE user_id = ? ORDER BY id ASC").all(String(userId));
+}
+
+function editarWebhook(id, url, eventos, activo) {
+    db.prepare("UPDATE user_webhooks SET url = ?, eventos = ?, activo = ? WHERE id = ?").run(url, eventos || 'all', activo ? 1 : 0, id);
+}
+
+function eliminarWebhook(id) {
+    db.prepare("DELETE FROM user_webhooks WHERE id = ?").run(id);
+}
+
+function getWebhooksActivos(userId) {
+    return db.prepare("SELECT * FROM user_webhooks WHERE user_id = ? AND activo = 1").all(String(userId));
+}
+
+// ─────────────────────────────────────────
+//   BACKUP LOG
+// ─────────────────────────────────────────
+
+function registrarBackup(filename, sizeBytes) {
+    db.prepare("INSERT INTO backup_log (filename, size_bytes) VALUES (?, ?)").run(filename, sizeBytes || 0);
+}
+
+function getBackupLog(limit = 20) {
+    return db.prepare("SELECT * FROM backup_log ORDER BY fecha DESC LIMIT ?").all(limit);
+}
+
+function limpiarBackupsViejos(keepDays = 7) {
+    return db.prepare("DELETE FROM backup_log WHERE fecha < datetime('now', '-' || ? || ' days')").run(keepDays);
+}
+
+// ─────────────────────────────────────────
+//   ANALYTICS AVANZADO
+// ─────────────────────────────────────────
+
+function getAnalyticsEnviosPorDia(userId, dias = 30) {
+    return db.prepare(`
+        SELECT date(fecha) as dia, COUNT(*) as total,
+        SUM(CASE WHEN estado = 'exitoso' OR estado = 'ok' THEN 1 ELSE 0 END) as exitosos,
+        SUM(CASE WHEN estado != 'exitoso' AND estado != 'ok' THEN 1 ELSE 0 END) as fallidos
+        FROM historial_envios WHERE user_id = ? AND fecha >= date('now', '-' || ? || ' days')
+        GROUP BY dia ORDER BY dia ASC
+    `).all(String(userId), dias);
+}
+
+function getAnalyticsHorasActivas(userId, dias = 7) {
+    return db.prepare(`
+        SELECT CAST(strftime('%H', fecha) AS INTEGER) as hora, COUNT(*) as total
+        FROM historial_envios WHERE user_id = ? AND fecha >= date('now', '-' || ? || ' days')
+        GROUP BY hora ORDER BY hora ASC
+    `).all(String(userId), dias);
+}
+
+function getAnalyticsTasaPorCuenta(userId) {
+    return db.prepare(`
+        SELECT cuenta, COUNT(*) as total,
+        SUM(CASE WHEN estado = 'exitoso' OR estado = 'ok' THEN 1 ELSE 0 END) as exitosos,
+        ROUND(SUM(CASE WHEN estado = 'exitoso' OR estado = 'ok' THEN 1.0 ELSE 0.0 END) / COUNT(*) * 100, 1) as tasa
+        FROM historial_envios WHERE user_id = ? GROUP BY cuenta ORDER BY tasa DESC
+    `).all(String(userId));
+}
+
+function getAnalyticsClientesActivos(dias = 7) {
+    return db.prepare(`
+        SELECT user_id, COUNT(*) as envios,
+        SUM(CASE WHEN estado = 'exitoso' OR estado = 'ok' THEN 1 ELSE 0 END) as exitosos
+        FROM historial_envios WHERE fecha >= date('now', '-' || ? || ' days')
+        GROUP BY user_id ORDER BY envios DESC LIMIT 20
+    `).all(dias);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -2372,4 +2574,15 @@ module.exports = {
     getTodosComprobantes, aprobarComprobante, rechazarComprobante, getComprobantesStats,
     // Metodos de pago (admin configurable)
     getMetodosPago, getMetodosPagoActivos, crearMetodoPago, editarMetodoPago, eliminarMetodoPago, initDefaultMetodosPago,
+    // Push notifications
+    addPushSubscription, getPushSubscriptions, removePushSubscription, getAllPushSubscriptions,
+    // Tickets
+    crearTicket, getTicket, getTicketsUsuario, getTicketsPendientes, getTodosTickets,
+    agregarMensajeTicket, getMensajesTicket, cerrarTicket, getTicketsStats,
+    // Webhooks
+    crearWebhook, getWebhooks, editarWebhook, eliminarWebhook, getWebhooksActivos,
+    // Backup log
+    registrarBackup, getBackupLog, limpiarBackupsViejos,
+    // Analytics
+    getAnalyticsEnviosPorDia, getAnalyticsHorasActivas, getAnalyticsTasaPorCuenta, getAnalyticsClientesActivos,
 };

@@ -444,6 +444,9 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
       <a href="#" data-section="canjear"><span class="icon">🎫</span><span>Canjear Codigo</span></a>
       <a href="#" data-section="pagos"><span class="icon">💳</span><span>Pagar Membresia</span></a>
+      <a href="#" data-section="tickets"><span class="icon">🎟️</span><span>Soporte</span></a>
+      <a href="#" data-section="analytics"><span class="icon">📊</span><span>Analytics</span></a>
+      <a href="#" data-section="webhooks"><span class="icon">🔗</span><span>Webhooks</span></a>
       <div class="nav-group seller-only" style="display:none">Seller</div>
       <a href="#" data-section="sellerpanel" class="seller-only" style="display:none"><span class="icon">🏪</span><span>Panel Seller</span></a>
       <div class="nav-group admin-only" style="display:none">Admin</div>
@@ -452,6 +455,8 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="adminlogs" class="admin-only" style="display:none"><span class="icon">📋</span><span>Logs Global</span></a>
       <a href="#" data-section="auditoria" class="admin-only" style="display:none"><span class="icon">🔍</span><span>Auditoria</span></a>
       <a href="#" data-section="adminpagos" class="admin-only" style="display:none"><span class="icon">💰</span><span>Pagos</span></a>
+      <a href="#" data-section="admintickets" class="admin-only" style="display:none"><span class="icon">🎟️</span><span>Tickets Soporte</span></a>
+      <a href="#" data-section="adminbackups" class="admin-only" style="display:none"><span class="icon">💾</span><span>Backups Auto</span></a>
     </nav>
     <div class="bottom-actions">
       <button onclick="showCambiarPass()">🔑 <span>Cambiar Contrasena</span></button>
@@ -1321,6 +1326,40 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div id="adminPagosContent"><div class="loading-dots"><span></span><span></span><span></span></div></div>
     </div>
 
+    <!-- TICKETS DE SOPORTE -->
+    <div class="section" id="sec-tickets">
+      <h2>🎟️ Soporte</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia tus dudas o reporta problemas. El admin te respondera directamente.</p>
+      <div id="ticketsContent"><div class="loading-dots"><span></span><span></span><span></span></div></div>
+    </div>
+
+    <!-- ANALYTICS -->
+    <div class="section" id="sec-analytics">
+      <h2>📊 Analytics Avanzado</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Graficos detallados de tus envios, tasas de entrega y actividad.</p>
+      <div id="analyticsContent"><div class="loading-dots"><span></span><span></span><span></span></div></div>
+    </div>
+
+    <!-- WEBHOOKS -->
+    <div class="section" id="sec-webhooks">
+      <h2>🔗 Webhooks de Eventos</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Recibe notificaciones automaticas en tu URL cuando ocurran eventos.</p>
+      <div id="webhooksContent"><div class="loading-dots"><span></span><span></span><span></span></div></div>
+    </div>
+
+    <!-- ADMIN: TICKETS -->
+    <div class="section" id="sec-admintickets">
+      <h2>🎟️ Tickets de Soporte</h2>
+      <div id="adminTicketsContent"><div class="loading-dots"><span></span><span></span><span></span></div></div>
+    </div>
+
+    <!-- ADMIN: BACKUPS -->
+    <div class="section" id="sec-adminbackups">
+      <h2>💾 Backups Automaticos</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Respaldo automatico diario a las 3:00 AM. Ultimos 7 dias.</p>
+      <div id="adminBackupsContent"><div class="loading-dots"><span></span><span></span><span></span></div></div>
+    </div>
+
     <!-- CUENTAS TELEGRAM -->
     <div class="section" id="sec-cuentastg">
       <h2>✈️ Cuentas Telegram</h2>
@@ -1902,6 +1941,7 @@ async function showApp(){
     localStorage.setItem('panel_seller','1');
   }
   initPlatformSwitch();
+  initPushNotifications();
   loadDashboard();
   loadDashboardExtended();
   loadLimites();
@@ -1942,7 +1982,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoMsgSelect');checkPromoEnvioProgreso()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,auditoria:loadAuditoria,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){},pagos:loadPagos,adminpagos:loadAdminPagos};
+    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoMsgSelect');checkPromoEnvioProgreso()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,auditoria:loadAuditoria,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){},pagos:loadPagos,adminpagos:loadAdminPagos,tickets:loadTickets,analytics:loadAnalytics,webhooks:loadWebhooks,admintickets:loadAdminTickets,adminbackups:loadAdminBackups};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -4246,6 +4286,282 @@ async function eliminarMetodo(id){
   if(r.ok){toast('Eliminado','success');adminPagosTab('metodos')}else{toast(r.error||'Error','error')}
 }
 
+// ═══════════════════════════════════════
+//   PUSH NOTIFICATIONS
+// ═══════════════════════════════════════
+async function initPushNotifications(){
+  if(!('serviceWorker' in navigator)||!('PushManager' in window))return;
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    const existing=await reg.pushManager.getSubscription();
+    if(existing)return;
+    const r=await api('/api/push/vapid_key');
+    if(!r.ok||!r.key)return;
+    const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(r.key)});
+    const key=sub.toJSON();
+    await api('/api/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,endpoint:key.endpoint,p256dh:key.keys.p256dh,auth:key.keys.auth})});
+  }catch(e){console.log('Push init error:',e)}
+}
+function urlBase64ToUint8Array(base64String){
+  const padding='='.repeat((4-base64String.length%4)%4);
+  const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/');
+  const rawData=window.atob(base64);
+  const outputArray=new Uint8Array(rawData.length);
+  for(let i=0;i<rawData.length;++i)outputArray[i]=rawData.charCodeAt(i);
+  return outputArray;
+}
+
+// ═══════════════════════════════════════
+//   TICKETS DE SOPORTE
+// ═══════════════════════════════════════
+async function loadTickets(){
+  const r=await api('/api/tickets?u='+userId);
+  if(!r.ok){$('ticketsContent').innerHTML='<div class="empty-state">Error al cargar tickets</div>';return}
+  let h='<button class="btn btn-primary" onclick="crearTicketModal()" style="margin-bottom:15px">+ Nuevo Ticket</button>';
+  if(!r.tickets||r.tickets.length===0){
+    h+='<div class="empty-state">No tienes tickets. Crea uno si necesitas ayuda.</div>';
+  }else{
+    h+='<div class="table-wrapper"><table><thead><tr><th>#</th><th>Asunto</th><th>Estado</th><th>Fecha</th><th>Accion</th></tr></thead><tbody>';
+    r.tickets.forEach(t=>{
+      const badge=t.estado==='abierto'?'<span style="color:var(--warning)">Abierto</span>':'<span style="color:var(--success)">Cerrado</span>';
+      h+=`<tr><td>${t.id}</td><td>${esc(t.asunto)}</td><td>${badge}</td><td style="font-size:11px">${t.fecha_creado||''}</td><td><button class="btn btn-sm" onclick="verTicket(${t.id})">Ver</button></td></tr>`;
+    });
+    h+='</tbody></table></div>';
+  }
+  $('ticketsContent').innerHTML=h;
+}
+function crearTicketModal(){
+  showModal(`<h3>Nuevo Ticket</h3>
+    <div class="form-group"><label>Asunto</label><input type="text" id="ticketAsunto" placeholder="Resumen del problema"></div>
+    <div class="form-group"><label>Mensaje</label><textarea id="ticketMensaje" rows="4" placeholder="Describe tu problema o pregunta"></textarea></div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="enviarTicket()">Enviar</button><button class="btn" onclick="closeModal()">Cancelar</button></div>`);
+}
+async function enviarTicket(){
+  const asunto=$('ticketAsunto').value.trim();
+  const mensaje=$('ticketMensaje').value.trim();
+  if(!asunto||!mensaje){toast('Completa todos los campos','error');return}
+  const r=await api('/api/tickets/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,asunto,mensaje})});
+  if(r.ok){closeModal();toast('Ticket creado','success');loadTickets()}else{toast(r.error||'Error','error')}
+}
+async function verTicket(id){
+  const r=await api('/api/tickets/mensajes?id='+id);
+  if(!r.ok)return;
+  let h=`<h3>Ticket #${r.ticket.id}: ${esc(r.ticket.asunto)}</h3><div style="max-height:300px;overflow-y:auto;margin-bottom:15px;padding:10px;background:var(--bg);border-radius:8px">`;
+  r.mensajes.forEach(m=>{
+    const isAdmin=m.es_admin===1;
+    h+=`<div style="padding:8px;margin-bottom:8px;border-radius:8px;background:${isAdmin?'rgba(124,58,237,0.1)':'rgba(0,0,0,0.05)'}"><div style="font-size:11px;color:var(--text2)">${isAdmin?'Admin':'Tu'} - ${m.fecha||''}</div><div>${esc(m.mensaje)}</div></div>`;
+  });
+  h+=`</div>`;
+  if(r.ticket.estado==='abierto'){
+    h+=`<div class="form-group"><textarea id="ticketResp" rows="2" placeholder="Escribe tu respuesta..."></textarea></div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="responderTicket(${id})">Responder</button><button class="btn btn-danger" onclick="cerrarTicketClick(${id})">Cerrar Ticket</button><button class="btn" onclick="closeModal()">Cerrar</button></div>`;
+  }else{h+=`<div class="modal-actions"><button class="btn" onclick="closeModal()">Cerrar</button></div>`}
+  showModal(h);
+}
+async function responderTicket(id){
+  const msg=$('ticketResp').value.trim();
+  if(!msg){toast('Escribe un mensaje','error');return}
+  const r=await api('/api/tickets/responder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket_id:id,u:userId,mensaje:msg})});
+  if(r.ok){toast('Enviado','success');verTicket(id)}else{toast(r.error||'Error','error')}
+}
+async function cerrarTicketClick(id){
+  if(!confirm('Cerrar este ticket?'))return;
+  await api('/api/tickets/cerrar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket_id:id})});
+  closeModal();toast('Ticket cerrado','success');loadTickets();
+}
+
+// ═══════════════════════════════════════
+//   ANALYTICS AVANZADO
+// ═══════════════════════════════════════
+async function loadAnalytics(){
+  const [enviosDia,horasActivas,tasaCuenta]=await Promise.all([
+    api('/api/analytics/envios_dia?u='+userId+'&dias=30'),
+    api('/api/analytics/horas_activas?u='+userId+'&dias=7'),
+    api('/api/analytics/tasa_cuenta?u='+userId)
+  ]);
+  let h='<div class="stats-grid" style="grid-template-columns:1fr 1fr;gap:15px">';
+  // Envios por dia chart
+  h+=`<div class="card" style="padding:15px"><h3 style="margin-bottom:10px">Envios por Dia (30 dias)</h3><canvas id="chartEnviosDia" height="200"></canvas></div>`;
+  // Horas activas chart
+  h+=`<div class="card" style="padding:15px"><h3 style="margin-bottom:10px">Horas mas Activas (7 dias)</h3><canvas id="chartHorasActivas" height="200"></canvas></div>`;
+  h+='</div>';
+  // Tasa por cuenta table
+  h+='<div class="card" style="padding:15px;margin-top:15px"><h3 style="margin-bottom:10px">Tasa de Entrega por Cuenta</h3>';
+  if(tasaCuenta.ok&&tasaCuenta.data&&tasaCuenta.data.length>0){
+    h+='<div class="table-wrapper"><table><thead><tr><th>Cuenta</th><th>Total</th><th>Exitosos</th><th>Tasa</th></tr></thead><tbody>';
+    tasaCuenta.data.forEach(t=>{
+      const color=t.tasa>=70?'var(--success)':t.tasa>=40?'var(--warning)':'var(--danger)';
+      h+=`<tr><td>${esc(t.cuenta||'N/A')}</td><td>${t.total}</td><td>${t.exitosos}</td><td style="color:${color};font-weight:bold">${t.tasa}%</td></tr>`;
+    });
+    h+='</tbody></table></div>';
+  }else{h+='<div class="empty-state">Sin datos de cuentas</div>'}
+  h+='</div>';
+  // Vacation mode button
+  h+=`<div class="card" style="padding:15px;margin-top:15px;display:flex;gap:10px;align-items:center">
+    <div style="flex:1"><h3>Modo Vacaciones</h3><p style="color:var(--text2);font-size:13px">Pausar/reanudar todas las campanas con un click</p></div>
+    <button class="btn btn-warning" onclick="activarVacaciones()">Pausar Todo</button>
+    <button class="btn btn-success" onclick="desactivarVacaciones()">Reanudar Todo</button>
+  </div>`;
+  // Dead groups detection
+  h+=`<div class="card" style="padding:15px;margin-top:15px"><h3>Grupos sin Actividad</h3>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:10px">Detectar grupos que no han tenido actividad en los ultimos 30 dias</p>
+    <button class="btn btn-sm" onclick="detectarGruposMuertos()">Escanear Grupos</button>
+    <div id="gruposMuertosResult" style="margin-top:10px"></div></div>`;
+  $('analyticsContent').innerHTML=h;
+  // Render charts using Chart.js (already loaded)
+  if(typeof Chart!=='undefined'){
+    if(enviosDia.ok&&enviosDia.data){
+      new Chart($('chartEnviosDia'),{type:'line',data:{labels:enviosDia.data.map(d=>d.dia),datasets:[{label:'Exitosos',data:enviosDia.data.map(d=>d.exitosos),borderColor:'#22c55e',tension:0.3,fill:false},{label:'Fallidos',data:enviosDia.data.map(d=>d.fallidos),borderColor:'#ef4444',tension:0.3,fill:false}]},options:{responsive:true,plugins:{legend:{display:true}},scales:{y:{beginAtZero:true}}}});
+    }
+    if(horasActivas.ok&&horasActivas.data){
+      const labels=Array.from({length:24},(_,i)=>i+'h');
+      const dataArr=new Array(24).fill(0);
+      horasActivas.data.forEach(h=>{dataArr[h.hora]=h.total});
+      new Chart($('chartHorasActivas'),{type:'bar',data:{labels:labels,datasets:[{label:'Envios',data:dataArr,backgroundColor:'rgba(124,58,237,0.6)'}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
+    }
+  }
+}
+async function activarVacaciones(){
+  if(!confirm('Pausar TODAS las campanas activas?'))return;
+  const r=await api('/api/vacaciones/activar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  if(r.ok){toast(r.msg||'Campanas pausadas','success')}else{toast(r.error||'Error','error')}
+}
+async function desactivarVacaciones(){
+  if(!confirm('Reanudar TODAS las campanas?'))return;
+  const r=await api('/api/vacaciones/desactivar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  if(r.ok){toast(r.msg||'Campanas reanudadas','success')}else{toast(r.error||'Error','error')}
+}
+async function detectarGruposMuertos(){
+  const r=await api('/api/grupos/muertos?u='+userId+'&dias=30');
+  if(!r.ok){$('gruposMuertosResult').innerHTML='<div class="empty-state">Error</div>';return}
+  if(!r.muertos||r.muertos.length===0){$('gruposMuertosResult').innerHTML=`<div style="color:var(--success)">Todos tus ${r.total_grupos} grupos tienen actividad reciente</div>`;return}
+  let h=`<div style="color:var(--warning);margin-bottom:8px">${r.muertos.length} de ${r.total_grupos} grupos sin actividad en 30 dias:</div>`;
+  h+='<div class="table-wrapper"><table><thead><tr><th>Grupo</th><th>Ultima Actividad</th></tr></thead><tbody>';
+  const ids=[];
+  r.muertos.forEach(g=>{h+=`<tr><td>${esc(g.nombre||g.link||'?')}</td><td>${g.ultima_actividad}</td></tr>`;ids.push(g.id)});
+  h+='</tbody></table></div>';
+  h+=`<button class="btn btn-danger btn-sm" style="margin-top:8px" onclick="limpiarGruposMuertos(${JSON.stringify(ids)})">Eliminar ${r.muertos.length} Grupos Muertos</button>`;
+  $('gruposMuertosResult').innerHTML=h;
+}
+async function limpiarGruposMuertos(ids){
+  if(!confirm('Eliminar '+ids.length+' grupos sin actividad?'))return;
+  const r=await api('/api/grupos/limpiar_muertos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,ids})});
+  if(r.ok){toast(r.eliminados+' grupos eliminados','success');detectarGruposMuertos()}else{toast(r.error||'Error','error')}
+}
+
+// ═══════════════════════════════════════
+//   WEBHOOKS DE EVENTOS
+// ═══════════════════════════════════════
+async function loadWebhooks(){
+  const r=await api('/api/webhooks?u='+userId);
+  let h='<button class="btn btn-primary" onclick="crearWebhookModal()" style="margin-bottom:15px">+ Nuevo Webhook</button>';
+  h+=`<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:15px;font-size:13px;color:var(--text2)">
+    <b>Eventos disponibles:</b> envio_completado, campana_terminada, pago_confirmado, comprobante_aprobado, membresia_activada, all (todos)<br>
+    <b>Firma:</b> Cada request incluye header X-Webhook-Signature (HMAC-SHA256 del body con tu secret)</div>`;
+  if(!r.ok||!r.webhooks||r.webhooks.length===0){
+    h+='<div class="empty-state">No tienes webhooks configurados.</div>';
+  }else{
+    h+='<div class="table-wrapper"><table><thead><tr><th>URL</th><th>Eventos</th><th>Activo</th><th>Acciones</th></tr></thead><tbody>';
+    r.webhooks.forEach(w=>{
+      h+=`<tr><td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(w.url)}</td><td>${esc(w.eventos)}</td><td>${w.activo?'Si':'No'}</td>
+      <td><button class="btn btn-sm" onclick="editarWebhookModal(${w.id},'${esc(w.url)}','${esc(w.eventos)}',${w.activo})">Editar</button> <button class="btn btn-danger btn-sm" onclick="eliminarWebhookClick(${w.id})">Eliminar</button></td></tr>`;
+    });
+    h+='</tbody></table></div>';
+  }
+  $('webhooksContent').innerHTML=h;
+}
+function crearWebhookModal(){
+  showModal(`<h3>Nuevo Webhook</h3>
+    <div class="form-group"><label>URL (https)</label><input type="url" id="whUrl" placeholder="https://tu-servidor.com/webhook"></div>
+    <div class="form-group"><label>Eventos (separados por coma, o "all")</label><input type="text" id="whEventos" value="all"></div>
+    <div class="form-group"><label>Secret (para firma HMAC)</label><input type="text" id="whSecret" placeholder="mi-secret-key"></div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="guardarWebhook()">Crear</button><button class="btn" onclick="closeModal()">Cancelar</button></div>`);
+}
+async function guardarWebhook(){
+  const url=$('whUrl').value.trim();
+  const eventos=$('whEventos').value.trim();
+  const secret=$('whSecret').value.trim();
+  if(!url){toast('Falta URL','error');return}
+  const r=await api('/api/webhooks/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,url,eventos,secret})});
+  if(r.ok){closeModal();toast('Webhook creado','success');loadWebhooks()}else{toast(r.error||'Error','error')}
+}
+function editarWebhookModal(id,url,eventos,activo){
+  showModal(`<h3>Editar Webhook #${id}</h3>
+    <div class="form-group"><label>URL</label><input type="url" id="whEditUrl" value="${esc(url)}"></div>
+    <div class="form-group"><label>Eventos</label><input type="text" id="whEditEventos" value="${esc(eventos)}"></div>
+    <div class="form-group"><label>Activo</label><select id="whEditActivo"><option value="1" ${activo?'selected':''}>Si</option><option value="0" ${!activo?'selected':''}>No</option></select></div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="guardarEditWebhook(${id})">Guardar</button><button class="btn" onclick="closeModal()">Cancelar</button></div>`);
+}
+async function guardarEditWebhook(id){
+  const r=await api('/api/webhooks/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,url:$('whEditUrl').value,eventos:$('whEditEventos').value,activo:parseInt($('whEditActivo').value)})});
+  if(r.ok){closeModal();toast('Actualizado','success');loadWebhooks()}else{toast(r.error||'Error','error')}
+}
+async function eliminarWebhookClick(id){
+  if(!confirm('Eliminar webhook #'+id+'?'))return;
+  const r=await api('/api/webhooks/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  if(r.ok){toast('Eliminado','success');loadWebhooks()}else{toast(r.error||'Error','error')}
+}
+
+// ═══════════════════════════════════════
+//   ADMIN: TICKETS
+// ═══════════════════════════════════════
+async function loadAdminTickets(){
+  const r=await api('/api/admin/tickets?u='+userId);
+  if(!r.ok){$('adminTicketsContent').innerHTML='<div class="empty-state">Error</div>';return}
+  let h=`<div class="stats-grid" style="grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:15px">
+    <div class="card stat-card"><div class="stat-number">${r.stats.abiertos}</div><div class="stat-label">Abiertos</div></div>
+    <div class="card stat-card"><div class="stat-number">${r.stats.hoy}</div><div class="stat-label">Hoy</div></div>
+    <div class="card stat-card"><div class="stat-number">${r.stats.total}</div><div class="stat-label">Total</div></div>
+  </div>`;
+  h+=`<div style="margin-bottom:10px"><button class="btn btn-sm ${!window._ticketFilter||window._ticketFilter==='abiertos'?'btn-primary':''}" onclick="window._ticketFilter='abiertos';loadAdminTickets()">Abiertos</button> <button class="btn btn-sm ${window._ticketFilter==='all'?'btn-primary':''}" onclick="window._ticketFilter='all';loadAdminTickets()">Todos</button></div>`;
+  if(!r.tickets||r.tickets.length===0){h+='<div class="empty-state">No hay tickets</div>'}
+  else{
+    h+='<div class="table-wrapper"><table><thead><tr><th>#</th><th>Usuario</th><th>Asunto</th><th>Estado</th><th>Fecha</th><th>Accion</th></tr></thead><tbody>';
+    r.tickets.forEach(t=>{
+      const badge=t.estado==='abierto'?'<span style="color:var(--warning)">Abierto</span>':'<span style="color:var(--success)">Cerrado</span>';
+      h+=`<tr><td>${t.id}</td><td>${esc(t.user_id)}</td><td>${esc(t.asunto)}</td><td>${badge}</td><td style="font-size:11px">${t.fecha_creado||''}</td><td><button class="btn btn-sm" onclick="verTicket(${t.id})">Ver</button></td></tr>`;
+    });
+    h+='</tbody></table></div>';
+  }
+  $('adminTicketsContent').innerHTML=h;
+}
+
+// ═══════════════════════════════════════
+//   ADMIN: BACKUPS
+// ═══════════════════════════════════════
+async function loadAdminBackups(){
+  const r=await api('/api/admin/backups?u='+userId);
+  if(!r.ok){$('adminBackupsContent').innerHTML='<div class="empty-state">Error</div>';return}
+  let h=`<button class="btn btn-primary" onclick="forzarBackup()" style="margin-bottom:15px">Backup Ahora</button>`;
+  h+=`<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:15px;font-size:13px;color:var(--text2)">
+    El sistema hace backup automatico cada dia a las 3:00 AM. Se mantienen los ultimos 7 dias.</div>`;
+  if(r.files&&r.files.length>0){
+    h+='<div class="table-wrapper"><table><thead><tr><th>Archivo</th><th>Tamano</th></tr></thead><tbody>';
+    r.files.forEach(f=>{h+=`<tr><td>${esc(f.filename)}</td><td>${(f.size/1024).toFixed(1)} KB</td></tr>`});
+    h+='</tbody></table></div>';
+  }else{h+='<div class="empty-state">No hay backups todavia. El primero se creara a las 3:00 AM.</div>'}
+  $('adminBackupsContent').innerHTML=h;
+}
+async function forzarBackup(){
+  toast('Creando backup...','info');
+  const r=await api('/api/admin/backup_ahora',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId})});
+  if(r.ok){toast('Backup creado: '+r.filename+' ('+(r.size/1024).toFixed(1)+' KB)','success');loadAdminBackups()}else{toast(r.error||'Error','error')}
+}
+
+// ═══════════════════════════════════════
+//   TEMPLATES CON VARIABLES
+// ═══════════════════════════════════════
+function insertVariable(varName,textareaId){
+  const ta=$(textareaId);
+  if(!ta)return;
+  const start=ta.selectionStart;
+  const end=ta.selectionEnd;
+  const val=ta.value;
+  ta.value=val.substring(0,start)+'{'+varName+'}'+val.substring(end);
+  ta.focus();
+  ta.setSelectionRange(start+varName.length+2,start+varName.length+2);
+}
+
 // --- THEME TOGGLE ---
 function toggleTheme(){
   const cur=document.documentElement.getAttribute('data-theme');
@@ -4263,7 +4579,7 @@ function toggleTheme(){
 // --- MULTI-LANGUAGE ---
 let currentLang='es';
 const LANG={
-  es:{dashboard:'Dashboard',cuentas:'Cuentas WSP',grupos:'Grupos',mensajes:'Mensajes',envios:'Envio Unico',enviopersonal:'Envio Personal',campanas:'Campanas',config:'Config Envio',stats:'Estadisticas',admin:'Admin Panel',plantillas:'Plantillas',historial:'Historial',actividad:'Actividad',logout:'Cerrar Sesion',login:'Iniciar Sesion',register:'Registrarse',send:'Enviar',cancel:'Cancelar',delete:'Eliminar',save:'Guardar',create:'Crear',loading:'Cargando...',nodata:'Sin datos',seguridad:'2FA y Sesiones',backup:'Backup / Restaurar',enviomiembros:'Envio a Miembros',enviointeractivo:'Envio Interactivo',programados:'Programados',listanegra:'Lista Negra',autoresp:'Auto-Responder',logs:'Logs del Bot',retry:'Cola de Reintentos',tggrupos:'Grupos TG',tgmensajes:'Mensajes TG',tgcampanas:'Campanas TG',tgprogramados:'Programados TG',tghistorial:'Historial TG',tgdetectar:'Detectar Grupos TG',tgstats:'Stats TG',tgautoresp:'Auto-Responder TG',tgconfig:'Config Envio TG',tglistanegra:'Lista Negra TG',cuentastg:'Cuentas TG',sellers:'Sellers',sellerpanel:'Panel Seller',canjear:'Canjear Codigo',pagos:'Pagar Membresia',adminpagos:'Gestion de Pagos'},
+  es:{dashboard:'Dashboard',cuentas:'Cuentas WSP',grupos:'Grupos',mensajes:'Mensajes',envios:'Envio Unico',enviopersonal:'Envio Personal',campanas:'Campanas',config:'Config Envio',stats:'Estadisticas',admin:'Admin Panel',plantillas:'Plantillas',historial:'Historial',actividad:'Actividad',logout:'Cerrar Sesion',login:'Iniciar Sesion',register:'Registrarse',send:'Enviar',cancel:'Cancelar',delete:'Eliminar',save:'Guardar',create:'Crear',loading:'Cargando...',nodata:'Sin datos',seguridad:'2FA y Sesiones',backup:'Backup / Restaurar',enviomiembros:'Envio a Miembros',enviointeractivo:'Envio Interactivo',programados:'Programados',listanegra:'Lista Negra',autoresp:'Auto-Responder',logs:'Logs del Bot',retry:'Cola de Reintentos',tggrupos:'Grupos TG',tgmensajes:'Mensajes TG',tgcampanas:'Campanas TG',tgprogramados:'Programados TG',tghistorial:'Historial TG',tgdetectar:'Detectar Grupos TG',tgstats:'Stats TG',tgautoresp:'Auto-Responder TG',tgconfig:'Config Envio TG',tglistanegra:'Lista Negra TG',cuentastg:'Cuentas TG',sellers:'Sellers',sellerpanel:'Panel Seller',canjear:'Canjear Codigo',pagos:'Pagar Membresia',adminpagos:'Gestion de Pagos',tickets:'Soporte',analytics:'Analytics',webhooks:'Webhooks',admintickets:'Tickets Soporte',adminbackups:'Backups Auto'},
   en:{dashboard:'Dashboard',cuentas:'WSP Accounts',grupos:'Groups',mensajes:'Messages',envios:'Single Send',enviopersonal:'Personal Send',campanas:'Campaigns',config:'Send Config',stats:'Statistics',admin:'Admin Panel',plantillas:'Templates',historial:'History',actividad:'Activity',logout:'Logout',login:'Login',register:'Register',send:'Send',cancel:'Cancel',delete:'Delete',save:'Save',create:'Create',loading:'Loading...',nodata:'No data',seguridad:'2FA & Sessions',backup:'Backup / Restore',enviomiembros:'Member Send',enviointeractivo:'Interactive Send',programados:'Scheduled',listanegra:'Blacklist',autoresp:'Auto-Responder',logs:'Bot Logs',retry:'Retry Queue',tggrupos:'TG Groups',tgmensajes:'TG Messages',tgcampanas:'TG Campaigns',tgprogramados:'TG Scheduled',tghistorial:'TG History',tgdetectar:'Detect TG Groups',tgstats:'TG Stats',tgautoresp:'TG Auto-Responder',tgconfig:'TG Send Config',tglistanegra:'TG Blacklist',cuentastg:'TG Accounts',sellers:'Sellers',sellerpanel:'Seller Panel',canjear:'Redeem Code'},
   pt:{dashboard:'Painel',cuentas:'Contas WSP',grupos:'Grupos',mensajes:'Mensagens',envios:'Envio Unico',enviopersonal:'Envio Pessoal',campanas:'Campanhas',config:'Config Envio',stats:'Estatisticas',admin:'Admin',plantillas:'Modelos',historial:'Historico',actividad:'Atividade',logout:'Sair',login:'Entrar',register:'Registrar',send:'Enviar',cancel:'Cancelar',delete:'Excluir',save:'Salvar',create:'Criar',loading:'Carregando...',nodata:'Sem dados',seguridad:'2FA e Sessoes',backup:'Backup / Restaurar',sellers:'Revendedores',sellerpanel:'Painel Revendedor',canjear:'Resgatar Codigo'}
 };

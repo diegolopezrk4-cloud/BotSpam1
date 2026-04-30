@@ -4,9 +4,58 @@ const QRCode = require("qrcode");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+const webpush = require("web-push");
 const config = require("./config_wsp");
 const db = require("./db_wsp");
 const motor = require("./motor_wsp");
+
+// --- Web Push VAPID ---
+let vapidKeys = null;
+const VAPID_FILE = path.join(__dirname, "vapid_keys.json");
+try {
+    vapidKeys = JSON.parse(fs.readFileSync(VAPID_FILE, "utf8"));
+} catch (e) {
+    vapidKeys = webpush.generateVAPIDKeys();
+    fs.writeFileSync(VAPID_FILE, JSON.stringify(vapidKeys, null, 2));
+}
+webpush.setVapidDetails("mailto:admin@botspam.com", vapidKeys.publicKey, vapidKeys.privateKey);
+
+function sendPushToUser(userId, payload) {
+    const subs = db.getPushSubscriptions(userId);
+    for (const s of subs) {
+        webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload))
+            .catch(() => db.removePushSubscription(s.endpoint));
+    }
+}
+
+function sendPushToAll(payload) {
+    const subs = db.getAllPushSubscriptions();
+    for (const s of subs) {
+        webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload))
+            .catch(() => db.removePushSubscription(s.endpoint));
+    }
+}
+
+// --- Webhook de eventos ---
+function fireWebhookEvent(userId, evento, data) {
+    const hooks = db.getWebhooksActivos(userId);
+    for (const h of hooks) {
+        if (h.eventos !== 'all' && !h.eventos.split(',').includes(evento)) continue;
+        const body = JSON.stringify({ evento, data, timestamp: new Date().toISOString() });
+        const u = new URL(h.url);
+        const opts = { method: "POST", hostname: u.hostname, port: u.port || (u.protocol === "https:" ? 443 : 80), path: u.pathname, headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } };
+        if (h.secret) {
+            const sig = crypto.createHmac("sha256", h.secret).update(body).digest("hex");
+            opts.headers["X-Webhook-Signature"] = sig;
+        }
+        const lib = u.protocol === "https:" ? require("https") : http;
+        const r = lib.request(opts, () => {});
+        r.on("error", () => {});
+        r.write(body);
+        r.end();
+    }
+}
 
 const QR_PORT = process.env.QR_PORT || 3000;
 
@@ -264,7 +313,7 @@ poll();
             "/api/status", "/api/panel_login", "/api/panel_registro",
             "/api/panel_recuperar_solicitar", "/api/panel_recuperar_reset",
             "/api/canjear_codigo", "/api/check_membresia",
-            "/api/pagos/webhook", "/api/metodos_pago"
+            "/api/pagos/webhook", "/api/metodos_pago", "/api/push/vapid_key", "/api/health"
         ];
         const isPublicEndpoint = PUBLIC_ENDPOINTS.includes(url.pathname) || url.pathname === "/api/status";
 
@@ -848,7 +897,9 @@ poll();
                         "/api/tasa_entrega", "/api/panel_logout", "/api/notificaciones",
                         "/api/actividad", "/api/limites",
                         "/api/pagos/planes", "/api/pagos/crear", "/api/pagos/estado", "/api/pagos/historial",
-                        "/api/comprobante/subir", "/api/comprobante/historial", "/api/comprobante/imagen"
+                        "/api/comprobante/subir", "/api/comprobante/historial", "/api/comprobante/imagen",
+                        "/api/push/vapid_key", "/api/push/subscribe", "/api/push/unsubscribe", "/api/push/test",
+                        "/api/tickets/crear", "/api/tickets", "/api/tickets/mensajes", "/api/tickets/responder", "/api/tickets/cerrar"
                     ];
                     const needsMembresia = !NO_MEMBRESIA_ENDPOINTS.includes(url.pathname);
                     if (needsMembresia) {
@@ -2605,6 +2656,8 @@ poll();
                     if (pagoActualizado) {
                         db.activarMembresia(pagoActualizado.user_id, pagoActualizado.plan_dias);
                         db.registrarAuditoria(pagoActualizado.user_id, 'pago_confirmado', `Plan: ${pagoActualizado.plan_key}, Monto: ${pagoActualizado.monto_usdt} USDT, TxID: ${data.transactionId || 'N/A'}`, "binance_webhook");
+                        sendPushToUser(pagoActualizado.user_id, { title: "Pago confirmado!", body: `Tu plan ${pagoActualizado.plan_key} ha sido activado (${pagoActualizado.plan_dias} dias)`, icon: "/icon-192.png" });
+                        fireWebhookEvent(pagoActualizado.user_id, "pago_confirmado", { plan: pagoActualizado.plan_key, dias: pagoActualizado.plan_dias, monto: pagoActualizado.monto_usdt });
 
                         // Sync membership activation to TG
                         try {
@@ -2819,6 +2872,8 @@ poll();
                     // Auto-activate membership
                     db.activarMembresia(comp.user_id, comp.plan_dias);
                     db.registrarAuditoria(body.admin_id, 'comprobante_aprobado', `Comprobante #${comp.id}, User: ${comp.user_id}, Plan: ${comp.plan_key}`, getClientIp());
+                    sendPushToUser(comp.user_id, { title: "Pago aprobado!", body: `Tu comprobante fue aprobado. Plan ${comp.plan_key} activado (${comp.plan_dias} dias)`, icon: "/icon-192.png" });
+                    fireWebhookEvent(comp.user_id, "comprobante_aprobado", { plan: comp.plan_key, dias: comp.plan_dias });
                     // Sync to TG
                     try {
                         const syncData = JSON.stringify({ telegram_id: comp.user_id, dias: comp.plan_dias, plan: comp.plan_key });
@@ -2887,6 +2942,449 @@ poll();
                 db.eliminarMetodoPago(parseInt(body.id));
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ═══════════════════════════════════════
+            //  PUSH NOTIFICATIONS
+            // ═══════════════════════════════════════
+
+            // GET /api/push/vapid_key — Obtener VAPID public key
+            if (url.pathname === "/api/push/vapid_key" && req.method === "GET") {
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, key: vapidKeys.publicKey }));
+            }
+
+            // POST /api/push/subscribe — Suscribir a push
+            if (url.pathname === "/api/push/subscribe" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.endpoint || !body.p256dh || !body.auth) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                db.addPushSubscription(body.u, body.endpoint, body.p256dh, body.auth);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/push/unsubscribe — Desuscribir
+            if (url.pathname === "/api/push/unsubscribe" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.endpoint) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta endpoint" })); }
+                db.removePushSubscription(body.endpoint);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/push/test — Enviar push de prueba
+            if (url.pathname === "/api/push/test" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                sendPushToUser(body.u, { title: "Test de notificacion", body: "Las notificaciones push funcionan correctamente!", icon: "/icon-192.png" });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ═══════════════════════════════════════
+            //  ANALYTICS AVANZADO
+            // ═══════════════════════════════════════
+
+            // GET /api/analytics/envios_dia — Envios por dia
+            if (url.pathname === "/api/analytics/envios_dia" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const dias = parseInt(url.searchParams.get("dias") || "30");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const data = db.getAnalyticsEnviosPorDia(userId, dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
+            }
+
+            // GET /api/analytics/horas_activas — Horas mas activas
+            if (url.pathname === "/api/analytics/horas_activas" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const dias = parseInt(url.searchParams.get("dias") || "7");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const data = db.getAnalyticsHorasActivas(userId, dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
+            }
+
+            // GET /api/analytics/tasa_cuenta — Tasa de entrega por cuenta
+            if (url.pathname === "/api/analytics/tasa_cuenta" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const data = db.getAnalyticsTasaPorCuenta(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
+            }
+
+            // GET /api/analytics/clientes_activos — Admin: clientes mas activos
+            if (url.pathname === "/api/analytics/clientes_activos" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const dias = parseInt(url.searchParams.get("dias") || "7");
+                const data = db.getAnalyticsClientesActivos(dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
+            }
+
+            // ═══════════════════════════════════════
+            //  TICKETS DE SOPORTE
+            // ═══════════════════════════════════════
+
+            // POST /api/tickets/crear — Crear ticket
+            if (url.pathname === "/api/tickets/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.asunto || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                const ticket = db.crearTicket(body.u, body.asunto, body.mensaje);
+                // Push to admin
+                sendPushToUser(config.ADMIN_TELEGRAM_IDS?.[0] || "", { title: "Nuevo ticket #" + ticket.id, body: body.asunto, icon: "/icon-192.png", data: { action: "ticket", id: ticket.id } });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ticket }));
+            }
+
+            // GET /api/tickets — Tickets del usuario
+            if (url.pathname === "/api/tickets" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const tickets = db.getTicketsUsuario(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, tickets }));
+            }
+
+            // GET /api/tickets/mensajes — Mensajes de un ticket
+            if (url.pathname === "/api/tickets/mensajes" && req.method === "GET") {
+                const ticketId = parseInt(url.searchParams.get("id") || "0");
+                if (!ticketId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                const ticket = db.getTicket(ticketId);
+                const mensajes = db.getMensajesTicket(ticketId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ticket, mensajes }));
+            }
+
+            // POST /api/tickets/responder — Responder ticket
+            if (url.pathname === "/api/tickets/responder" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.ticket_id || !body.u || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                const esAdmin = checkAdmin(body.u);
+                const msg = db.agregarMensajeTicket(body.ticket_id, body.u, esAdmin, body.mensaje);
+                // Push to the other party
+                const ticket = db.getTicket(body.ticket_id);
+                if (esAdmin) {
+                    sendPushToUser(ticket.user_id, { title: "Respuesta a tu ticket #" + ticket.id, body: body.mensaje.substring(0, 100), icon: "/icon-192.png" });
+                } else {
+                    sendPushToUser(config.ADMIN_TELEGRAM_IDS?.[0] || "", { title: "Respuesta en ticket #" + ticket.id, body: body.mensaje.substring(0, 100), icon: "/icon-192.png" });
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg }));
+            }
+
+            // POST /api/tickets/cerrar — Cerrar ticket
+            if (url.pathname === "/api/tickets/cerrar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.ticket_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta ticket_id" })); }
+                db.cerrarTicket(body.ticket_id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/admin/tickets — Admin: todos los tickets
+            if (url.pathname === "/api/admin/tickets" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const filter = url.searchParams.get("filter") || "all";
+                const tickets = filter === "abiertos" ? db.getTicketsPendientes() : db.getTodosTickets();
+                const stats = db.getTicketsStats();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, tickets, stats }));
+            }
+
+            // ═══════════════════════════════════════
+            //  TEMPLATES CON VARIABLES
+            // ═══════════════════════════════════════
+
+            // POST /api/templates/preview — Preview de template con variables
+            if (url.pathname === "/api/templates/preview" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.template) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta template" })); }
+                let result = body.template;
+                result = result.replace(/\{nombre\}/g, body.nombre || "Juan");
+                result = result.replace(/\{fecha\}/g, new Date().toLocaleDateString("es-PE"));
+                result = result.replace(/\{hora\}/g, new Date().toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" }));
+                result = result.replace(/\{random\}/g, () => {
+                    const frases = (body.random_options || "Hola|Hey|Que tal").split("|");
+                    return frases[Math.floor(Math.random() * frases.length)];
+                });
+                result = result.replace(/\{numero\}/g, body.numero || "+51999999999");
+                result = result.replace(/\{grupo\}/g, body.grupo || "Mi Grupo");
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, preview: result }));
+            }
+
+            // ═══════════════════════════════════════
+            //  WEBHOOKS DE EVENTOS
+            // ═══════════════════════════════════════
+
+            // GET /api/webhooks — Lista webhooks del usuario
+            if (url.pathname === "/api/webhooks" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const webhooks = db.getWebhooks(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, webhooks }));
+            }
+
+            // POST /api/webhooks/crear — Crear webhook
+            if (url.pathname === "/api/webhooks/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.url) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                const wh = db.crearWebhook(body.u, body.url, body.eventos, body.secret);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, webhook: wh }));
+            }
+
+            // POST /api/webhooks/editar — Editar webhook
+            if (url.pathname === "/api/webhooks/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id || !body.url) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                db.editarWebhook(body.id, body.url, body.eventos, body.activo !== undefined ? body.activo : 1);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/webhooks/eliminar — Eliminar webhook
+            if (url.pathname === "/api/webhooks/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                db.eliminarWebhook(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ═══════════════════════════════════════
+            //  MODO VACACIONES
+            // ═══════════════════════════════════════
+
+            // POST /api/vacaciones/activar — Pausar todo
+            if (url.pathname === "/api/vacaciones/activar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const campanas = db.getCampanas(body.u);
+                let pausadas = 0;
+                for (const c of campanas) {
+                    if (c.activa) {
+                        db.toggleCampana(c.id, 0);
+                        pausadas++;
+                    }
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, pausadas, msg: `${pausadas} campanas pausadas. Modo vacaciones activado.` }));
+            }
+
+            // POST /api/vacaciones/desactivar — Reanudar todo
+            if (url.pathname === "/api/vacaciones/desactivar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const campanas = db.getCampanas(body.u);
+                let reanudadas = 0;
+                for (const c of campanas) {
+                    if (!c.activa) {
+                        db.toggleCampana(c.id, 1);
+                        reanudadas++;
+                    }
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, reanudadas, msg: `${reanudadas} campanas reanudadas. Modo vacaciones desactivado.` }));
+            }
+
+            // ═══════════════════════════════════════
+            //  AUTO-LIMPIEZA DE GRUPOS MUERTOS
+            // ═══════════════════════════════════════
+
+            // GET /api/grupos/muertos — Detectar grupos sin actividad
+            if (url.pathname === "/api/grupos/muertos" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const dias = parseInt(url.searchParams.get("dias") || "30");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const grupos = db.getGrupos(userId);
+                const ahora = Date.now();
+                const muertos = [];
+                for (const g of grupos) {
+                    const act = db.getGrupoActividad(g.link || g.grupo_jid);
+                    const lastActivity = act ? new Date(act).getTime() : 0;
+                    if (!lastActivity || (ahora - lastActivity) > dias * 86400000) {
+                        muertos.push({ ...g, ultima_actividad: act || "nunca" });
+                    }
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, muertos, total_grupos: grupos.length }));
+            }
+
+            // POST /api/grupos/limpiar_muertos — Eliminar grupos muertos
+            if (url.pathname === "/api/grupos/limpiar_muertos" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.ids) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                let eliminados = 0;
+                for (const id of body.ids) {
+                    try { db.eliminarGrupo(body.u, id); eliminados++; } catch (_) {}
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, eliminados }));
+            }
+
+            // ═══════════════════════════════════════
+            //  RESPALDO AUTOMATICO
+            // ═══════════════════════════════════════
+
+            // GET /api/admin/backups — Lista de backups
+            if (url.pathname === "/api/admin/backups" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const backups = db.getBackupLog();
+                // Also list actual files in backups dir
+                const backupDir = path.join(__dirname, "backups");
+                let files = [];
+                try { files = fs.readdirSync(backupDir).filter(f => f.endsWith(".db")).map(f => ({ filename: f, size: fs.statSync(path.join(backupDir, f)).size })); } catch (_) {}
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, backups, files }));
+            }
+
+            // POST /api/admin/backup_ahora — Forzar backup ahora
+            if (url.pathname === "/api/admin/backup_ahora" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id || body.u)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                try {
+                    const backupDir = path.join(__dirname, "backups");
+                    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+                    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+                    const dbPath = path.join(__dirname, "wsp_titan.db");
+                    const dest = path.join(backupDir, `wsp_titan_${ts}.db`);
+                    fs.copyFileSync(dbPath, dest);
+                    const size = fs.statSync(dest).size;
+                    db.registrarBackup(`wsp_titan_${ts}.db`, size);
+                    // Clean old backups (keep 7 days)
+                    const allFiles = fs.readdirSync(backupDir).filter(f => f.endsWith(".db")).sort();
+                    while (allFiles.length > 7) {
+                        const old = allFiles.shift();
+                        try { fs.unlinkSync(path.join(backupDir, old)); } catch (_) {}
+                    }
+                    db.limpiarBackupsViejos(7);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, filename: `wsp_titan_${ts}.db`, size }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // ═══════════════════════════════════════
+            //  DASHBOARD DE SELLERS AVANZADO
+            // ═══════════════════════════════════════
+
+            // GET /api/seller/dashboard — Stats avanzadas del seller
+            if (url.pathname === "/api/seller/dashboard" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const seller = db.isSellerUser(userId);
+                if (!seller) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No es seller" })); }
+                const codigos = db.getSellerCodes(seller.id);
+                const codigosUsados = codigos.filter(c => c.usado);
+                const codigosPendientes = codigos.filter(c => !c.usado);
+                // Monthly breakdown
+                const porMes = {};
+                for (const c of codigosUsados) {
+                    const mes = (c.fecha_usado || c.fecha_creado || "").substring(0, 7);
+                    if (!porMes[mes]) porMes[mes] = 0;
+                    porMes[mes]++;
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({
+                    ok: true,
+                    total_codigos: codigos.length,
+                    usados: codigosUsados.length,
+                    pendientes: codigosPendientes.length,
+                    clientes_activos: codigosUsados.length,
+                    por_mes: porMes,
+                    tasa_conversion: codigos.length > 0 ? Math.round(codigosUsados.length / codigos.length * 100) : 0
+                }));
+            }
+
+            // ═══════════════════════════════════════
+            //  PROGRAMACION RECURRENTE (CRON-LIKE)
+            // ═══════════════════════════════════════
+
+            // POST /api/programados/recurrente — Crear envio recurrente
+            if (url.pathname === "/api/programados/recurrente" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.mensaje_id || !body.dias_semana || !body.hora) {
+                    res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos: u, mensaje_id, dias_semana (array), hora" }));
+                }
+                // Store as a special scheduled message with recurrence pattern
+                const recurrence = JSON.stringify({ dias_semana: body.dias_semana, hora: body.hora });
+                const result = db.crearProgramado(body.u, body.mensaje_id, body.hora, body.grupos || [], recurrence);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, programado: result, recurrence: body.dias_semana }));
+            }
+
+            // ═══════════════════════════════════════
+            //  RATE LIMITING ADAPTATIVO
+            // ═══════════════════════════════════════
+
+            // GET /api/rate_limit/status — Estado del rate limiting adaptativo
+            if (url.pathname === "/api/rate_limit/status" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const config_envio = db.getUserEnvioConfig(userId);
+                const tasas = db.getAnalyticsTasaPorCuenta(userId);
+                let recomendacion = null;
+                for (const t of tasas) {
+                    if (t.tasa < 50 && t.total > 10) {
+                        recomendacion = { cuenta: t.cuenta, tasa: t.tasa, msg: `Cuenta ${t.cuenta} tiene tasa de ${t.tasa}% — considere reducir velocidad o cambiar de cuenta` };
+                        break;
+                    }
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, config: config_envio, tasas, recomendacion }));
+            }
+
+            // ═══════════════════════════════════════
+            //  A/B TESTING DE MENSAJES
+            // ═══════════════════════════════════════
+
+            // POST /api/ab_test/crear — Crear A/B test
+            if (url.pathname === "/api/ab_test/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.variante_a || !body.variante_b || !body.grupos) {
+                    res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos: u, variante_a, variante_b, grupos (array)" }));
+                }
+                const grupos = body.grupos;
+                const mitad = Math.floor(grupos.length / 2);
+                const gruposA = grupos.slice(0, mitad);
+                const gruposB = grupos.slice(mitad);
+                res.writeHead(200);
+                return res.end(JSON.stringify({
+                    ok: true,
+                    plan: {
+                        variante_a: { mensaje: body.variante_a, grupos: gruposA, total: gruposA.length },
+                        variante_b: { mensaje: body.variante_b, grupos: gruposB, total: gruposB.length }
+                    },
+                    msg: `Test creado: Variante A → ${gruposA.length} grupos, Variante B → ${gruposB.length} grupos`
+                }));
+            }
+
+            // ═══════════════════════════════════════
+            //  MONITOREO / HEALTH CHECK
+            // ═══════════════════════════════════════
+
+            // GET /api/health — Health check para monitoreo
+            if (url.pathname === "/api/health" && req.method === "GET") {
+                const uptime = process.uptime();
+                const mem = process.memoryUsage();
+                res.writeHead(200);
+                return res.end(JSON.stringify({
+                    ok: true, status: "healthy",
+                    uptime_seconds: Math.floor(uptime),
+                    uptime_human: `${Math.floor(uptime/3600)}h ${Math.floor((uptime%3600)/60)}m`,
+                    memory_mb: Math.round(mem.heapUsed / 1024 / 1024),
+                    bot_connected: !!botSock?.user,
+                    timestamp: new Date().toISOString()
+                }));
             }
 
             // Endpoint no encontrado
@@ -2969,6 +3467,7 @@ async function startBot() {
     fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
     fs.mkdirSync("media", { recursive: true });
     fs.mkdirSync("comprobantes", { recursive: true });
+    fs.mkdirSync("backups", { recursive: true });
 
     // Periodic cleanup: every 30 minutes
     setInterval(() => {
@@ -2978,6 +3477,34 @@ async function startBot() {
             db.limpiarLoginAttempts();
         } catch (e) { console.error("Cleanup error:", e.message); }
     }, 30 * 60 * 1000);
+
+    // Automatic daily backup at 3 AM
+    function scheduleBackup() {
+        const now = new Date();
+        const next3am = new Date(now);
+        next3am.setHours(3, 0, 0, 0);
+        if (next3am <= now) next3am.setDate(next3am.getDate() + 1);
+        const ms = next3am - now;
+        setTimeout(() => {
+            try {
+                const ts = new Date().toISOString().replace(/[:.]/g, "-");
+                const dbPath = path.join(__dirname, "wsp_titan.db");
+                const dest = path.join(__dirname, "backups", `wsp_titan_${ts}.db`);
+                fs.copyFileSync(dbPath, dest);
+                const size = fs.statSync(dest).size;
+                db.registrarBackup(`wsp_titan_${ts}.db`, size);
+                const allFiles = fs.readdirSync(path.join(__dirname, "backups")).filter(f => f.endsWith(".db")).sort();
+                while (allFiles.length > 7) {
+                    const old = allFiles.shift();
+                    try { fs.unlinkSync(path.join(__dirname, "backups", old)); } catch (_) {}
+                }
+                db.limpiarBackupsViejos(7);
+                console.log(`[BACKUP] Auto-backup: ${dest} (${(size/1024).toFixed(1)} KB)`);
+            } catch (e) { console.error("[BACKUP] Error:", e.message); }
+            scheduleBackup();
+        }, ms);
+    }
+    scheduleBackup();
 
     const { state, saveCreds } = await useMultiFileAuthState("sessions");
 
