@@ -35,7 +35,8 @@ const server = http.createServer(async (req, res) => {
         });
 
         proxyReq.on("error", (e) => {
-            if (!res.headersSent) { res.writeHead(502); res.end(JSON.stringify({ ok: false, error: "Bot TG no disponible: " + e.message })); }
+            console.error("Proxy TG error:", e.message);
+            if (!res.headersSent) { res.writeHead(502); res.end(JSON.stringify({ ok: false, error: "Bot TG no disponible" })); }
         });
 
         const tgTimeout = (url.pathname.includes('detectar') || url.pathname.includes('carpeta')) ? 120000 : 30000;
@@ -64,7 +65,8 @@ const server = http.createServer(async (req, res) => {
         });
 
         proxyReq.on("error", (e) => {
-            if (!res.headersSent) { res.writeHead(502); res.end(JSON.stringify({ ok: false, error: "API no disponible: " + e.message })); }
+            console.error("Proxy WSP error:", e.message);
+            if (!res.headersSent) { res.writeHead(502); res.end(JSON.stringify({ ok: false, error: "API no disponible" })); }
         });
 
         const wspTimeout = (url.pathname.includes('detectar') || url.pathname.includes('miembros')) ? 120000 : 30000;

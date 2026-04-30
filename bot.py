@@ -4028,10 +4028,7 @@ async def cmd_desactivar(msg: types.Message):
         uid = int(partes[1])
     except ValueError:
         return await msg.answer("❌ El user_id debe ser un numero.")
-    import aiosqlite
-    async with aiosqlite.connect("titan.db") as d:
-        await d.execute("UPDATE usuarios SET activo=0 WHERE telegram_id=?", (uid,))
-        await d.commit()
+    await db.desactivar_usuario(uid)
     await msg.answer(f"✅ Membresia de {uid} desactivada.")
 
 @dp.message(Command("ban"))
@@ -4045,10 +4042,7 @@ async def cmd_ban(msg: types.Message):
         uid = int(partes[1])
     except ValueError:
         return await msg.answer("❌ El user_id debe ser un numero.")
-    import aiosqlite
-    async with aiosqlite.connect("titan.db") as d:
-        await d.execute("UPDATE usuarios SET activo=0, plan='baneado' WHERE telegram_id=?", (uid,))
-        await d.commit()
+    await db.ban_usuario(uid)
     await msg.answer(f"🔨 Usuario {uid} baneado.")
     try:
         await bot.send_message(uid, "⛔ Tu acceso al bot ha sido suspendido.")

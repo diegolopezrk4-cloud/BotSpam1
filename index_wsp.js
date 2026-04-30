@@ -45,12 +45,20 @@ function getState(jid) {
 }
 
 function setState(jid, screen, data = {}) {
-    userState[jid] = { screen, data };
+    userState[jid] = { screen, data, _ts: Date.now() };
 }
 
 function clearState(jid) {
     delete userState[jid];
 }
+
+// Limpiar userState cada 30 minutos: eliminar entradas inactivas >1 hora
+setInterval(() => {
+    const cutoff = Date.now() - 3600 * 1000;
+    for (const jid of Object.keys(userState)) {
+        if ((userState[jid]._ts || 0) < cutoff) delete userState[jid];
+    }
+}, 1800000);
 
 // --- Variables globales ---
 let botSock = null;
@@ -510,7 +518,8 @@ poll();
             // POST /api/activar — Activar membresía WSP { wsp_id, dias }
             if (url.pathname === "/api/activar" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.wsp_id || !body.dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta wsp_id o dias" })); }
+                const diasVal = parseInt(body.dias) || 0;
+                if (!body.wsp_id || !body.dias || diasVal < 1) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta wsp_id o dias (debe ser >= 1)" })); }
                 // Buscar usuario por número o ID
                 let user = db.getUsuario(body.wsp_id);
                 if (!user) {
@@ -1435,7 +1444,11 @@ poll();
                     }
                     const batchSize = parseInt(body.batch_size) || 0;
                     const delayMinutes = parseInt(body.delay_minutes) || 5;
-                    motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    const started = motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    if (!started) {
+                        res.writeHead(409);
+                        return res.end(JSON.stringify({ ok: false, error: "Ya hay un envio activo para este usuario" }));
+                    }
                     res.writeHead(200);
                     return res.end(JSON.stringify({
                         ok: true,
@@ -1661,7 +1674,7 @@ poll();
                 const tid = body.telegram_id || body.user_id;
                 const dias = parseInt(body.dias) || 0;
                 const plan = body.plan || (dias >= 36500 ? "permanente" : dias >= 30 ? "mensual" : dias >= 7 ? "semanal" : "diario");
-                if (!tid || !dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o dias" })); }
+                if (!tid || !dias || dias < 1) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o dias (debe ser >= 1)" })); }
                 let user = db.getUsuario(tid);
                 if (!user) user = db.findUserByNumber(tid);
                 if (!user) {

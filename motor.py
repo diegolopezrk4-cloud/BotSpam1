@@ -379,6 +379,7 @@ async def worker_campana(campana_id, user_id, bot_notificar=None):
                                 f"🗑 Eliminado automaticamente de tu lista.")
                         except Exception:
                             pass
+                    idx_cuenta += 1
 
                 except errors.AuthKeyUnregisteredError:
                     logger.warning(f"[{nombre}] AuthKey invalida, removiendo cuenta.")

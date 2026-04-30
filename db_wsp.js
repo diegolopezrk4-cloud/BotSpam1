@@ -1007,7 +1007,7 @@ function getHistorialEnvios(userId, limite = 50, tipoFiltro = null, resultadoFil
         }
     }
     if (desde) { sql += " AND fecha >= ?"; params.push(desde); }
-    if (hasta) { sql += " AND fecha <= ? || ' 23:59:59'"; params.push(hasta); }
+    if (hasta) { sql += " AND fecha <= (? || ' 23:59:59')"; params.push(hasta); }
     sql += " ORDER BY fecha DESC LIMIT ?";
     params.push(limite);
     return db.prepare(sql).all(...params);
@@ -1306,6 +1306,7 @@ function panelLogin(telegramId, password) {
 
 function panelRegistro(telegramId, password, username) {
     const bcrypt = require("bcryptjs");
+    if (!password || password.length < 4) return { ok: false, error: "La contraseña debe tener al menos 4 caracteres" };
     const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
     if (existing) return { ok: false, error: "ya_registrado" };
     const hashed = bcrypt.hashSync(password, 10);
@@ -1330,6 +1331,7 @@ function panelCambiarPassword(telegramId, oldPass, newPass) {
         passOk = (user.password === oldPass);
     }
     if (!passOk) return { ok: false, error: "Contraseña actual incorrecta" };
+    if (!newPass || newPass.length < 4) return { ok: false, error: "La nueva contraseña debe tener al menos 4 caracteres" };
     const hashed = bcrypt.hashSync(newPass, 10);
     db.prepare("UPDATE panel_users SET password = ? WHERE telegram_id = ?").run(hashed, String(telegramId));
     return { ok: true };
@@ -1362,6 +1364,7 @@ function verificarRecoveryCode(telegramId, code) {
 
 function panelResetPassword(telegramId, code, newPass) {
     const bcrypt = require("bcryptjs");
+    if (!newPass || newPass.length < 4) return { ok: false, error: "La nueva contraseña debe tener al menos 4 caracteres" };
     const v = verificarRecoveryCode(telegramId, code);
     if (!v.ok) return v;
     const user = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
