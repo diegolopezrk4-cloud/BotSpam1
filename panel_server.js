@@ -110,8 +110,9 @@ const server = http.createServer(async (req, res) => {
         });
         res.end(html);
     } catch (e) {
+        console.error("Error cargando panel:", e.message);
         res.writeHead(500);
-        res.end("Error cargando panel: " + e.message);
+        res.end("Error interno del servidor");
     }
 });
 

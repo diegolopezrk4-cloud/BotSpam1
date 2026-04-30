@@ -62,6 +62,11 @@ const botSentIds = new Set();
 const processedMsgIds = new Set();
 let botIsSending = false;
 
+// Limpiar processedMsgIds cada 30 min para evitar memory leak
+setInterval(() => {
+    if (processedMsgIds.size > 10000) processedMsgIds.clear();
+}, 1800000);
+
 function trackSent(result) {
     if (result && result.key && result.key.id) {
         botSentIds.add(result.key.id);
@@ -88,6 +93,10 @@ function isAdmin(jid) {
 
 // --- Enviar mensaje helper ---
 async function send(jid, text) {
+    if (!botSock || !botSock.user) {
+        console.error("[send] botSock no disponible, mensaje descartado para:", jid);
+        return;
+    }
     botIsSending = true;
     try {
         const result = await botSock.sendMessage(jid, { text });
@@ -98,6 +107,10 @@ async function send(jid, text) {
 }
 
 async function sendImage(jid, imagePath, caption = "") {
+    if (!botSock || !botSock.user) {
+        console.error("[sendImage] botSock no disponible, mensaje descartado para:", jid);
+        return;
+    }
     botIsSending = true;
     try {
         if (fs.existsSync(imagePath)) {
@@ -237,11 +250,20 @@ poll();
     if (url.pathname.startsWith("/api/")) {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
 
-        // Helper para leer body POST
+        // Helper para leer body POST (max 5MB)
+        const MAX_BODY = 5 * 1024 * 1024;
         const readBody = () => new Promise((resolve) => {
             let data = "";
-            req.on("data", c => data += c);
-            req.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve({}); } });
+            let overflow = false;
+            req.on("data", c => {
+                if (overflow) return;
+                data += c;
+                if (data.length > MAX_BODY) { overflow = true; data = ""; }
+            });
+            req.on("end", () => {
+                if (overflow) return resolve({});
+                try { resolve(JSON.parse(data)); } catch { resolve({}); }
+            });
         });
 
         try {

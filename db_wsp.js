@@ -717,8 +717,7 @@ function tieneMembresia(wspId) {
     const user = getUsuario(wspId);
     if (user && user.activo) {
         if (user.fecha_expira) {
-            const expira = new Date(user.fecha_expira);
-            if (Date.now() > expira.getTime()) {
+            if (nowPeru() > user.fecha_expira) {
                 db.prepare("UPDATE usuarios SET activo = 0, plan = 'expirado' WHERE wsp_id = ?").run(user.wsp_id);
                 return false;
             }
@@ -735,8 +734,7 @@ function tieneMembresia(wspId) {
         const altUser = getUsuario(altJid);
         if (altUser && altUser.activo) {
             if (altUser.fecha_expira) {
-                const expira = new Date(altUser.fecha_expira);
-                if (Date.now() > expira.getTime()) {
+                if (nowPeru() > altUser.fecha_expira) {
                     db.prepare("UPDATE usuarios SET activo = 0, plan = 'expirado' WHERE wsp_id = ?").run(altUser.wsp_id);
                     return false;
                 }
@@ -1385,7 +1383,7 @@ function checkMembresia(userId) {
         } catch (e) {}
     }
     if (!user) return { ok: true, activa: false, es_admin: esAdmin, membresia: null };
-    const activo = user.activo && (user.plan === 'permanente' || !user.fecha_expira || new Date(user.fecha_expira) > new Date());
+    const activo = user.activo && (user.plan === 'permanente' || !user.fecha_expira || user.fecha_expira > nowPeru());
     return {
         ok: true,
         activa: activo || esAdmin,

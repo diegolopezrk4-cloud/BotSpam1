@@ -14,6 +14,14 @@ const reporteInterval = {};  // { userId: intervalId }
 // Updated by message listeners — used to detect if someone else posted after our spam
 const grupoUltimaActividad = {};
 
+// Limpiar grupoUltimaActividad cada hora para evitar memory leak
+setInterval(() => {
+    const cutoff = Date.now() - 24 * 3600 * 1000;
+    for (const k of Object.keys(grupoUltimaActividad)) {
+        if (grupoUltimaActividad[k] < cutoff) delete grupoUltimaActividad[k];
+    }
+}, 3600000);
+
 // Limite de envios diarios por cuenta (proteccion anti-ban)
 const LIMITE_ENVIOS_DIARIOS = 500;
 
@@ -870,9 +878,17 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
     if (responderActivos[userId]) return false;
 
     let cancelled = false;
+    const registeredHandlers = []; // Track handlers for cleanup
     const task = {
         running: true,
-        cancel: () => { cancelled = true; },
+        cancel: () => {
+            cancelled = true;
+            // Remove all registered event listeners
+            for (const { sock, handler } of registeredHandlers) {
+                try { sock.ev.off("messages.upsert", handler); } catch (e) {}
+            }
+            registeredHandlers.length = 0;
+        },
     };
     responderActivos[userId] = task;
 
@@ -902,7 +918,7 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
             const autoRespCounters = {};
 
             for (const { nombre, sock } of socks) {
-                sock.ev.on("messages.upsert", async ({ messages }) => {
+                const handler = async ({ messages }) => {
                     if (cancelled) return;
                     for (const msg of messages) {
                         if (!msg.message || msg.key.fromMe) continue;
@@ -952,7 +968,9 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
                             }
                         }
                     }
-                });
+                };
+                sock.ev.on("messages.upsert", handler);
+                registeredHandlers.push({ sock, handler });
             }
 
             while (!cancelled) {

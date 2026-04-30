@@ -5,6 +5,8 @@ import os
 import logging
 from datetime import datetime, timezone, timedelta
 from telethon import TelegramClient, errors, events
+from telethon.tl.functions.messages import ImportChatInviteRequest
+from telethon.tl.functions.channels import JoinChannelRequest
 
 # Zona horaria de Peru (UTC-5)
 PERU_TZ = timezone(timedelta(hours=-5))
@@ -63,6 +65,12 @@ def variar_mensaje(msg_original):
     else:
         texto = texto + random.choice(CHARS_INVISIBLES)
     return texto
+
+def match_whole_word(text, word):
+    """Whole-word keyword matching (avoid 'no' matching 'noches')."""
+    escaped = re.escape(word)
+    pattern = r'(?:^|\s|[^a-zA-Z\u00C0-\u024F])' + escaped + r'(?:$|\s|[^a-zA-Z\u00C0-\u024F])'
+    return bool(re.search(pattern, text, re.IGNORECASE)) or text == word
 
 def es_mensaje_spam(texto):
     """Detecta si un mensaje es de otro spammer/bot (mensaje largo, muchos links, etc.)."""
@@ -646,7 +654,7 @@ async def worker_responder(user_id, contacto, keywords, bot_notificar=None):
                         except Exception:
                             pass
                         for kw in keywords_lower:
-                            if kw in texto_lower:
+                            if match_whole_word(texto_lower, kw):
                                 try:
                                     if kw in keyword_responses:
                                         idx = keyword_counters.get(kw, 0) % len(keyword_responses[kw])
