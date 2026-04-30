@@ -651,6 +651,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                     let consecutiveErrors = 0;
                     const MAX_CONSECUTIVE_ERRORS = 5;
 
+                    console.log(`[Campana ${campana.nombre}] Cuenta '${currentSock.nombre}' enviando a ${gruposActuales.length} grupo(s)...`);
+                    db.agregarLog(userId, 'campana', `${campana.nombre}: Cuenta '${currentSock.nombre}' enviando a ${gruposActuales.length} grupo(s)...`);
+
                     for (const grupoLink of gruposActuales) {
                         if (cancelled) break;
 
@@ -662,21 +665,13 @@ function iniciarCampana(campanaId, userId, botSock) {
                             break;
                         }
 
+                        console.log(`   [Campana ${campana.nombre}] Resolviendo JID para: ${grupoLink}`);
                         const groupJid = await resolveGroupJid(currentSock.sock, grupoLink);
                         if (!groupJid) {
-                            db.eliminarGrupoPorLink(userId, grupoLink);
-                            db.eliminarGrupoCampana(campanaId, grupoLink);
+                            console.log(`   [Campana ${campana.nombre}] ERROR: No se pudo resolver JID para ${grupoLink}`);
+                            db.agregarLog(userId, 'campana', `${campana.nombre}: No se pudo resolver JID para ${grupoLink}`);
                             db.actualizarStatsCampana(campanaId, 0, 1);
-                            db.registrarEnvio(userId, campanaId, grupoLink, "error_jid_eliminado");
-                            gruposEliminados.push(grupoLink);
-                            const idx = gruposLinks.indexOf(grupoLink);
-                            if (idx !== -1) gruposLinks.splice(idx, 1);
-                            continue;
-                        }
-
-                        // Skip group if no new activity since our last send (avoid duplicate spam)
-                        if (!grupoTieneActividadNueva(campanaId, groupJid, campanaStartTime)) {
-                            console.log(`   [Anti-dup] Grupo ${grupoLink}: sin actividad nueva, saltando`);
+                            db.registrarEnvio(userId, campanaId, grupoLink, "error_jid");
                             continue;
                         }
 
@@ -684,9 +679,17 @@ function iniciarCampana(campanaId, userId, botSock) {
                         let mensajeAEnviar = campana.mensaje;
                         let imagenAEnviar = campana.imagen_path;
 
+                        if (!mensajeAEnviar || !mensajeAEnviar.trim()) {
+                            console.log(`   [Campana ${campana.nombre}] ERROR: Mensaje vacio, saltando grupo`);
+                            db.agregarLog(userId, 'campana', `${campana.nombre}: Mensaje vacio`);
+                            continue;
+                        }
+
                         mensajeAEnviar = variarMensaje(mensajeAEnviar, userId);
 
+                        console.log(`   [Campana ${campana.nombre}] Enviando a grupo ${groupJid.slice(0,15)}...`);
                         const result = await sendToGroup(currentSock.sock, groupJid, mensajeAEnviar, imagenAEnviar);
+                        console.log(`   [Campana ${campana.nombre}] Resultado: sent=${result.sent}, delivered=${result.delivered}, reason=${result.reason||'ok'}`);
 
                         if (result.sent && (result.delivered || result.reason === "pending" || result.reason === "no_id")) {
                             registrarEnvioCampana(campanaId, groupJid);
@@ -731,7 +734,13 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 }
                             }
 
-                            if (result.reason === "readonly" || result.reason === "not_member" || result.reason === "forbidden") {
+                            if (result.reason === "readonly") {
+                                console.log(`   [Campana ${campana.nombre}] Grupo ${grupoLink}: solo lectura, saltando (no eliminado)`);
+                                db.agregarLog(userId, 'campana', `${campana.nombre}: Grupo solo-lectura, saltando`);
+                                db.registrarEnvio(userId, campanaId, grupoLink, "readonly_skip");
+                            } else if (result.reason === "not_member" || result.reason === "forbidden") {
+                                console.log(`   [Campana ${campana.nombre}] Grupo ${grupoLink}: ${result.reason}, eliminando`);
+                                db.agregarLog(userId, 'campana', `${campana.nombre}: Grupo ${result.reason}, eliminado`);
                                 db.eliminarGrupoPorLink(userId, grupoLink);
                                 db.eliminarGrupoCampana(campanaId, grupoLink);
                                 db.registrarEnvio(userId, campanaId, grupoLink, `eliminado_${result.reason}`);
@@ -814,20 +823,19 @@ function iniciarCampana(campanaId, userId, botSock) {
                         enviosDiaMsg = "\n\u{1F4CA} Envios hoy: " + enviosDia.map(e => `${e.cuenta_nombre}=${e.total}`).join(", ");
                     }
 
-                    let esperaMsg = numCuentas === 1
-                        ? `\u23F0 Esperando 10 min...`
-                        : `\u23F0 Esperando ${conf.espera_ciclo || 600}s...`;
+                    const esperaSeg = numCuentas === 1 ? 600 : (conf.espera_ciclo || 600);
+                    const esperaMin = Math.round(esperaSeg / 60);
 
-                    await notificarUsuario(botSock, userId, `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c.enviados} env | \u274C ${c.errores} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`);
+                    await notificarUsuario(botSock, userId, `\u23F8 *${campana.nombre}* — Ciclo #${ciclo} completado\n\u2705 ${c.enviados} enviados | \u274C ${c.errores} errores\n\u{1F310} ${gruposLinks.length} grupo(s) activos\n\n\u{1F6D1} *Estado: EN REPOSO*\n\u23F0 Reanuda en ${esperaMin} minuto(s)${reporteExtra}${enviosDiaMsg}`);
 
                     db.setCampanaEstadoDetalle(campanaId, 'en_reposo');
 
-                    if (numCuentas === 1) {
-                        await delay(600 * 1000);
-                    } else {
-                        await delay((conf.espera_ciclo || 600) * 1000);
+                    await delay(esperaSeg * 1000);
+
+                    if (!cancelled) {
+                        db.setCampanaEstadoDetalle(campanaId, 'activa');
+                        await notificarUsuario(botSock, userId, `\u25B6 *${campana.nombre}* — Reanudando ciclo #${ciclo + 1}...`);
                     }
-                    if (!cancelled) db.setCampanaEstadoDetalle(campanaId, 'activa');
                     delayMultiplier = Math.max(1.0, delayMultiplier - 0.5);
                 }
             }
