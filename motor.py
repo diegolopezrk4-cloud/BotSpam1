@@ -519,11 +519,26 @@ async def worker_responder(user_id, contacto, keywords, bot_notificar=None):
             return
 
         respuestas_variadas = [
-            f"Hola! Yo te puedo ayudar con eso.\nContacta a {contacto} para mas info.",
-            f"Hey! Tengo lo que buscas.\nEscribe a {contacto}",
-            f"Yo manejo eso! Contacta a {contacto}",
-            f"Te puedo ayudar! Habla con {contacto}",
-            f"Hola, yo tengo disponible.\nContactame en {contacto}",
+            "Jajaja oye y tu que opinas de eso? 😂",
+            "Uy yo tambien busco eso! Tu de donde eres? 🤔",
+            "Jaja alguien sabe si eso es verdad? 😅",
+            "Wow no sabia eso! Donde lo viste? 👀",
+            "Oigan y eso funciona o es puro cuento? 🤣",
+            "Jajaja que buena pregunta, alguien sabe? 😂",
+            "Ey yo tambien quiero saber! Alguno tiene info? 🙋",
+            "Jaja me paso lo mismo! Y tu que hiciste? 😆",
+            "Eso suena interesante, cuéntame mas! 🧐",
+            "Jajaja pensé que era el unico que buscaba eso 😂",
+            "Oye y eso donde lo consigo? Alguien sabe? 🤷",
+            "Jaja que random! Pero si, yo tambien necesito 😅",
+            "Uy que bueno que alguien preguntó eso! 🔥",
+            "Jajaja justo estaba pensando en eso! 😂",
+            "Wow no manches! Eso es real? 😱",
+            "Oigan alguien tiene experiencia con eso? 🤔",
+            "Jaja yo tambien ando en las mismas! 😆",
+            "Que genial! Alguien ya lo probo? 👀",
+            "Jajaja me hiciste el dia con esa pregunta 😂",
+            "Ey buena onda! Yo te puedo ayudar con eso 💪",
         ]
 
         mensajes_respondidos = set()

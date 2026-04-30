@@ -4,11 +4,38 @@ const fs = require("fs");
 const db = require("./db");
 const config = require("./config");
 
-const tareasActivas = {};    // { campanaId: { running, cancel } }
-const responderActivos = {}; // { userId: { running, cancel } }
+const tareasActivas = {};    // { campanaId: { running, cancel, paused, progressIndex } }
+const responderActivos = {}; // { userId: { running, cancel, paused, respondidos } }
 const clientSessions = {};   // { "userId_nombre": socket }
 const pendingLinks = {};     // { "userId_nombre": { qr, status, error } }
 const reporteInterval = {};  // { userId: intervalId }
+
+// Estado de pausa de campanas: { campanaId: { grupoIndex, cuentaIndex, ciclo } }
+const campanaProgress = {};
+
+// Preguntas random/graciosas para el auto-responder
+const PREGUNTAS_RANDOM = [
+    "Jajaja oye y tu que opinas de eso? 😂",
+    "Uy yo tambien busco eso! Tu de donde eres? 🤔",
+    "Jaja alguien sabe si eso es verdad? 😅",
+    "Wow no sabia eso! Donde lo viste? 👀",
+    "Oigan y eso funciona o es puro cuento? 🤣",
+    "Jajaja que buena pregunta, alguien sabe? 😂",
+    "Ey yo tambien quiero saber! Alguno tiene info? 🙋",
+    "Jaja me paso lo mismo! Y tu que hiciste? 😆",
+    "Eso suena interesante, cuéntame mas! 🧐",
+    "Jajaja pensé que era el unico que buscaba eso 😂",
+    "Oye y eso donde lo consigo? Alguien sabe? 🤷",
+    "Jaja que random! Pero si, yo tambien necesito 😅",
+    "Uy que bueno que alguien preguntó eso! 🔥",
+    "Jajaja justo estaba pensando en eso! 😂",
+    "Wow no manches! Eso es real? 😱",
+    "Oigan alguien tiene experiencia con eso? 🤔",
+    "Jaja yo tambien ando en las mismas! 😆",
+    "Que genial! Alguien ya lo probo? 👀",
+    "Jajaja me hiciste el dia con esa pregunta 😂",
+    "Ey buena onda! Yo te puedo ayudar con eso 💪",
+];
 
 // Limite de envios diarios por cuenta (proteccion anti-ban)
 const LIMITE_ENVIOS_DIARIOS = 500;
@@ -391,12 +418,28 @@ function dentroDeHorario(campanaId) {
 // CAMPANA ENGINE con las 10 mejoras
 // ============================================================
 function iniciarCampana(campanaId, userId, botSock) {
-    if (tareasActivas[campanaId]) return false;
+    if (!botSock || !botSock.user) {
+        console.error(`[Campana] No se puede iniciar: bot no conectado`);
+        return false;
+    }
+    if (tareasActivas[campanaId]) {
+        // Si estaba pausado, reanudar
+        const existing = tareasActivas[campanaId];
+        if (existing.paused) {
+            existing.paused = false;
+            console.log(`[Campana] Reanudando campana ${campanaId} desde progreso guardado`);
+            return true;
+        }
+        return false;
+    }
 
     let cancelled = false;
+    let paused = false;
     const task = {
         running: true,
         cancel: () => { cancelled = true; },
+        get paused() { return paused; },
+        set paused(v) { paused = v; },
     };
     tareasActivas[campanaId] = task;
 
@@ -448,6 +491,19 @@ function iniciarCampana(campanaId, userId, botSock) {
             const MAX_CONSECUTIVE_PENDING = 3;
             const PAUSA_RATE_LIMIT = 300;
 
+            // Restaurar progreso guardado si existe
+            let startGrupoIndex = 0;
+            let startCuentaIndex = 0;
+            const hasProgress = !!campanaProgress[campanaId];
+            if (hasProgress) {
+                const saved = campanaProgress[campanaId];
+                ciclo = saved.ciclo || 0;
+                startGrupoIndex = saved.grupoIndex || 0;
+                startCuentaIndex = saved.cuentaIndex || 0;
+                delete campanaProgress[campanaId];
+                console.log(`[Campana ${campana.nombre}] Reanudando desde ciclo=${ciclo}, cuenta=${startCuentaIndex}, grupo=${startGrupoIndex}`);
+            }
+
             try {
                 let tiempoMsg = "";
                 if (numCuentas === 1) {
@@ -461,12 +517,24 @@ function iniciarCampana(campanaId, userId, botSock) {
                 }
                 let templateMsg = templates.length ? `\n\u{1F4DD} ${templates.length} template(s) para rotacion` : "";
 
-                await botSock.sendMessage(userId, {
-                    text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}${templateMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`,
-                });
+                if (hasProgress) {
+                    await botSock.sendMessage(userId, {
+                        text: `\u25B6 *${campana.nombre}* reanudada desde donde se pausó.\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\nCiclo: ${ciclo} | Grupo: ${startGrupoIndex + 1}\n${tiempoMsg}${horarioMsg}${templateMsg}`,
+                    });
+                } else {
+                    await botSock.sendMessage(userId, {
+                        text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}${templateMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`,
+                    });
+                }
             } catch (e) {}
 
             while (!cancelled) {
+                // Verificar si esta pausado
+                while (paused && !cancelled) {
+                    await delay(2000);
+                }
+                if (cancelled) break;
+
                 ciclo++;
                 console.log(`[Campana ${campana.nombre}] Ciclo #${ciclo}`);
 
@@ -507,8 +575,14 @@ function iniciarCampana(campanaId, userId, botSock) {
                 const blLinks = new Set(blacklist.map(b => b.grupo_link));
                 gruposLinks = gruposLinks.filter(gl => !blLinks.has(gl));
 
-                for (let si = 0; si < socks.length; si++) {
+                for (let si = (startCuentaIndex > 0 ? startCuentaIndex : 0); si < socks.length; si++) {
                     if (cancelled) break;
+                    if (paused) {
+                        // Guardar progreso al pausar entre cuentas
+                        campanaProgress[campanaId] = { grupoIndex: 0, cuentaIndex: si, ciclo };
+                        console.log(`[Campana] Pausada entre cuentas en ciclo=${ciclo}, cuenta=${si}`);
+                        break;
+                    }
                     let currentSock = socks[si];
 
                     // MEJORA 9: Verificar limite diario
@@ -525,8 +599,15 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                     const gruposActuales = [...gruposLinks];
 
-                    for (const grupoLink of gruposActuales) {
+                    for (let gi = (si === startCuentaIndex && startGrupoIndex > 0 ? startGrupoIndex : 0); gi < gruposActuales.length; gi++) {
+                        const grupoLink = gruposActuales[gi];
                         if (cancelled) break;
+                        // Guardar progreso y pausar si se solicita
+                        if (paused) {
+                            campanaProgress[campanaId] = { grupoIndex: gi, cuentaIndex: si, ciclo };
+                            console.log(`[Campana] Pausada en ciclo=${ciclo}, cuenta=${si}, grupo=${gi}`);
+                            break;
+                        }
 
                         // Verificar limite diario en cada iteracion
                         const enviosActuales = db.getEnviosDiarios(userId, currentSock.nombre);
@@ -662,8 +743,12 @@ function iniciarCampana(campanaId, userId, botSock) {
                     }
                 }
 
+                // Resetear indices de inicio despues del primer ciclo restaurado
+                startCuentaIndex = 0;
+                startGrupoIndex = 0;
+
                 // Reporte de ciclo
-                if (!cancelled) {
+                if (!cancelled && !paused) {
                     const c = db.getCampanaById(campanaId);
                     gruposLinks = db.getGruposCampana(campanaId);
 
@@ -718,11 +803,34 @@ function detenerCampana(campanaId) {
         task.cancel();
         task.running = false;
         delete tareasActivas[campanaId];
+        delete campanaProgress[campanaId];
         db.setCampanaActiva(campanaId, false);
         return true;
     }
     // Aunque no haya tarea activa, asegurar que la DB este limpia
     db.setCampanaActiva(campanaId, false);
+    return false;
+}
+
+function pausarCampana(campanaId) {
+    const task = tareasActivas[campanaId];
+    if (task && !task.paused) {
+        task.paused = true;
+        return true;
+    }
+    return false;
+}
+
+function reanudarCampana(campanaId, userId, botSock) {
+    const task = tareasActivas[campanaId];
+    if (task && task.paused) {
+        task.paused = false;
+        return true;
+    }
+    // Si no hay tarea activa pero hay progreso guardado, re-iniciar
+    if (!task && campanaProgress[campanaId]) {
+        return iniciarCampana(campanaId, userId, botSock);
+    }
     return false;
 }
 
@@ -766,13 +874,35 @@ function detenerReporteDiario(userId) {
 }
 
 // --- RESPONDER ENGINE ---
+// Configuracion de rate-limit del responder
+const RESPONDER_MAX_MENSAJES = 10;     // Enviar maximo N mensajes antes de pausar
+const RESPONDER_PAUSA_SEGUNDOS = 300;  // Pausar 5 minutos (300s) despues de N mensajes
+
 function iniciarResponder(userId, contacto, palabras, botSock) {
-    if (responderActivos[userId]) return false;
+    if (!botSock || !botSock.user) {
+        console.error(`[Responder] No se puede iniciar: bot no conectado`);
+        return false;
+    }
+    if (responderActivos[userId]) {
+        // Si estaba pausado, reanudar
+        const existing = responderActivos[userId];
+        if (existing.paused) {
+            existing.paused = false;
+            console.log(`[Responder] Reanudando para usuario ${userId} (respondidos: ${existing.respondidos})`);
+            return true;
+        }
+        return false;
+    }
 
     let cancelled = false;
+    let paused = false;
+    let respondidos = 0;
     const task = {
         running: true,
         cancel: () => { cancelled = true; },
+        get paused() { return paused; },
+        set paused(v) { paused = v; },
+        get respondidos() { return respondidos; },
     };
     responderActivos[userId] = task;
 
@@ -796,7 +926,7 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
 
             for (const { nombre, sock } of socks) {
                 sock.ev.on("messages.upsert", async ({ messages }) => {
-                    if (cancelled) return;
+                    if (cancelled || paused) return;
                     for (const msg of messages) {
                         if (!msg.message || msg.key.fromMe) continue;
                         const jid = msg.key.remoteJid;
@@ -809,11 +939,43 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
 
                         for (const kw of keywordsLower) {
                             if (lower.includes(kw)) {
+                                // Rate limiting: si ya se enviaron N mensajes, pausar
+                                if (respondidos >= RESPONDER_MAX_MENSAJES) {
+                                    if (!paused) {
+                                        paused = true;
+                                        console.log(`[Responder] Rate limit: ${respondidos} mensajes enviados, pausando ${RESPONDER_PAUSA_SEGUNDOS}s...`);
+                                        try {
+                                            botSock.sendMessage(userId, {
+                                                text: `\u23F8 *Auto-responder pausado*\n\n` +
+                                                    `Se enviaron ${respondidos} mensajes.\n` +
+                                                    `Esperando ${Math.round(RESPONDER_PAUSA_SEGUNDOS / 60)} minutos...\n\n` +
+                                                    `Escribe *reanudar* para continuar antes.`,
+                                            }).catch(() => {});
+                                        } catch (e) {}
+                                        // Programar reanudacion automatica sin bloquear el event handler
+                                        setTimeout(async () => {
+                                            if (cancelled) return;
+                                            paused = false;
+                                            respondidos = 0;
+                                            try {
+                                                await botSock.sendMessage(userId, {
+                                                    text: `\u25B6 *Auto-responder reanudado* despues de la pausa.`,
+                                                });
+                                            } catch (e) {}
+                                        }, RESPONDER_PAUSA_SEGUNDOS * 1000);
+                                    }
+                                    return;
+                                }
+
                                 try {
+                                    // Usar preguntas random/graciosas
+                                    const pregunta = PREGUNTAS_RANDOM[Math.floor(Math.random() * PREGUNTAS_RANDOM.length)];
                                     await sock.sendMessage(jid, {
-                                        text: `Hola! Te recomiendo contactar a ${contacto} \u{1F4F1}`,
+                                        text: pregunta,
                                     }, { quoted: msg });
                                     db.registrarRespuesta(userId, jid, kw);
+                                    respondidos++;
+                                    console.log(`[Responder] ${nombre}: respondido ${respondidos}/${RESPONDER_MAX_MENSAJES} en ${jid}`);
                                 } catch (e) {
                                     console.error(`Responder error: ${e.message}`);
                                 }
@@ -835,6 +997,24 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
     })();
 
     return true;
+}
+
+function pausarResponder(userId) {
+    const task = responderActivos[userId];
+    if (task && !task.paused) {
+        task.paused = true;
+        return true;
+    }
+    return false;
+}
+
+function reanudarResponder(userId) {
+    const task = responderActivos[userId];
+    if (task && task.paused) {
+        task.paused = false;
+        return true;
+    }
+    return false;
 }
 
 function detenerResponder(userId) {
@@ -883,6 +1063,7 @@ async function listarChatsPersonales(botSock) {
 }
 
 async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
+    if (!botSock || !botSock.user) return false;
     if (envioPersonalActivo[userId]) return false;
 
     let cancelled = false;
@@ -975,6 +1156,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock) {
 }
 
 async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock) {
+    if (!botSock || !botSock.user) return false;
     if (envioPersonalActivo[userId]) return false;
 
     let cancelled = false;
@@ -1059,6 +1241,7 @@ function detenerEnvioPersonal(userId) {
 module.exports = {
     tareasActivas,
     getCampanasActivas,
+    campanaProgress,
     responderActivos,
     envioPersonalActivo,
     clientSessions,
@@ -1078,10 +1261,14 @@ module.exports = {
     clearLink,
     iniciarCampana,
     detenerCampana,
+    pausarCampana,
+    reanudarCampana,
     iniciarReporteDiario,
     detenerReporteDiario,
     iniciarResponder,
     detenerResponder,
+    pausarResponder,
+    reanudarResponder,
     listarChatsPersonales,
     enviarAPersonales,
     enviarASeleccionados,
