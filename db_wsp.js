@@ -1933,9 +1933,9 @@ function eliminarSeller(id) {
 function getSellerInvitesCount(sellerId, periodo) {
     let desde;
     if (periodo === 'semanal') {
-        desde = new Date(Date.now() - 7 * 86400000).toISOString();
+        desde = new Date(Date.now() - 7 * 86400000).toISOString().replace('T', ' ').replace('Z', '').slice(0, 19);
     } else {
-        desde = new Date(Date.now() - 30 * 86400000).toISOString();
+        desde = new Date(Date.now() - 30 * 86400000).toISOString().replace('T', ' ').replace('Z', '').slice(0, 19);
     }
     const row = db.prepare("SELECT COUNT(*) as total FROM seller_invites WHERE seller_id = ? AND fecha_invitacion >= ?").get(sellerId, desde);
     return row ? row.total : 0;

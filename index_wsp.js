@@ -2079,8 +2079,9 @@ poll();
                 const sellers = db.getTodosSellers();
                 const sellersWithStats = sellers.map(s => {
                     const usados = db.getSellerInvitesCount(s.id, s.periodo);
+                    const pendientes = db.getSellerCodesPendientes(s.id).length;
                     const invites = db.getSellerInvites(s.id);
-                    return { ...s, invites_usados: usados, invites_total: invites.length, invites };
+                    return { ...s, invites_usados: usados + pendientes, invites_total: invites.length, invites };
                 });
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, sellers: sellersWithStats }));
@@ -2119,9 +2120,10 @@ poll();
                 const seller = db.isSellerUser(uid);
                 if (!seller) { res.writeHead(200); return res.end(JSON.stringify({ ok: true, es_seller: false })); }
                 const usados = db.getSellerInvitesCount(seller.id, seller.periodo);
+                const pendientes = db.getSellerCodesPendientes(seller.id).length;
                 const invites = db.getSellerInvites(seller.id);
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, es_seller: true, seller: { ...seller, invites_usados: usados }, invites }));
+                return res.end(JSON.stringify({ ok: true, es_seller: true, seller: { ...seller, invites_usados: usados + pendientes }, invites }));
             }
             // POST /api/seller/invitar — Seller activa membresia a un usuario
             if (url.pathname === "/api/seller/invitar" && req.method === "POST") {
