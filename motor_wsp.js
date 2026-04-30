@@ -523,8 +523,10 @@ function iniciarCampana(campanaId, userId, botSock) {
 
     (async () => {
         try {
+            console.log(`[Campana] Iniciando campana ID=${campanaId} para usuario ${userId}`);
+            db.agregarLog(userId, 'campana', `Iniciando campana ID=${campanaId}`);
             const campana = db.getCampanaById(campanaId);
-            if (!campana) return;
+            if (!campana) { console.log(`[Campana] ERROR: Campana ${campanaId} no encontrada en DB`); db.agregarLog(userId, 'error', `Campana ${campanaId} no encontrada en DB`); return; }
             db.setCampanaActiva(campanaId, true);
 
             const sesionesNombres = db.getSesionesCampana(campanaId);
@@ -532,7 +534,11 @@ function iniciarCampana(campanaId, userId, botSock) {
             const conf = db.getCampanaConfig(campanaId);
             const horario = db.getCampanaHorario(campanaId);
 
+            console.log(`[Campana ${campana.nombre}] Sesiones: ${sesionesNombres.length}, Grupos: ${gruposLinks.length}`);
+            db.agregarLog(userId, 'campana', `${campana.nombre}: ${sesionesNombres.length} cuenta(s), ${gruposLinks.length} grupo(s)`);
             if (!sesionesNombres.length || !gruposLinks.length) {
+                console.log(`[Campana ${campana.nombre}] Sin sesiones o grupos, abortando`);
+                db.agregarLog(userId, 'error', `${campana.nombre}: Sin sesiones o grupos, abortando`);
                 await notificarUsuario(botSock, userId, "\u26A0 Campana sin cuentas o grupos asignados.");
                 return;
             }
@@ -547,14 +553,22 @@ function iniciarCampana(campanaId, userId, botSock) {
                     continue;
                 }
                 try {
+                    console.log(`[Campana ${campana.nombre}] Conectando cuenta '${nombre}'...`);
+                    db.agregarLog(userId, 'campana', `${campana.nombre}: Conectando cuenta '${nombre}'...`);
                     const s = await getOrConnectClient(userId, nombre);
+                    console.log(`[Campana ${campana.nombre}] Cuenta '${nombre}' conectada OK`);
+                    db.agregarLog(userId, 'campana', `${campana.nombre}: Cuenta '${nombre}' conectada OK`);
                     socks.push({ nombre, sock: s });
                 } catch (e) {
-                    console.error(`Error conectando ${nombre}: ${e.message}`);
+                    console.error(`[Campana ${campana.nombre}] Error conectando '${nombre}': ${e.message}`);
+                    db.agregarLog(userId, 'error', `${campana.nombre}: Error conectando '${nombre}': ${e.message}`);
+                    await notificarUsuario(botSock, userId, `\u26A0 No se pudo conectar cuenta '${nombre}': ${e.message}`);
                 }
             }
             if (!socks.length) {
-                await notificarUsuario(botSock, userId, "\u274C No se pudo conectar ninguna cuenta.");
+                console.log(`[Campana ${campana.nombre}] NINGUNA cuenta se pudo conectar. Campana abortada.`);
+                db.agregarLog(userId, 'error', `${campana.nombre}: NINGUNA cuenta conectada. Campana abortada.`);
+                await notificarUsuario(botSock, userId, `\u274C *${campana.nombre}*: No se pudo conectar ninguna cuenta. Verifica que las cuentas esten vinculadas y activas.`);
                 return;
             }
 
@@ -805,7 +819,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                 }
             }
         } catch (e) {
-            console.error(`Error campana ${campanaId}: ${e.message}`);
+            console.error(`[Campana ${campanaId}] ERROR FATAL: ${e.message}\n${e.stack}`);
+            db.agregarLog(userId, 'error', `Campana ${campanaId} ERROR FATAL: ${e.message}`);
+            await notificarUsuario(botSock, userId, `\u274C *ERROR en campana*: ${e.message}\n\nLa campana se detuvo. Revisa los logs del bot para mas detalles.`);
         } finally {
             db.setCampanaActiva(campanaId, false);
             delete tareasActivas[campanaId];

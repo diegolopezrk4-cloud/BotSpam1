@@ -350,6 +350,10 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 
 53. **Dropdown "Cargar mensaje guardado" vacio + mensajes sin texto** — `refreshPlantillasSelect()` usaba `m.texto` para acceder al contenido del mensaje, pero la columna en la BD es `mensaje` (no `texto`). Resultado: el dropdown mostraba nombres pero al seleccionar uno, el textarea quedaba vacio. Mismo bug en: tabla de mensajes (`loadMensajes`), modal de editar mensaje, y cards de Envio Unico. Tambien eliminada duplicacion (antes cargaba `/api/mensajes` + `/api/plantillas` que retornan los mismos datos). Fix: cambiado `m.texto` a `m.mensaje` en todas las instancias. (`panel.html:2504,2509,2520,2759-2768`)
 
+54. **Campana iniciaba pero no mostraba errores** — Si la campana fallaba internamente (error conectando cuentas, error de red, error inesperado), el catch generico solo hacia `console.error()` sin notificar al usuario. El usuario veia "Iniciada" pero nada pasaba y no sabia por que. Fix: (a) Error fatal del catch generico ahora envia notificacion WhatsApp al usuario con el error. (b) Cada paso critico ahora escribe a `bot_logs` via `db.agregarLog()` para que sea visible en el panel "Registros del Bot". (c) Errores de conexion de cuenta ahora notifican al usuario via WhatsApp. (`motor_wsp.js:526-571,815-817`)
+
+55. **Notificacion zombie: delay de 5s para estabilidad** — El codigo de deteccion zombie se ejecutaba inmediatamente al abrir conexion, pero el socket podia no estar 100% listo para enviar mensajes. Fix: se agrego `await delay(5000)` antes de detectar zombies + log de cuantas campanas zombie se encontraron. (`index_wsp.js:2479-2482`)
+
 ## Notas Importantes para la Siguiente IA
 1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.
 2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).
@@ -365,5 +369,5 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 
 ## Comando de Actualizacion
 ```bash
-cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777523595-fix-bugs-features && npm install && bash start.sh
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777583803-fix-campaign-bugs && npm install && bash start.sh
 ```

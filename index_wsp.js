@@ -2475,8 +2475,11 @@ async function startBot() {
             }
 
             // Detectar campanas zombie (activas en DB pero sin tarea en memoria tras reinicio)
+            // Esperar 5 seg para que el socket este 100% listo
+            await new Promise(r => setTimeout(r, 5000));
             try {
                 const zombies = db.resetZombieCampanas();
+                console.log(`[Zombie] Verificando campanas activas en DB... encontradas: ${zombies.length}`);
                 if (zombies.length) {
                     console.log(`\u{1F6A8} ${zombies.length} campana(s) zombie detectada(s) tras reinicio. Reseteadas.`);
                     const porUsuario = {};
