@@ -850,6 +850,29 @@ poll();
                 }
             }
 
+            // ═══ USER IDENTITY VALIDATION ═══
+            // Verify that the user parameter matches the authenticated session.
+            // Admins can act on behalf of others; everyone else can only access their own data.
+            function verifyUserAccess(targetUserId) {
+                if (!req._authUser) return true; // public endpoint, no check needed
+                if (!targetUserId) return true;
+                if (String(req._authUser) === String(targetUserId)) return true;
+                // Admin can access any user's data
+                const authU = db.getUsuario(String(req._authUser));
+                if (authU && authU.es_admin === 1) return true;
+                if (config.ADMIN_TELEGRAM_IDS && config.ADMIN_TELEGRAM_IDS.includes(String(req._authUser))) return true;
+                return false;
+            }
+
+            // Centralized identity check: if request has a "u" param, verify access
+            if (req._authUser && req.method === "GET") {
+                const targetU = url.searchParams.get("u");
+                if (targetU && !verifyUserAccess(targetU)) {
+                    res.writeHead(403);
+                    return res.end(JSON.stringify({ ok: false, error: "No autorizado para acceder a datos de otro usuario" }));
+                }
+            }
+
             // ─── DESVINCULAR CUENTA ───
             if (url.pathname === "/api/desvincular" && req.method === "POST") {
                 const body = await readBody();
@@ -1720,6 +1743,8 @@ poll();
             function checkAdmin(adminId) {
                 if (!adminId) return false;
                 const id = String(adminId);
+                // SECURITY: verify that the authenticated user matches the claimed admin_id
+                if (req._authUser && String(req._authUser) !== id) return false;
                 // Check WSP usuarios table
                 const u = db.getUsuario(id);
                 if (u && u.es_admin === 1) return true;
@@ -2249,6 +2274,7 @@ poll();
             if (url.pathname === "/api/seller/info" && req.method === "GET") {
                 const uid = url.searchParams.get("u");
                 if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                if (req._authUser && String(req._authUser) !== String(uid)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 const seller = db.isSellerUser(uid);
                 if (!seller) { res.writeHead(200); return res.end(JSON.stringify({ ok: true, es_seller: false })); }
                 const usados = db.getSellerInvitesCount(seller.id, seller.periodo);
