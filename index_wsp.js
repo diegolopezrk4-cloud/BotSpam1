@@ -2160,6 +2160,83 @@ poll();
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, invites_usados: usados + 1, max_invites: seller.max_invites }));
             }
+            // POST /api/seller/generar_codigo — Seller genera un código de activación
+            if (url.pathname === "/api/seller/generar_codigo" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const seller = db.isSellerUser(body.u);
+                if (!seller) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No eres seller autorizado" })); }
+                const usados = db.getSellerInvitesCount(seller.id, seller.periodo);
+                const pendientes = db.getSellerCodesPendientes(seller.id).length;
+                if (usados + pendientes >= seller.max_invites) {
+                    const periodoLabel = seller.periodo === 'semanal' ? 'esta semana' : 'este mes';
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: `Limite alcanzado: ${usados} usadas + ${pendientes} pendientes = ${usados + pendientes}/${seller.max_invites} ${periodoLabel}` }));
+                }
+                const cantidad = Math.min(parseInt(body.cantidad) || 1, 10);
+                const codigos = [];
+                for (let i = 0; i < cantidad; i++) {
+                    const codigo = db.generarSellerCode(seller.id, seller.plan_dias, seller.plan_tipo);
+                    codigos.push(codigo);
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, codigos }));
+            }
+            // GET /api/seller/codigos — Lista códigos del seller
+            if (url.pathname === "/api/seller/codigos" && req.method === "GET") {
+                const uid = url.searchParams.get("u");
+                if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const seller = db.isSellerUser(uid);
+                if (!seller) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No eres seller" })); }
+                const codigos = db.getSellerCodes(seller.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, codigos }));
+            }
+            // POST /api/seller/eliminar_codigo — Eliminar código no usado
+            if (url.pathname === "/api/seller/eliminar_codigo" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const seller = db.isSellerUser(body.u);
+                if (!seller) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No eres seller" })); }
+                db.eliminarSellerCode(body.code_id, seller.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            // POST /api/canjear_codigo — Cualquier usuario canjea un código de seller
+            if (url.pathname === "/api/canjear_codigo" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.codigo || !body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta codigo o telegram_id" })); }
+                const result = db.canjearSellerCode(body.codigo, body.telegram_id);
+                if (!result.ok) {
+                    const msgs = { codigo_invalido: 'Codigo invalido o no existe', codigo_usado: 'Este codigo ya fue usado', seller_inactivo: 'El seller esta inactivo' };
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: msgs[result.error] || result.error }));
+                }
+                // Activate membership
+                let user = db.getUsuario(body.telegram_id);
+                if (!user) user = db.findUserByNumber(body.telegram_id);
+                if (!user) {
+                    db.crearUsuario(body.telegram_id, "");
+                    user = db.getUsuario(body.telegram_id);
+                }
+                if (result.plan_tipo === "permanente") {
+                    db.getDb().prepare("UPDATE usuarios SET plan='permanente', activo=1, fecha_expira=NULL WHERE wsp_id=?").run(user.wsp_id);
+                } else {
+                    db.activarMembresia(user.wsp_id, result.plan_dias);
+                }
+                // Sync to TG
+                try {
+                    const http = require("http");
+                    const syncData = JSON.stringify({ telegram_id: body.telegram_id, dias: result.plan_dias, plan: result.plan_tipo });
+                    const syncReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                    syncReq.on("error", () => {});
+                    syncReq.write(syncData);
+                    syncReq.end();
+                } catch (_) {}
+                const planLabel = result.plan_tipo === 'permanente' ? 'Permanente' : result.plan_tipo === 'mensual' ? 'Mensual (30 dias)' : 'Semanal (7 dias)';
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, plan: planLabel, seller: result.seller_nombre }));
+            }
 
             // Endpoint no encontrado
             res.writeHead(404);

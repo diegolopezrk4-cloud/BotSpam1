@@ -8,6 +8,11 @@
 
 ---
 
+## Pregunta para la Siguiente IA
+> Lee este handoff completo y confirma que entiendes la arquitectura, los archivos principales, las mejoras ya implementadas, y que tienes claro donde agregar nuevas funcionalidades. Si vas a modificar panel.html, di en que linea/seccion vas a trabajar para evitar romper lo existente. Si necesita agregar una API de punto final, confirme que lo agregue ANTES de la linea "Endpoint no encontrado" en index_wsp.js.
+
+---
+
 ## Resumen del Sistema
 Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automaticas y panel de control web con soporte PWA.
 
@@ -16,13 +21,15 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 - **Panel Web** (puerto 3001) — `panel_server.js` sirve `panel.html` y proxea API
 - **TG API** (puerto 3002) — `bot.py` + `motor.py` + `db.py`
 - **Base de datos**: SQLite (`wsp_titan.db` para WSP, `titan.db` para TG)
+- **Bot Token**: 8779002740:AAEGu8ML62y0uFAqpbpSwStm7FJBn3d-KMo
+- **Admin ID**: 8001675901
 
 ## Archivos Principales
 | Archivo | Descripcion | Lineas aprox |
 |---|---|---|
-| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~4480 |
-| `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~4540 |
-| `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2015 |
+| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~4580 |
+| `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~4620 |
+| `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2070 |
 | `motor_wsp.js` | Motor de envio WhatsApp | ~74000 |
 | `panel_server.js` | Servidor web que sirve panel.html y proxea APIs | ~100 |
 | `bot.py` | Bot de Telegram (comandos + API) | ~178000 |
@@ -34,11 +41,11 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 
 ## Mejoras Implementadas
 
-### PRs Anteriores (ya mergeados al branch principal de desarrollo)
+### PRs Anteriores (ya mergeados)
 
 #### 1. Recuperacion de Contrasena
 - Web: Login > "Olvide mi contrasena" > ingresa Telegram ID > recibe codigo por bot > ingresa codigo + nueva contrasena
-- Bot: Comando `/recuperpass` genera codigo y permite cambiar contrasena directo desde Telegram
+- Bot: Comando `/recuperpass` genera codigo y permite cambiar contrasena desde Telegram
 - Tablas: `recovery_codes` (telegram_id, code, created_at)
 
 #### 2. Envio Personal — Numeros Manuales
@@ -114,61 +121,80 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 
 ### Este PR — Mejoras Nuevas
 
-#### 19. Sistema de Sellers (Revendedores)
+#### 19. Sistema de Sellers (Revendedores) con Codigos
 - **Admin**: Crear/editar/eliminar sellers desde "Admin > Sellers"
 - **Seller Config**: Telegram ID, nombre, max invitaciones, periodo (semanal/mensual), plan que otorga (semanal/mensual/permanente)
-- **Panel Seller**: Los sellers ven su seccion "Panel Seller" donde pueden activar membresias a clientes
-- **Limite por periodo**: El contador de invitaciones se resetea automaticamente cada semana o mes segun configuracion
+- **Panel Seller**: Los sellers ven su seccion donde pueden:
+  - **Generar codigos** (ej: `VIP-A3X9K2`) — codigos unicos que le dan al cliente
+  - **Activar directo** por Telegram ID si ya lo tienen
+  - Ver tabla de codigos (pendientes/usados) con click para copiar
+  - Ver historial de membresias activadas
+- **Canjear Codigo**: Seccion visible para TODOS los usuarios donde pueden ingresar un codigo y se activa su membresia automaticamente
+- **Limite por periodo**: El contador de invitaciones se resetea cada semana/mes
 - **Barra de progreso**: Visualizacion de invitaciones usadas/disponibles
-- **Historial**: Registro de todas las invitaciones con fecha, cliente ID y plan otorgado
-- **Sync TG**: Al activar membresia via seller, se sincroniza automaticamente con la base de datos de Telegram
-- **Tablas**: `sellers` (telegram_id, nombre, max_invites, periodo, plan_dias, plan_tipo, activo), `seller_invites` (seller_id, invitado_telegram_id, plan_dias, plan_tipo, fecha_invitacion)
-- **Endpoints Admin**: `/api/admin/sellers` (GET), `/api/admin/sellers/crear` (POST), `/api/admin/sellers/editar` (POST), `/api/admin/sellers/eliminar` (POST)
-- **Endpoints Seller**: `/api/seller/info` (GET), `/api/seller/invitar` (POST)
-- **Login/CheckMembresia**: Ahora devuelven `es_seller` para mostrar/ocultar seccion seller en el panel
+- **Sync TG**: Al activar membresia (por codigo o directo), se sincroniza a Telegram
+- **Tablas**:
+  - `sellers` (telegram_id, nombre, max_invites, periodo, plan_dias, plan_tipo, activo)
+  - `seller_invites` (seller_id, invitado_telegram_id, plan_dias, plan_tipo, fecha_invitacion)
+  - `seller_codes` (seller_id, codigo, plan_dias, plan_tipo, usado, usado_por, fecha_creado, fecha_usado)
+- **Endpoints Admin**:
+  - `GET /api/admin/sellers` — Lista sellers `?u=ADMIN_ID`
+  - `POST /api/admin/sellers/crear` — Crear seller `{admin_id, telegram_id, nombre, max_invites, periodo, plan_dias, plan_tipo}`
+  - `POST /api/admin/sellers/editar` — Editar seller `{admin_id, id, max_invites, periodo, plan_dias, plan_tipo, activo}`
+  - `POST /api/admin/sellers/eliminar` — Eliminar seller `{admin_id, id}`
+- **Endpoints Seller**:
+  - `GET /api/seller/info` — Info del seller `?u=USER_ID`
+  - `POST /api/seller/invitar` — Activar membresia directo `{u, invitado_id, invitado_nombre}`
+  - `POST /api/seller/generar_codigo` — Generar codigos `{u, cantidad}`
+  - `GET /api/seller/codigos` — Lista codigos del seller `?u=USER_ID`
+  - `POST /api/seller/eliminar_codigo` — Eliminar codigo no usado `{u, code_id}`
+- **Endpoint Publico**:
+  - `POST /api/canjear_codigo` — Cualquier usuario canjea un codigo `{codigo, telegram_id}`
+- **Login/CheckMembresia**: Devuelven `es_seller` para mostrar/ocultar seccion seller
 
 ---
 
 ## Secciones del Panel
-| # | Seccion | Plataforma | Descripcion |
-|---|---|---|---|
-| 1 | Dashboard | Ambas | Vista general, estadisticas, graficos |
-| 2 | Cuentas WSP | WSP | Vincular/desvincular cuentas WhatsApp via QR |
-| 3 | Cuentas TG | TG | Vincular cuentas TG via codigo o QR |
-| 4 | Grupos WSP | WSP | Gestion de grupos (busqueda, secciones, ordenar) |
-| 5 | Grupos TG | TG | Gestion de grupos TG |
-| 6 | Mensajes y Plantillas | WSP | Crear/editar mensajes reutilizables |
-| 7 | Envio Unico | WSP | Enviar una vez a grupos seleccionados |
-| 8 | Envio Personal | WSP | Enviar a chats personales/numeros manuales |
-| 9 | Envio a Miembros | WSP | DM a miembros de grupo con filtro por pais |
-| 10 | Envio Interactivo | WSP | Promo con escucha de respuestas + filtro pais |
-| 11 | Programados WSP | WSP | Envios programados |
-| 12 | Campanas WSP | WSP | Envios ciclicos automaticos |
-| 13 | Mensajes TG | TG | Mensajes para Telegram |
-| 14 | Campanas TG | TG | Envios ciclicos TG |
-| 15 | Programados TG | TG | Envios programados TG |
-| 16 | Historial TG | TG | Historial de envios TG |
-| 17 | Detectar Grupos TG | TG | Detectar grupos TG |
-| 18 | Stats TG | TG | Estadisticas TG |
-| 19 | Historial WSP | WSP | Historial de envios WSP |
-| 20 | Logs del Bot | WSP | Logs en tiempo real |
-| 21 | Cola de Reintentos | WSP | Mensajes pendientes de reenvio |
-| 22 | Config Envio WSP | WSP | Intervalos, retrasos, imagen |
-| 23 | Lista Negra | WSP | Grupos y numeros excluidos |
-| 24 | Auto-Responder WSP | WSP | Respuestas automaticas |
-| 25 | Auto-Responder TG | TG | Respuestas automaticas TG |
-| 26 | Config Envio TG | TG | Configuracion envio TG |
-| 27 | Lista Negra TG | TG | Exclusiones TG |
-| 28 | 2FA y Sesiones | Ambas | Autenticacion 2FA + sesiones activas |
-| 29 | Backup / Restaurar | Ambas | Exportar/Importar configuracion |
-| 30 | Estadisticas y DMs | Ambas | Estadisticas detalladas + DMs |
-| 31 | Actividad | Ambas | Registro de actividad |
-| 32 | **Panel Seller** | Ambas | **NUEVO**: Panel para sellers — activar membresias a clientes |
-| 33 | Admin Panel | Admin | Gestion de usuarios |
-| 34 | **Sellers** | Admin | **NUEVO**: Crear/editar/eliminar sellers |
-| 35 | Logs Global | Admin | Logs de todos los usuarios |
+| # | Seccion | ID HTML | Plataforma | Descripcion |
+|---|---|---|---|---|
+| 1 | Dashboard | sec-dashboard | Ambas | Vista general, graficos |
+| 2 | Cuentas WSP | sec-cuentas | WSP | Vincular cuentas WhatsApp |
+| 3 | Cuentas TG | sec-cuentastg | TG | Vincular cuentas Telegram |
+| 4 | Grupos WSP | sec-grupos | WSP | Gestion de grupos |
+| 5 | Grupos TG | sec-tggrupos | TG | Gestion de grupos TG |
+| 6 | Mensajes y Plantillas | sec-mensajes | WSP | Mensajes reutilizables |
+| 7 | Envio Unico | sec-envios | WSP | Enviar a grupos |
+| 8 | Envio Personal | sec-enviopersonal | WSP | Enviar a numeros |
+| 9 | Envio a Miembros | sec-enviomiembros | WSP | DM a miembros + filtro pais |
+| 10 | Envio Interactivo | sec-enviointeractivo | WSP | Promo + filtro pais |
+| 11 | Programados WSP | sec-programados | WSP | Envios programados |
+| 12 | Campanas WSP | sec-campanas | WSP | Envios ciclicos |
+| 13 | Mensajes TG | sec-tgmensajes | TG | Mensajes TG |
+| 14 | Campanas TG | sec-tgcampanas | TG | Envios ciclicos TG |
+| 15 | Programados TG | sec-tgprogramados | TG | Envios programados TG |
+| 16 | Historial TG | sec-tghistorial | TG | Historial TG |
+| 17 | Detectar Grupos TG | sec-tgdetectar | TG | Detectar grupos TG |
+| 18 | Stats TG | sec-tgstats | TG | Estadisticas TG |
+| 19 | Historial WSP | sec-historial | WSP | Historial WSP |
+| 20 | Logs del Bot | sec-logs | WSP | Logs en tiempo real |
+| 21 | Cola de Reintentos | sec-retry | WSP | Mensajes pendientes |
+| 22 | Config Envio WSP | sec-config | WSP | Intervalos, retrasos |
+| 23 | Lista Negra | sec-listanegra | WSP | Grupos excluidos |
+| 24 | Auto-Responder WSP | sec-autoresp | WSP | Respuestas automaticas |
+| 25 | Auto-Responder TG | sec-tgautoresp | TG | Respuestas TG |
+| 26 | Config Envio TG | sec-tgconfig | TG | Config envio TG |
+| 27 | Lista Negra TG | sec-tglistanegra | TG | Exclusiones TG |
+| 28 | 2FA y Sesiones | sec-seguridad | Ambas | 2FA + sesiones activas |
+| 29 | Backup / Restaurar | sec-backup | Ambas | Export/Import config |
+| 30 | Estadisticas y DMs | sec-stats | Ambas | Estadisticas + DMs |
+| 31 | Actividad | sec-actividad | Ambas | Registro actividad |
+| 32 | **Canjear Codigo** | sec-canjear | Ambas | **NUEVO**: Canjear codigo de membresia (visible para todos) |
+| 33 | **Panel Seller** | sec-sellerpanel | seller-only | **NUEVO**: Generar codigos + activar membresias |
+| 34 | Admin Panel | sec-admin | admin-only | Gestion de usuarios |
+| 35 | **Sellers** | sec-sellers | admin-only | **NUEVO**: Crear/editar/eliminar sellers |
+| 36 | Logs Global | sec-adminlogs | admin-only | Logs de todos los usuarios |
 
-## Endpoints API
+## Endpoints API Completos
 ### Sellers (NUEVOS)
 | Endpoint | Metodo | Descripcion |
 |---|---|---|
@@ -176,15 +202,23 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 | `/api/admin/sellers/crear` | POST | Crear seller `{admin_id, telegram_id, nombre, max_invites, periodo, plan_dias, plan_tipo}` |
 | `/api/admin/sellers/editar` | POST | Editar seller `{admin_id, id, max_invites, periodo, plan_dias, plan_tipo, activo}` |
 | `/api/admin/sellers/eliminar` | POST | Eliminar seller `{admin_id, id}` |
-| `/api/seller/info` | GET | Info del seller actual `?u=USER_ID` |
-| `/api/seller/invitar` | POST | Seller activa membresia `{u, invitado_id, invitado_nombre}` |
+| `/api/seller/info` | GET | Info del seller `?u=USER_ID` |
+| `/api/seller/invitar` | POST | Activar membresia directo `{u, invitado_id, invitado_nombre}` |
+| `/api/seller/generar_codigo` | POST | Generar codigos `{u, cantidad}` |
+| `/api/seller/codigos` | GET | Lista codigos `?u=USER_ID` |
+| `/api/seller/eliminar_codigo` | POST | Eliminar codigo no usado `{u, code_id}` |
+| `/api/canjear_codigo` | POST | Canjear codigo `{codigo, telegram_id}` |
 
 ### Endpoints Anteriores (sin cambios)
-Ver listado completo en el handoff anterior. Endpoints principales:
-- `/api/panel_login`, `/api/panel_registro`, `/api/check_membresia`
-- `/api/grupos`, `/api/campanas`, `/api/historial`, `/api/dashboard`
-- `/api/2fa/*`, `/api/panel_sessions/*`, `/api/config/*`
-- `/api/admin/usuarios`, `/api/admin/membresia`, `/api/admin/desactivar`
+- Auth: `/api/panel_login`, `/api/panel_registro`, `/api/check_membresia`, `/api/panel_cambiar_password`, `/api/panel_recuperar_solicitar`, `/api/panel_recuperar_reset`
+- Grupos: `/api/grupos`, `/api/grupos/add`, `/api/grupos/del`, `/api/grupos/delall`, `/api/grupos/seccion`, `/api/grupos/secciones`
+- Campanas: `/api/campanas`, `/api/campanas/crear`, `/api/campanas/del`, `/api/campanas/editar`, `/api/iniciar`, `/api/detener`
+- Envios: `/api/historial`, `/api/dashboard`, `/api/dashboard/extended`, `/api/reporte_diario`, `/api/tasa_entrega`, `/api/envios_chart`, `/api/limites`
+- 2FA: `/api/2fa/setup`, `/api/2fa/verify`, `/api/2fa/enable`, `/api/2fa/disable`, `/api/2fa/status`
+- Sesiones: `/api/panel_sessions`, `/api/panel_sessions/close`
+- Backup: `/api/config/exportar`, `/api/config/importar`
+- Admin: `/api/admin/usuarios`, `/api/admin/membresia`, `/api/admin/desactivar`, `/api/admin/set_admin`
+- Promo: `/api/promo/plantillas`, `/api/promo/plantillas/crear`, `/api/promo/plantillas/editar`, `/api/promo/plantillas/eliminar`
 
 ## Tablas de Base de Datos
 ### Tablas WSP (wsp_titan.db)
@@ -212,22 +246,34 @@ Ver listado completo en el handoff anterior. Endpoints principales:
 - `user_2fa` — 2FA TOTP
 - `active_sessions` — Sesiones activas
 - `envios_semanales` — Cache semanal
-- **`sellers`** — **NUEVO**: Revendedores (telegram_id, nombre, max_invites, periodo, plan_dias, plan_tipo, activo)
-- **`seller_invites`** — **NUEVO**: Invitaciones de sellers (seller_id, invitado_telegram_id, plan_dias, plan_tipo, fecha)
+- **`sellers`** — Revendedores (telegram_id, nombre, max_invites, periodo, plan_dias, plan_tipo, activo)
+- **`seller_invites`** — Invitaciones de sellers (seller_id, invitado_telegram_id, plan_dias, plan_tipo, fecha)
+- **`seller_codes`** — Codigos de activacion (seller_id, codigo, plan_dias, plan_tipo, usado, usado_por, fecha_creado, fecha_usado)
 
-## Notas Importantes
-1. **panel.html** es monolitico (~4480 lineas). Todo HTML, CSS y JS en un archivo. No separar.
+## Flujo del Sistema de Sellers
+1. **Admin** crea un seller en Admin > Sellers (Telegram ID, nombre, limite, periodo, plan)
+2. **Seller** inicia sesion y ve "Panel Seller" en el sidebar
+3. **Seller** tiene 2 opciones:
+   - **Generar codigos**: Crea codigos como `VIP-A3X9K2`, se los da a sus clientes
+   - **Activar directo**: Si tiene el Telegram ID, activa la membresia directamente
+4. **Cliente** va a "Canjear Codigo" en su panel, ingresa el codigo y se activa su membresia
+5. El limite se descuenta: codigos pendientes + usados en el periodo cuentan contra el limite
+6. El contador se resetea automaticamente cada semana o mes segun configuracion del admin
+
+## Notas Importantes para la Siguiente IA
+1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.
 2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).
 3. Las tablas y funciones de DB se agregan en `db_wsp.js` **ANTES** del `module.exports`.
 4. Los nuevos exports se agregan al final del objeto `module.exports` en `db_wsp.js`.
-5. `panel_server.js` proxea `/api/*` al puerto 3000 (WSP) y `/api/tg*` al puerto 3002 (TG). NO necesitas modificarlo para nuevos endpoints.
-6. Para agregar una nueva seccion al panel: (a) nav en sidebar, (b) `div.section` con `id="sec-NOMBRE"`, (c) funcion de carga, (d) agregar al objeto `loaders`.
+5. `panel_server.js` proxea `/api/*` al puerto 3000 (WSP) y `/api/tg*` al puerto 3002 (TG). NO necesitas modificarlo.
+6. Para agregar una nueva seccion al panel: (a) nav en sidebar, (b) `div.section` con `id="sec-NOMBRE"`, (c) funcion de carga JS, (d) agregar al objeto `loaders`.
 7. El tema oscuro/claro usa CSS variables: `var(--bg)`, `var(--text)`, etc.
 8. Multi-idioma usa `LANG` object. Agregar traducciones para ES, EN y PT.
-9. Sellers usan clase CSS `seller-only` (similar a `admin-only`). Se muestran si `esSeller || esAdmin`.
-10. **SIEMPRE** actualizar este HANDOFF.md despues de cada mejora o fix.
+9. Sellers usan clase CSS `seller-only`. Se muestran si `esSeller || esAdmin`.
+10. "Canjear Codigo" es visible para TODOS los usuarios (no necesita ser seller ni admin).
+11. **SIEMPRE** actualizar este HANDOFF.md despues de cada mejora o fix.
 
 ## Comando de Actualizacion
 ```bash
-cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/<BRANCH_NAME> && npm install && bash start.sh
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777514912-country-filter-mejoras && npm install && bash start.sh
 ```

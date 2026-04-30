@@ -442,6 +442,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div class="nav-group">General</div>
       <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas y DMs</span></a>
       <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
+      <a href="#" data-section="canjear"><span class="icon">🎫</span><span>Canjear Codigo</span></a>
       <div class="nav-group seller-only" style="display:none">Seller</div>
       <a href="#" data-section="sellerpanel" class="seller-only" style="display:none"><span class="icon">🏪</span><span>Panel Seller</span></a>
       <div class="nav-group admin-only" style="display:none">Admin</div>
@@ -1239,12 +1240,29 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- SELLER PANEL (para sellers) -->
     <div class="section" id="sec-sellerpanel">
       <h2>🏪 Panel de Seller</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Activa membresias para tus clientes desde aqui.</p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Activa membresias para tus clientes por codigo o directamente.</p>
       <div id="sellerInfoBox" style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent)">
         <div class="loading-overlay"><span class="spinner"></span> Cargando info de seller...</div>
       </div>
+      <!-- Generar códigos -->
+      <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--accent2)">
+        <h3 style="margin-bottom:10px;color:var(--accent2)">🎫 Generar Codigos de Activacion</h3>
+        <p style="color:var(--text2);font-size:13px;margin-bottom:10px">Genera codigos unicos para darle a tus clientes. Ellos lo canjean en el panel y se les activa la membresia.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin-bottom:0;min-width:120px">
+            <label>Cantidad (max 10)</label>
+            <input type="number" id="sellerCodeCantidad" value="1" min="1" max="10" style="width:80px">
+          </div>
+          <button class="btn btn-primary" onclick="sellerGenerarCodigos()">🎫 Generar Codigos</button>
+          <button class="btn btn-outline" onclick="sellerLoadCodigos()">🔄 Actualizar Lista</button>
+        </div>
+        <div id="sellerCodigosGenerados" style="margin-top:10px"></div>
+      </div>
+      <div id="sellerCodigosContent" class="empty-state"><div class="icon">🎫</div><p>Sin codigos generados</p></div>
+      <!-- Activar directo por ID -->
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--success)">
-        <h3 style="margin-bottom:10px;color:var(--success)">🎟️ Activar Membresia a Cliente</h3>
+        <h3 style="margin-bottom:10px;color:var(--success)">🎟️ Activar Directo por Telegram ID</h3>
+        <p style="color:var(--text2);font-size:13px;margin-bottom:10px">Tambien puedes activar la membresia directamente si ya tienes el Telegram ID del cliente.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <div class="form-group" style="margin-bottom:0;flex:1;min-width:180px">
             <label>Telegram ID del cliente</label>
@@ -1258,6 +1276,20 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         </div>
       </div>
       <div id="sellerInvitesContent" class="empty-state"><div class="icon">🎟️</div><p>Sin invitaciones aun</p></div>
+    </div>
+
+    <!-- CANJEAR CODIGO (visible para todos los usuarios) -->
+    <div class="section" id="sec-canjear">
+      <h2>🎫 Canjear Codigo de Membresia</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Si tienes un codigo de activacion, ingresalo aqui para activar tu membresia.</p>
+      <div style="background:var(--bg);padding:20px;border-radius:10px;border:1px solid var(--accent);max-width:500px">
+        <div class="form-group">
+          <label>Codigo de activacion</label>
+          <input type="text" id="canjearCodigoInput" placeholder="Ej: VIP-A3X9K2" style="font-size:18px;text-align:center;text-transform:uppercase;letter-spacing:2px">
+        </div>
+        <button class="btn btn-success" onclick="canjearCodigo()" style="width:100%;font-size:16px;padding:12px">🎫 Canjear Codigo</button>
+        <div id="canjearResult" style="margin-top:15px;display:none"></div>
+      </div>
     </div>
 
     <!-- CUENTAS TELEGRAM -->
@@ -1850,7 +1882,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoPlantillaSelect')},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel};
+    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoPlantillaSelect')},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){}};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -3691,6 +3723,7 @@ async function loadSellerPanel(){
   if(!r.ok||!r.es_seller){
     $('sellerInfoBox').innerHTML='<div class="empty-state"><p>No eres un seller autorizado.</p></div>';
     $('sellerInvitesContent').innerHTML='';
+    $('sellerCodigosContent').innerHTML='';
     return;
   }
   const s=r.seller;
@@ -3705,6 +3738,7 @@ async function loadSellerPanel(){
   h+=`<div style="font-size:28px;font-weight:bold;color:${barColor}">${usadas} / ${s.max_invites}</div>`;
   h+=`<div style="background:var(--bg3);border-radius:6px;height:10px;margin-top:6px"><div style="width:${pct}%;background:${barColor};height:100%;border-radius:6px;transition:width 0.3s"></div></div></div></div>`;
   $('sellerInfoBox').innerHTML=h;
+  sellerLoadCodigos();
   const invites=r.invites||[];
   if(!invites.length){$('sellerInvitesContent').innerHTML='<div class="empty-state"><div class="icon">\ud83c\udf9f\ufe0f</div><p>Aun no has activado membresias</p></div>';return}
   let t='<div class="table-wrap"><div class="table-header"><h3>\ud83c\udf9f\ufe0f '+invites.length+' Membresias Activadas</h3></div>';
@@ -3716,6 +3750,51 @@ async function loadSellerPanel(){
   });
   t+='</tbody></table></div>';
   $('sellerInvitesContent').innerHTML=t;
+}
+
+async function sellerGenerarCodigos(){
+  const cant=parseInt($('sellerCodeCantidad').value)||1;
+  const r=await api('/api/seller/generar_codigo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,cantidad:cant})});
+  if(r.ok){
+    const codigos=r.codigos||[];
+    let h='<div style="background:var(--bg3);padding:12px;border-radius:8px;border:1px solid var(--success)"><p style="color:var(--success);font-weight:bold;margin-bottom:8px">\ud83c\udf89 Codigos generados:</p>';
+    codigos.forEach(c=>{h+=`<div style="font-family:monospace;font-size:16px;padding:4px 8px;background:var(--bg);border-radius:4px;margin-bottom:4px;display:inline-block;margin-right:8px;border:1px solid var(--accent);cursor:pointer" onclick="navigator.clipboard.writeText('${c}');toast('Codigo copiado: ${c}','success')" title="Click para copiar">${c} \ud83d\udccb</div>`});
+    h+='<p style="color:var(--text2);font-size:11px;margin-top:8px">Click en un codigo para copiarlo</p></div>';
+    $('sellerCodigosGenerados').innerHTML=h;
+    toast(codigos.length+' codigo(s) generado(s)','success');
+    sellerLoadCodigos();
+  }else{
+    toast('Error: '+(r.error||''),'error');
+  }
+}
+
+async function sellerLoadCodigos(){
+  const r=await api('/api/seller/codigos?u='+userId);
+  if(!r.ok){$('sellerCodigosContent').innerHTML='<div class="empty-state"><p>Error cargando codigos</p></div>';return}
+  const codigos=r.codigos||[];
+  if(!codigos.length){$('sellerCodigosContent').innerHTML='<div class="empty-state"><div class="icon">\ud83c\udf9f\ufe0f</div><p>Sin codigos generados</p></div>';return}
+  const pendientes=codigos.filter(c=>!c.usado);
+  const usados=codigos.filter(c=>c.usado);
+  let h='<div class="table-wrap"><div class="table-header"><h3>\ud83c\udf9f\ufe0f '+codigos.length+' Codigos ('+pendientes.length+' pendientes, '+usados.length+' usados)</h3></div>';
+  h+='<table><thead><tr><th>Codigo</th><th>Plan</th><th>Estado</th><th>Usado por</th><th>Fecha creado</th><th>Acciones</th></tr></thead><tbody>';
+  codigos.forEach(c=>{
+    const plan=c.plan_tipo==='permanente'?'Permanente':c.plan_tipo==='mensual'?'Mensual':'Semanal';
+    const estado=c.usado?'<span class="badge badge-success">Usado</span>':'<span class="badge badge-warn">Pendiente</span>';
+    const usadoPor=c.usado_por||'-';
+    const fecha=c.fecha_creado?new Date(c.fecha_creado).toLocaleString('es'):'?';
+    h+=`<tr><td style="font-family:monospace;font-weight:bold;cursor:pointer" onclick="navigator.clipboard.writeText('${c.codigo}');toast('Copiado: ${c.codigo}','success')" title="Click para copiar">${c.codigo} \ud83d\udccb</td>`;
+    h+=`<td>${plan} (${c.plan_dias}d)</td><td>${estado}</td><td style="font-size:11px">${usadoPor}</td><td style="font-size:11px">${fecha}</td>`;
+    h+=`<td>${c.usado?'':'<button class="btn btn-sm btn-danger" onclick="sellerEliminarCodigo('+c.id+')">\u274c</button>'}</td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  $('sellerCodigosContent').innerHTML=h;
+}
+
+async function sellerEliminarCodigo(codeId){
+  if(!confirm('Eliminar este codigo?'))return;
+  const r=await api('/api/seller/eliminar_codigo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,code_id:codeId})});
+  toast(r.ok?'Codigo eliminado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)sellerLoadCodigos();
 }
 
 async function sellerInvitar(){
@@ -3730,6 +3809,23 @@ async function sellerInvitar(){
     loadSellerPanel();
   }else{
     toast('Error: '+(r.error||'No se pudo activar'),'error');
+  }
+}
+
+// --- CANJEAR CODIGO (cualquier usuario) ---
+async function canjearCodigo(){
+  const codigo=$('canjearCodigoInput').value.trim().toUpperCase();
+  if(!codigo){toast('Ingresa un codigo','error');return}
+  $('canjearResult').style.display='none';
+  const r=await api('/api/canjear_codigo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codigo:codigo,telegram_id:userId})});
+  const el=$('canjearResult');
+  el.style.display='block';
+  if(r.ok){
+    el.innerHTML=`<div style="background:var(--success);color:white;padding:15px;border-radius:8px;text-align:center"><div style="font-size:24px;margin-bottom:8px">\ud83c\udf89</div><div style="font-size:16px;font-weight:bold">Membresia Activada!</div><div style="margin-top:8px">Plan: <b>${r.plan}</b></div>${r.seller?'<div style="font-size:12px;margin-top:4px;opacity:0.8">Seller: '+r.seller+'</div>':''}</div>`;
+    $('canjearCodigoInput').value='';
+    toast('Membresia activada exitosamente!','success');
+  }else{
+    el.innerHTML=`<div style="background:var(--danger);color:white;padding:15px;border-radius:8px;text-align:center"><div style="font-size:24px;margin-bottom:8px">\u274c</div><div>${r.error||'Error al canjear codigo'}</div></div>`;
   }
 }
 
@@ -3750,9 +3846,9 @@ function toggleTheme(){
 // --- MULTI-LANGUAGE ---
 let currentLang='es';
 const LANG={
-  es:{dashboard:'Dashboard',cuentas:'Cuentas WSP',grupos:'Grupos',mensajes:'Mensajes',envios:'Envio Unico',enviopersonal:'Envio Personal',campanas:'Campanas',config:'Config Envio',stats:'Estadisticas',admin:'Admin Panel',plantillas:'Plantillas',historial:'Historial',actividad:'Actividad',logout:'Cerrar Sesion',login:'Iniciar Sesion',register:'Registrarse',send:'Enviar',cancel:'Cancelar',delete:'Eliminar',save:'Guardar',create:'Crear',loading:'Cargando...',nodata:'Sin datos',seguridad:'2FA y Sesiones',backup:'Backup / Restaurar',enviomiembros:'Envio a Miembros',enviointeractivo:'Envio Interactivo',programados:'Programados',listanegra:'Lista Negra',autoresp:'Auto-Responder',logs:'Logs del Bot',retry:'Cola de Reintentos',tggrupos:'Grupos TG',tgmensajes:'Mensajes TG',tgcampanas:'Campanas TG',tgprogramados:'Programados TG',tghistorial:'Historial TG',tgdetectar:'Detectar Grupos TG',tgstats:'Stats TG',tgautoresp:'Auto-Responder TG',tgconfig:'Config Envio TG',tglistanegra:'Lista Negra TG',cuentastg:'Cuentas TG',sellers:'Sellers',sellerpanel:'Panel Seller'},
-  en:{dashboard:'Dashboard',cuentas:'WSP Accounts',grupos:'Groups',mensajes:'Messages',envios:'Single Send',enviopersonal:'Personal Send',campanas:'Campaigns',config:'Send Config',stats:'Statistics',admin:'Admin Panel',plantillas:'Templates',historial:'History',actividad:'Activity',logout:'Logout',login:'Login',register:'Register',send:'Send',cancel:'Cancel',delete:'Delete',save:'Save',create:'Create',loading:'Loading...',nodata:'No data',seguridad:'2FA & Sessions',backup:'Backup / Restore',enviomiembros:'Member Send',enviointeractivo:'Interactive Send',programados:'Scheduled',listanegra:'Blacklist',autoresp:'Auto-Responder',logs:'Bot Logs',retry:'Retry Queue',tggrupos:'TG Groups',tgmensajes:'TG Messages',tgcampanas:'TG Campaigns',tgprogramados:'TG Scheduled',tghistorial:'TG History',tgdetectar:'Detect TG Groups',tgstats:'TG Stats',tgautoresp:'TG Auto-Responder',tgconfig:'TG Send Config',tglistanegra:'TG Blacklist',cuentastg:'TG Accounts',sellers:'Sellers',sellerpanel:'Seller Panel'},
-  pt:{dashboard:'Painel',cuentas:'Contas WSP',grupos:'Grupos',mensajes:'Mensagens',envios:'Envio Unico',enviopersonal:'Envio Pessoal',campanas:'Campanhas',config:'Config Envio',stats:'Estatisticas',admin:'Admin',plantillas:'Modelos',historial:'Historico',actividad:'Atividade',logout:'Sair',login:'Entrar',register:'Registrar',send:'Enviar',cancel:'Cancelar',delete:'Excluir',save:'Salvar',create:'Criar',loading:'Carregando...',nodata:'Sem dados',seguridad:'2FA e Sessoes',backup:'Backup / Restaurar',sellers:'Revendedores',sellerpanel:'Painel Revendedor'}
+  es:{dashboard:'Dashboard',cuentas:'Cuentas WSP',grupos:'Grupos',mensajes:'Mensajes',envios:'Envio Unico',enviopersonal:'Envio Personal',campanas:'Campanas',config:'Config Envio',stats:'Estadisticas',admin:'Admin Panel',plantillas:'Plantillas',historial:'Historial',actividad:'Actividad',logout:'Cerrar Sesion',login:'Iniciar Sesion',register:'Registrarse',send:'Enviar',cancel:'Cancelar',delete:'Eliminar',save:'Guardar',create:'Crear',loading:'Cargando...',nodata:'Sin datos',seguridad:'2FA y Sesiones',backup:'Backup / Restaurar',enviomiembros:'Envio a Miembros',enviointeractivo:'Envio Interactivo',programados:'Programados',listanegra:'Lista Negra',autoresp:'Auto-Responder',logs:'Logs del Bot',retry:'Cola de Reintentos',tggrupos:'Grupos TG',tgmensajes:'Mensajes TG',tgcampanas:'Campanas TG',tgprogramados:'Programados TG',tghistorial:'Historial TG',tgdetectar:'Detectar Grupos TG',tgstats:'Stats TG',tgautoresp:'Auto-Responder TG',tgconfig:'Config Envio TG',tglistanegra:'Lista Negra TG',cuentastg:'Cuentas TG',sellers:'Sellers',sellerpanel:'Panel Seller',canjear:'Canjear Codigo'},
+  en:{dashboard:'Dashboard',cuentas:'WSP Accounts',grupos:'Groups',mensajes:'Messages',envios:'Single Send',enviopersonal:'Personal Send',campanas:'Campaigns',config:'Send Config',stats:'Statistics',admin:'Admin Panel',plantillas:'Templates',historial:'History',actividad:'Activity',logout:'Logout',login:'Login',register:'Register',send:'Send',cancel:'Cancel',delete:'Delete',save:'Save',create:'Create',loading:'Loading...',nodata:'No data',seguridad:'2FA & Sessions',backup:'Backup / Restore',enviomiembros:'Member Send',enviointeractivo:'Interactive Send',programados:'Scheduled',listanegra:'Blacklist',autoresp:'Auto-Responder',logs:'Bot Logs',retry:'Retry Queue',tggrupos:'TG Groups',tgmensajes:'TG Messages',tgcampanas:'TG Campaigns',tgprogramados:'TG Scheduled',tghistorial:'TG History',tgdetectar:'Detect TG Groups',tgstats:'TG Stats',tgautoresp:'TG Auto-Responder',tgconfig:'TG Send Config',tglistanegra:'TG Blacklist',cuentastg:'TG Accounts',sellers:'Sellers',sellerpanel:'Seller Panel',canjear:'Redeem Code'},
+  pt:{dashboard:'Painel',cuentas:'Contas WSP',grupos:'Grupos',mensajes:'Mensagens',envios:'Envio Unico',enviopersonal:'Envio Pessoal',campanas:'Campanhas',config:'Config Envio',stats:'Estatisticas',admin:'Admin',plantillas:'Modelos',historial:'Historico',actividad:'Atividade',logout:'Sair',login:'Entrar',register:'Registrar',send:'Enviar',cancel:'Cancelar',delete:'Excluir',save:'Salvar',create:'Criar',loading:'Carregando...',nodata:'Sem dados',seguridad:'2FA e Sessoes',backup:'Backup / Restaurar',sellers:'Revendedores',sellerpanel:'Painel Revendedor',canjear:'Resgatar Codigo'}
 };
 function toggleLang(){
   currentLang=currentLang==='es'?'en':'es';

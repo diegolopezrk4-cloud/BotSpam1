@@ -531,6 +531,20 @@ function init() {
             FOREIGN KEY(seller_id) REFERENCES sellers(id)
         );
     `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS seller_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            seller_id INTEGER NOT NULL,
+            codigo TEXT NOT NULL UNIQUE,
+            plan_dias INTEGER DEFAULT 7,
+            plan_tipo TEXT DEFAULT 'semanal',
+            usado INTEGER DEFAULT 0,
+            usado_por TEXT DEFAULT NULL,
+            fecha_creado TEXT DEFAULT (datetime('now')),
+            fecha_usado TEXT DEFAULT NULL,
+            FOREIGN KEY(seller_id) REFERENCES sellers(id)
+        );
+    `);
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -1940,6 +1954,42 @@ function isSellerUser(telegramId) {
     return s || null;
 }
 
+function generarSellerCode(sellerId, planDias, planTipo) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let codigo;
+    for (let attempts = 0; attempts < 20; attempts++) {
+        codigo = 'VIP-';
+        for (let i = 0; i < 6; i++) codigo += chars.charAt(Math.floor(Math.random() * chars.length));
+        const exists = db.prepare("SELECT 1 FROM seller_codes WHERE codigo = ?").get(codigo);
+        if (!exists) break;
+    }
+    db.prepare("INSERT INTO seller_codes (seller_id, codigo, plan_dias, plan_tipo) VALUES (?, ?, ?, ?)")
+        .run(sellerId, codigo, planDias || 7, planTipo || 'semanal');
+    return codigo;
+}
+
+function getSellerCodes(sellerId) {
+    return db.prepare("SELECT * FROM seller_codes WHERE seller_id = ? ORDER BY fecha_creado DESC").all(sellerId);
+}
+
+function getSellerCodesPendientes(sellerId) {
+    return db.prepare("SELECT * FROM seller_codes WHERE seller_id = ? AND usado = 0 ORDER BY fecha_creado DESC").all(sellerId);
+}
+
+function canjearSellerCode(codigo, telegramId) {
+    const code = db.prepare("SELECT sc.*, s.activo as seller_activo, s.telegram_id as seller_tid, s.nombre as seller_nombre FROM seller_codes sc JOIN sellers s ON sc.seller_id = s.id WHERE sc.codigo = ?").get(String(codigo).toUpperCase().trim());
+    if (!code) return { ok: false, error: 'codigo_invalido' };
+    if (code.usado) return { ok: false, error: 'codigo_usado' };
+    if (!code.seller_activo) return { ok: false, error: 'seller_inactivo' };
+    db.prepare("UPDATE seller_codes SET usado = 1, usado_por = ?, fecha_usado = datetime('now') WHERE id = ?").run(String(telegramId), code.id);
+    registrarSellerInvite(code.seller_id, telegramId, code.plan_dias, code.plan_tipo);
+    return { ok: true, plan_dias: code.plan_dias, plan_tipo: code.plan_tipo, seller_nombre: code.seller_nombre };
+}
+
+function eliminarSellerCode(codeId, sellerId) {
+    db.prepare("DELETE FROM seller_codes WHERE id = ? AND seller_id = ? AND usado = 0").run(codeId, sellerId);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -2013,4 +2063,6 @@ module.exports = {
     // Sellers (Revendedores)
     crearSeller, getSeller, getSellerById, getTodosSellers, editarSeller, eliminarSeller,
     getSellerInvitesCount, getSellerInvites, registrarSellerInvite, isSellerUser,
+    // Seller codes
+    generarSellerCode, getSellerCodes, getSellerCodesPendientes, canjearSellerCode, eliminarSellerCode,
 };
