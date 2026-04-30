@@ -576,3 +576,35 @@ Cuando un pago es confirmado (automatico por Binance webhook o manual por admin)
 65. **Docker Compose**: Dockerfile + docker-compose.yml para empaquetar los 3 servicios. Volumes para persistencia. Health check integrado.
 66. **CI/CD GitHub Actions**: Workflow en `.github/workflows/ci.yml` — syntax check JS (node -c), syntax check Python (py_compile), verifica archivos requeridos, build Docker image.
 67. **Monitoreo/Health Check**: `GET /api/health` (publico) retorna uptime, memoria, estado del bot. Compatible con UptimeRobot y similares.
+
+#### Pagos y Planes (PR #27 — ultimo commit)
+68. **QR en Metodos de Pago**: Admin puede subir foto QR de Yape/Plin en cada metodo de pago. Cliente ve el QR al elegir metodo.
+    - Endpoints: `POST /api/admin/metodos_pago/qr` (subir QR), `GET /api/metodos_pago/qr?id=X` (servir QR)
+    - Columna: `metodos_pago.qr_imagen`
+    - Funciones DB: `setMetodoPagoQr()`, `getMetodoPago()`
+    - QR se guarda en: `comprobantes/qr_metodo_{id}_{timestamp}.{ext}`
+
+69. **2 opciones de comprobante**: Cliente puede subir comprobante directo en el panel O enviar por WhatsApp (boton directo a wa.me/51976680776).
+    - Radio buttons en modal de pago para elegir metodo de entrega
+
+70. **Planes editables por admin**: Solo Semanal (S/15) y Mensual (S/30) por defecto. Admin puede editar precios, dias, agregar/eliminar planes desde panel.
+    - Endpoints: `GET /api/admin/planes`, `POST /api/admin/planes/editar`
+    - Tabla: `admin_config` (clave TEXT PRIMARY KEY, valor TEXT)
+    - Funciones DB: `getPlanes()`, `setPlanes()`, `getAdminConfig()`, `setAdminConfig()`
+    - Seccion: Gestion Pagos > tab "Editar Planes"
+
+71. **Header precios dinamicos**: Los precios en el banner de membresia se actualizan automaticamente desde la API.
+
+---
+
+## Bugs Conocidos (Pendientes de Corregir)
+
+### BUG-001: Comprobante imagen no carga en panel admin
+- **Donde**: Admin > Gestion Pagos > Pendientes > click "Ver" en comprobante
+- **Sintoma**: Modal muestra "Error al cargar imagen" en vez de la foto del comprobante
+- **Causa probable**: El endpoint `/api/comprobante/imagen` no encuentra el archivo, o el path guardado en DB no coincide con la ubicacion real del archivo subido
+- **Archivos relevantes**:
+  - `index_wsp.js` — buscar `/api/comprobante/imagen` y `/api/comprobante/subir`
+  - `db_wsp.js` — funcion `crearComprobante()` (donde se guarda el path)
+  - `panel.html` — funcion `verComprobante(id)` (modal que muestra la imagen)
+- **Directorio de comprobantes**: `comprobantes/` (verificar que existe y tiene permisos)
