@@ -1444,7 +1444,7 @@ poll();
                     }
                     const batchSize = parseInt(body.batch_size) || 0;
                     const delayMinutes = parseInt(body.delay_minutes) || 5;
-                    const started = motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    const started = await motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
                     if (!started) {
                         res.writeHead(409);
                         return res.end(JSON.stringify({ ok: false, error: "Ya hay un envio activo para este usuario" }));
