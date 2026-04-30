@@ -1925,6 +1925,7 @@ function editarSeller(id, maxInvites, periodo, planDias, planTipo, activo) {
 }
 
 function eliminarSeller(id) {
+    db.prepare("DELETE FROM seller_codes WHERE seller_id = ?").run(id);
     db.prepare("DELETE FROM seller_invites WHERE seller_id = ?").run(id);
     db.prepare("DELETE FROM sellers WHERE id = ?").run(id);
 }
@@ -1956,13 +1957,14 @@ function isSellerUser(telegramId) {
 
 function generarSellerCode(sellerId, planDias, planTipo) {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let codigo;
-    for (let attempts = 0; attempts < 20; attempts++) {
-        codigo = 'VIP-';
-        for (let i = 0; i < 6; i++) codigo += chars.charAt(Math.floor(Math.random() * chars.length));
-        const exists = db.prepare("SELECT 1 FROM seller_codes WHERE codigo = ?").get(codigo);
-        if (!exists) break;
+    let codigo = null;
+    for (let attempts = 0; attempts < 50; attempts++) {
+        let candidate = 'VIP-';
+        for (let i = 0; i < 6; i++) candidate += chars.charAt(Math.floor(Math.random() * chars.length));
+        const exists = db.prepare("SELECT 1 FROM seller_codes WHERE codigo = ?").get(candidate);
+        if (!exists) { codigo = candidate; break; }
     }
+    if (!codigo) throw new Error('No se pudo generar un codigo unico');
     db.prepare("INSERT INTO seller_codes (seller_id, codigo, plan_dias, plan_tipo) VALUES (?, ?, ?, ?)")
         .run(sellerId, codigo, planDias || 7, planTipo || 'semanal');
     return codigo;

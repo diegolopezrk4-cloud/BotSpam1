@@ -2131,10 +2131,11 @@ poll();
                 if (!seller) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No eres seller autorizado" })); }
                 if (!body.invitado_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta invitado_id" })); }
                 const usados = db.getSellerInvitesCount(seller.id, seller.periodo);
-                if (usados >= seller.max_invites) {
+                const pendientes = db.getSellerCodesPendientes(seller.id).length;
+                if (usados + pendientes >= seller.max_invites) {
                     const periodoLabel = seller.periodo === 'semanal' ? 'esta semana' : 'este mes';
                     res.writeHead(400);
-                    return res.end(JSON.stringify({ ok: false, error: `Limite alcanzado: ${usados}/${seller.max_invites} invitaciones ${periodoLabel}` }));
+                    return res.end(JSON.stringify({ ok: false, error: `Limite alcanzado: ${usados} usadas + ${pendientes} pendientes = ${usados + pendientes}/${seller.max_invites} ${periodoLabel}` }));
                 }
                 let user = db.getUsuario(body.invitado_id);
                 if (!user) user = db.findUserByNumber(body.invitado_id);
@@ -2168,12 +2169,14 @@ poll();
                 if (!seller) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No eres seller autorizado" })); }
                 const usados = db.getSellerInvitesCount(seller.id, seller.periodo);
                 const pendientes = db.getSellerCodesPendientes(seller.id).length;
-                if (usados + pendientes >= seller.max_invites) {
+                const totalUsado = usados + pendientes;
+                if (totalUsado >= seller.max_invites) {
                     const periodoLabel = seller.periodo === 'semanal' ? 'esta semana' : 'este mes';
                     res.writeHead(400);
-                    return res.end(JSON.stringify({ ok: false, error: `Limite alcanzado: ${usados} usadas + ${pendientes} pendientes = ${usados + pendientes}/${seller.max_invites} ${periodoLabel}` }));
+                    return res.end(JSON.stringify({ ok: false, error: `Limite alcanzado: ${usados} usadas + ${pendientes} pendientes = ${totalUsado}/${seller.max_invites} ${periodoLabel}` }));
                 }
-                const cantidad = Math.min(parseInt(body.cantidad) || 1, 10);
+                const disponibles = seller.max_invites - totalUsado;
+                const cantidad = Math.min(parseInt(body.cantidad) || 1, 10, disponibles);
                 const codigos = [];
                 for (let i = 0; i < cantidad; i++) {
                     const codigo = db.generarSellerCode(seller.id, seller.plan_dias, seller.plan_tipo);
