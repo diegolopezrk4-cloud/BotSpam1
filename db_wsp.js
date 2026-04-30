@@ -1344,6 +1344,8 @@ function getPanelUser(telegramId) {
 function crearRecoveryCode(telegramId) {
     const crypto = require("crypto");
     db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(String(telegramId));
+    // Cleanup all expired codes (older than 10 min) globally
+    try { db.prepare("DELETE FROM recovery_codes WHERE datetime(created_at) < datetime('now', '-10 minutes')").run(); } catch (e) {}
     const code = crypto.randomInt(100000, 1000000).toString();
     db.prepare("INSERT INTO recovery_codes (telegram_id, code) VALUES (?, ?)").run(String(telegramId), code);
     return code;

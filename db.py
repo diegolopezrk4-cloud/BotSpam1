@@ -130,6 +130,15 @@ async def init_db():
                 FOREIGN KEY(user_id) REFERENCES usuarios(telegram_id)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS lista_negra_tg (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                grupo_link TEXT,
+                fecha TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY(user_id) REFERENCES usuarios(telegram_id)
+            )
+        """)
         await db.commit()
 
     # Migrations
@@ -231,8 +240,8 @@ async def eliminar_sesion(user_id, nombre):
             (user_id, nombre)
         )
         await db.execute(
-            "DELETE FROM campana_sesiones WHERE sesion_nombre=?",
-            (nombre,)
+            "DELETE FROM campana_sesiones WHERE sesion_nombre=? AND campana_id IN (SELECT id FROM campanas WHERE user_id=?)",
+            (nombre, user_id)
         )
         await db.commit()
 
@@ -690,4 +699,36 @@ async def get_all_users_with_active_campaigns():
             "SELECT user_id, id FROM campanas WHERE activa=1"
         ) as cur:
             return await cur.fetchall()
+
+# ─────────────────────────────────────────
+#   LISTA NEGRA TG
+# ─────────────────────────────────────────
+async def get_lista_negra_tg(user_id):
+    async with _connect() as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM lista_negra_tg WHERE user_id=? ORDER BY fecha DESC", (user_id,)
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+async def agregar_lista_negra_tg(user_id, grupo_link):
+    async with _connect() as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO lista_negra_tg (user_id, grupo_link) VALUES (?,?)",
+            (user_id, grupo_link)
+        )
+        await db.commit()
+
+async def eliminar_lista_negra_tg(user_id, grupo_link):
+    async with _connect() as db:
+        await db.execute(
+            "DELETE FROM lista_negra_tg WHERE user_id=? AND grupo_link=?",
+            (user_id, grupo_link)
+        )
+        await db.commit()
+
+async def limpiar_lista_negra_tg(user_id):
+    async with _connect() as db:
+        await db.execute("DELETE FROM lista_negra_tg WHERE user_id=?", (user_id,))
+        await db.commit()
 

@@ -116,7 +116,11 @@ async function connectClientAccount(userId, nombre, telefono) {
             }
         });
         setTimeout(() => {
-            if (!resolved) { resolved = true; reject(new Error("Timeout conectando cuenta (60s)")); }
+            if (!resolved) {
+                resolved = true;
+                try { sock.end(); } catch (e) {}
+                reject(new Error("Timeout conectando cuenta (60s)"));
+            }
         }, 60000);
     });
 }
@@ -209,6 +213,7 @@ async function linkAccount(userId, nombre) {
                         clearTimeout(globalTimeout);
                         reject(new Error("Sesion rechazada"));
                     } else {
+                        try { sock.end(); } catch (e) {}
                         linkData.status = "conectando";
                         await delay(3000);
                         tryConnect();
@@ -343,6 +348,9 @@ function grupoTieneActividadNueva(campanaId, grupoJid) {
     if (!row) return true; // never sent = treat as new
     const envioTime = new Date(row.ultimo_envio + "Z").getTime();
     const ultimaActividad = grupoUltimaActividad[grupoJid];
+    // If we sent recently (last 30 min) from THIS campaign, skip even without activity data
+    const minutesSinceSend = (Date.now() - envioTime) / 60000;
+    if (minutesSinceSend < 30) return false;
     if (ultimaActividad === undefined) return true; // no data (e.g. after restart) — allow send
     return ultimaActividad > envioTime;
 }
@@ -353,21 +361,33 @@ function grupoTieneActividadNueva(campanaId, grupoJid) {
 async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
     const textoFinal = addInvisibleChars(mensaje);
     try {
-        try {
-            const metadata = await sock.groupMetadata(groupJid);
-            if (metadata.announce) {
-                const myJid = sock.user?.id;
-                const myNum = myJid ? myJid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "") : "";
-                const meParticipant = metadata.participants?.find(p => {
-                    const pNum = p.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
-                    return pNum === myNum;
-                });
-                if (!meParticipant || (meParticipant.admin !== "admin" && meParticipant.admin !== "superadmin")) {
-                    return { sent: false, delivered: false, reason: "readonly" };
+        let metadata = null;
+        for (let metaRetry = 0; metaRetry < 2; metaRetry++) {
+            try {
+                metadata = await sock.groupMetadata(groupJid);
+                break;
+            } catch (metaErr) {
+                const errMsg = (metaErr.message || "").toLowerCase();
+                if (errMsg.includes("not-authorized") || errMsg.includes("forbidden") || errMsg.includes("item-not-found") || errMsg.includes("404")) {
+                    return { sent: false, delivered: false, reason: "not_member" };
                 }
+                if (metaRetry === 0) {
+                    await delay(2000);
+                    continue;
+                }
+                return { sent: false, delivered: false, reason: "metadata_error" };
             }
-        } catch (metaErr) {
-            return { sent: false, delivered: false, reason: "not_member" };
+        }
+        if (metadata && metadata.announce) {
+            const myJid = sock.user?.id;
+            const myNum = myJid ? myJid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "") : "";
+            const meParticipant = metadata.participants?.find(p => {
+                const pNum = p.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+                return pNum === myNum;
+            });
+            if (!meParticipant || (meParticipant.admin !== "admin" && meParticipant.admin !== "superadmin")) {
+                return { sent: false, delivered: false, reason: "readonly" };
+            }
         }
 
         let result;
@@ -401,8 +421,8 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
             };
             sock.ev.on("messages.update", handler);
             setTimeout(() => {
-                try { sock.ev.off("messages.update", handler); } catch (e) {}
                 if (!done) { done = true; resolve({ delivered: false, reason: "pending" }); }
+                try { sock.ev.off("messages.update", handler); } catch (e) {}
             }, 15000);
         });
 
@@ -446,8 +466,7 @@ function esGrupoReal(groupId, groupMetadata) {
     if (groupMetadata) {
         if (groupMetadata.isCommunityAnnounce) return false;
         if (groupMetadata.isCommunity && groupMetadata.linkedParent) return false;
-        // Filtrar grupos de solo lectura (solo admins pueden escribir)
-        if (groupMetadata.announce === true) return false;
+        // Nota: NO filtrar announce (solo-admin) aqui — sendToGroup ya verifica si somos admin
         // Filtrar newsletters/canales
         if (groupMetadata.isNewsletter) return false;
     }
@@ -708,6 +727,10 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 gruposEliminados.push(grupoLink);
                                 const idx = gruposLinks.indexOf(grupoLink);
                                 if (idx !== -1) gruposLinks.splice(idx, 1);
+                            } else if (result.reason === "metadata_error") {
+                                db.registrarEnvio(userId, campanaId, grupoLink, "error_temporal");
+                                db.actualizarGrupoStats(userId, grupoLink, "fallido");
+                                console.log(`[Campana] Grupo ${grupoLink}: error temporal de metadata, NO eliminado`);
                             }
                             db.actualizarStatsCampana(campanaId, 0, 1);
                             consecutiveErrors++;
@@ -1013,8 +1036,13 @@ async function listarChatsPersonales(botSock) {
     return chats;
 }
 
-async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta) {
+async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, batchSize, delayMinutes) {
     if (envioPersonalActivo[userId]) return false;
+    if (!batchSize) {
+        const envioConfig = db.getUserEnvioConfig(userId);
+        batchSize = envioConfig.lote_tamano || 0;
+        delayMinutes = batchSize ? Math.ceil((envioConfig.lote_pausa_seg || 300) / 60) : 0;
+    }
 
     let cancelled = false;
     const task = {
@@ -1057,14 +1085,20 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta) {
             const DELAY_MIN_P = 3000;
             const DELAY_MAX_P = 8000;
 
+            const batchInfo = batchSize ? `\n\u{1F4E6} Lotes de ${batchSize} mensajes, pausa ${delayMinutes} min entre lotes` : '';
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio\n\u23F3 Tiempo estimado: ~${Math.round(total * 5.5 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`,
+                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round(total * 5.5 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`,
                 });
             } catch (e) {}
 
-            for (const chat of chats) {
-                if (cancelled) break;
+            for (let chatIdx = 0; chatIdx < chats.length; chatIdx++) {
+                const chat = chats[chatIdx];
+                if (cancelled) {
+                    // Save progress before breaking so pause/resume works
+                    db.guardarProgresoEnvio(userId, 'personal_' + userId, chatIdx, total, mensaje, chats.map(c => c.jid), 'Chats personales');
+                    break;
+                }
 
                 try {
                     const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
@@ -1096,7 +1130,20 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta) {
                     } catch (e) {}
                 }
 
-                // Esperar 10 segundos entre cada envio
+                // Batch pause: if batch_size configured, pause every N messages
+                if (batchSize && enviados > 0 && enviados % batchSize === 0 && !cancelled) {
+                    try {
+                        await botSock.sendMessage(userId, {
+                            text: `\u23F8 Pausa de lote: ${enviados}/${total} enviados. Esperando ${delayMinutes} min...`,
+                        });
+                    } catch (e) {}
+                    // Save progress in case of cancel during pause
+                    db.guardarProgresoEnvio(userId, 'personal_' + userId, enviados, total, mensaje, chats.map(c => c.jid), 'Chats personales');
+                    await delay((delayMinutes || 5) * 60 * 1000);
+                    if (cancelled) break;
+                }
+
+                // Esperar entre cada envio
                 if (!cancelled) {
                     const cooldownP = DELAY_MIN_P + Math.floor(Math.random() * (DELAY_MAX_P - DELAY_MIN_P));
                     await delay(cooldownP);
@@ -1337,7 +1384,7 @@ function iniciarSchedulerMiembros(botSock) {
     _schedulerInterval = setInterval(async () => {
         try {
             const now = new Date();
-            const peruTime = new Date(now.toLocaleString("en-US", { timeZone: "America/Lima" }));
+            const peruTime = new Date(now.toLocaleString("en-US", { timeZone: config.TIMEZONE }));
             const horaActual = String(peruTime.getHours()).padStart(2, "0") + ":" + String(peruTime.getMinutes()).padStart(2, "0");
             const diaActual = peruTime.getDay();
 
@@ -1354,7 +1401,7 @@ function iniciarSchedulerMiembros(botSock) {
                     if (prog.ultimo_envio) {
                         const lastSend = new Date(prog.ultimo_envio + "Z");
                         const hoyPeru = peruTime.toISOString().split("T")[0];
-                        const lastSendPeru = new Date(lastSend.toLocaleString("en-US", { timeZone: "America/Lima" }));
+                        const lastSendPeru = new Date(lastSend.toLocaleString("en-US", { timeZone: config.TIMEZONE }));
                         const lastSendDate = lastSendPeru.toISOString().split("T")[0];
                         if (lastSendDate === hoyPeru) continue;
                     }
