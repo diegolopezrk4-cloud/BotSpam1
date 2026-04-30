@@ -35,9 +35,16 @@ function getSessionDir(userId, nombre) {
     return path.join(config.SESSIONS_DIR, safe);
 }
 
+// Lock to prevent simultaneous reconnection attempts per account
+const reconnectLocks = {};
+
 async function connectClientAccount(userId, nombre, telefono) {
     const sessionDir = getSessionDir(userId, nombre);
     const key = `${userId}_${nombre}`;
+    // Prevent parallel reconnection attempts for the same account
+    if (reconnectLocks[key]) {
+        throw new Error("Ya se esta reconectando esta cuenta. Espera un momento.");
+    }
     fs.mkdirSync(sessionDir, { recursive: true });
 
     async function createSocket() {
@@ -103,11 +110,14 @@ async function connectClientAccount(userId, nombre, telefono) {
                     reconnectAttempts++;
                     console.log(`[WSP] Cuenta ${nombre} desconectada (code ${code}). Reconectando intento ${reconnectAttempts}/${MAX_RECONNECT}...`);
                     await delay(3000 * reconnectAttempts);
+                    reconnectLocks[key] = true;
                     try {
                         const newSock = await connectClientAccount(userId, nombre, telefono);
                         clientSessions[key] = newSock;
                     } catch (e) {
                         console.log(`[WSP] Reconexion fallida para ${nombre}: ${e.message}`);
+                    } finally {
+                        delete reconnectLocks[key];
                     }
                 } else if (!resolved) {
                     resolved = true;
@@ -333,8 +343,10 @@ function escapeRegex(str) {
 }
 
 // Track group activity from other users (called from index_wsp.js message listener)
+// Now persists to DB so it survives restarts
 function registrarActividadGrupo(grupoJid) {
     grupoUltimaActividad[grupoJid] = Date.now();
+    try { db.registrarActividadGrupoDB(grupoJid); } catch (e) {}
 }
 
 // Record when campaign sends to a group (persists to DB)
@@ -347,11 +359,15 @@ function grupoTieneActividadNueva(campanaId, grupoJid) {
     const row = db.getUltimoEnvioCampana(campanaId, grupoJid);
     if (!row) return true; // never sent = treat as new
     const envioTime = new Date(row.ultimo_envio + "Z").getTime();
-    const ultimaActividad = grupoUltimaActividad[grupoJid];
+    // Check in-memory first, then DB for persistence across restarts
+    let ultimaActividad = grupoUltimaActividad[grupoJid];
+    if (ultimaActividad === undefined) {
+        ultimaActividad = db.getUltimaActividadGrupo(grupoJid);
+    }
     // If we sent recently (last 30 min) from THIS campaign, skip even without activity data
     const minutesSinceSend = (Date.now() - envioTime) / 60000;
     if (minutesSinceSend < 30) return false;
-    if (ultimaActividad === undefined) return true; // no data (e.g. after restart) — allow send
+    if (ultimaActividad === undefined) return true; // truly no data — allow send
     return ultimaActividad > envioTime;
 }
 
@@ -406,23 +422,23 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
 
         const deliveryResult = await new Promise((resolve) => {
             let done = false;
+            const cleanup = () => { try { sock.ev.off("messages.update", handler); } catch (e) {} };
             const handler = (updates) => {
                 for (const upd of updates) {
                     if (upd.key?.id === msgId) {
                         const status = upd.update?.status;
                         if (status >= 2) {
-                            if (!done) { done = true; resolve({ delivered: true }); }
+                            if (!done) { done = true; cleanup(); resolve({ delivered: true }); }
                         }
                         if (status === 0) {
-                            if (!done) { done = true; resolve({ delivered: false, reason: "rejected" }); }
+                            if (!done) { done = true; cleanup(); resolve({ delivered: false, reason: "rejected" }); }
                         }
                     }
                 }
             };
             sock.ev.on("messages.update", handler);
             setTimeout(() => {
-                if (!done) { done = true; resolve({ delivered: false, reason: "pending" }); }
-                try { sock.ev.off("messages.update", handler); } catch (e) {}
+                if (!done) { done = true; cleanup(); resolve({ delivered: false, reason: "pending" }); }
             }, 15000);
         });
 
@@ -1037,7 +1053,7 @@ async function listarChatsPersonales(botSock) {
 }
 
 async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, batchSize, delayMinutes) {
-    if (envioPersonalActivo[userId]) return false;
+    if (envioPersonalActivo[userId]) return { blocked: true, error: "Ya hay un envio personal activo. Espera que termine o cancelalo." };
     if (!batchSize) {
         const envioConfig = db.getUserEnvioConfig(userId);
         batchSize = envioConfig.lote_tamano || 0;
@@ -1169,7 +1185,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
 
 let _taskIdCounter = 0;
 async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes, grupoNombre, grupoJid, startIndex) {
-    if (envioPersonalActivo[userId]) return false;
+    if (envioPersonalActivo[userId]) return { blocked: true, error: "Ya hay un envio personal/miembros activo. Espera que termine o cancelalo." };
 
     let cancelled = false;
     const taskId = ++_taskIdCounter;

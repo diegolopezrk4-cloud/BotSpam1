@@ -237,12 +237,43 @@ poll();
     if (url.pathname.startsWith("/api/")) {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
 
-        // Helper para leer body POST
+        // Helper para leer body POST con limite de tamaño (10MB max)
+        const MAX_BODY_SIZE = 10 * 1024 * 1024;
         const readBody = () => new Promise((resolve) => {
             let data = "";
-            req.on("data", c => data += c);
-            req.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve({}); } });
+            let size = 0;
+            let aborted = false;
+            req.on("data", c => {
+                size += c.length;
+                if (size > MAX_BODY_SIZE) {
+                    if (!aborted) { aborted = true; req.destroy(); resolve({}); }
+                    return;
+                }
+                data += c;
+            });
+            req.on("end", () => { if (!aborted) { try { resolve(JSON.parse(data)); } catch { resolve({}); } } });
+            req.on("error", () => { if (!aborted) resolve({}); });
         });
+
+        // Helper: obtener IP del cliente
+        const getClientIp = () => req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress || "";
+
+        // Helper: validar sesion (token auth)
+        // Endpoints publicos que NO requieren token:
+        const PUBLIC_ENDPOINTS = [
+            "/api/status", "/api/panel_login", "/api/panel_registro",
+            "/api/panel_recuperar_solicitar", "/api/panel_recuperar_reset",
+            "/api/canjear_codigo", "/api/check_membresia"
+        ];
+        const isPublicEndpoint = PUBLIC_ENDPOINTS.includes(url.pathname) || url.pathname === "/api/status";
+
+        function authenticateRequest(body) {
+            if (isPublicEndpoint) return { authenticated: true, userId: null };
+            const token = req.headers["authorization"]?.replace("Bearer ", "") || url.searchParams.get("token") || body?._token;
+            const session = db.validateSession(token);
+            if (!session) return { authenticated: false, userId: null };
+            return { authenticated: true, userId: session.telegram_id, token };
+        }
 
         try {
             // GET /api/status — Estado del bot WSP
@@ -651,6 +682,13 @@ poll();
             if (url.pathname === "/api/panel_login" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                // Rate limiting: max 5 attempts per IP in 15 minutes
+                const clientIp = getClientIp();
+                const attempts = db.getLoginAttempts(clientIp);
+                if (attempts >= 5) {
+                    res.writeHead(429);
+                    return res.end(JSON.stringify({ ok: false, error: "Demasiados intentos. Espera 15 minutos." }));
+                }
                 const r = db.panelLogin(body.telegram_id, body.password);
                 if (r.ok) {
                     const tfa = db.get2FA(body.telegram_id);
@@ -660,15 +698,23 @@ poll();
                     }
                     if (tfa && tfa.enabled && body.totp_code) {
                         const valid = db.verify2FACode(tfa.secret, body.totp_code);
-                        if (!valid) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, requires_2fa: true, error: "Codigo 2FA invalido" })); }
+                        if (!valid) {
+                            db.registrarLoginAttempt(clientIp, body.telegram_id, false);
+                            res.writeHead(200);
+                            return res.end(JSON.stringify({ ok: false, requires_2fa: true, error: "Codigo 2FA invalido" }));
+                        }
                     }
                     const token = require("crypto").randomBytes(32).toString("hex");
-                    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+                    const ip = clientIp;
                     const ua = req.headers["user-agent"] || "";
                     db.createSession(body.telegram_id, token, ip, ua);
+                    db.registrarLoginAttempt(clientIp, body.telegram_id, true);
+                    db.registrarAuditoria(body.telegram_id, 'login', `Login exitoso desde ${ip}`, ip);
                     r.token = token;
                     const sellerInfo = db.isSellerUser(body.telegram_id);
                     r.es_seller = !!sellerInfo;
+                } else {
+                    db.registrarLoginAttempt(clientIp, body.telegram_id, false);
                 }
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
@@ -693,8 +739,13 @@ poll();
             }
             if (url.pathname === "/api/panel_cambiar_password" && req.method === "POST") {
                 const body = await readBody();
+                // Requires valid session token
+                const cpToken = req.headers["authorization"]?.replace("Bearer ", "") || body._token;
+                const cpSession = db.validateSession(cpToken);
+                if (!cpSession) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "sesion_invalida" })); }
                 if (!body.telegram_id || !body.old_password || !body.new_password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id, old_password o new_password" })); }
                 const r = db.panelCambiarPassword(body.telegram_id, body.old_password, body.new_password);
+                if (r.ok) db.registrarAuditoria(body.telegram_id, 'cambiar_password', 'Password cambiado', getClientIp());
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
             }
@@ -746,6 +797,80 @@ poll();
                 r.es_seller = !!sellerInfo;
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
+            }
+
+            // ─── LOGOUT ───
+            if (url.pathname === "/api/panel_logout" && req.method === "POST") {
+                const logoutToken = req.headers["authorization"]?.replace("Bearer ", "");
+                if (logoutToken) {
+                    const session = db.validateSession(logoutToken);
+                    if (session) {
+                        db.deleteSession(session.telegram_id, session.id);
+                        db.registrarAuditoria(session.telegram_id, 'logout', 'Sesion cerrada', getClientIp());
+                    }
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ═══ TOKEN AUTHENTICATION MIDDLEWARE ═══
+            // All endpoints below this point require a valid session token
+            if (!isPublicEndpoint) {
+                const authToken = req.headers["authorization"]?.replace("Bearer ", "") || url.searchParams.get("token");
+                const session = db.validateSession(authToken);
+                if (!session) {
+                    res.writeHead(401);
+                    return res.end(JSON.stringify({ ok: false, error: "sesion_invalida", msg: "Token invalido o expirado. Inicia sesion nuevamente." }));
+                }
+                // Attach authenticated user to request context
+                req._authUser = session.telegram_id;
+                req._authToken = authToken;
+
+                // ═══ MEMBERSHIP VALIDATION ═══
+                // Endpoints that work without active membership (read-only / account management)
+                const NO_MEMBRESIA_ENDPOINTS = [
+                    "/api/panel_sessions", "/api/panel_sessions/close",
+                    "/api/2fa/setup", "/api/2fa/enable", "/api/2fa/disable", "/api/2fa/status",
+                    "/api/dashboard", "/api/dashboard_extended", "/api/reporte_diario",
+                    "/api/tasa_entrega", "/api/panel_logout", "/api/notificaciones",
+                    "/api/actividad", "/api/limites"
+                ];
+                const needsMembresia = !NO_MEMBRESIA_ENDPOINTS.includes(url.pathname);
+                if (needsMembresia) {
+                    const u = db.getUsuario(session.telegram_id) || db.findUserByNumber(session.telegram_id);
+                    const isAdminUser = u && u.es_admin === 1;
+                    const isSellerUser = !!db.isSellerUser(session.telegram_id);
+                    if (!isAdminUser && !isSellerUser) {
+                        const membresia = db.checkMembresia(session.telegram_id);
+                        if (!membresia.activa) {
+                            res.writeHead(403);
+                            return res.end(JSON.stringify({ ok: false, error: "membresia_requerida", msg: "Tu membresia no esta activa. Adquiere una membresia para usar esta funcion." }));
+                        }
+                    }
+                }
+            }
+
+            // ═══ USER IDENTITY VALIDATION ═══
+            // Verify that the user parameter matches the authenticated session.
+            // Admins can act on behalf of others; everyone else can only access their own data.
+            function verifyUserAccess(targetUserId) {
+                if (!req._authUser) return true; // public endpoint, no check needed
+                if (!targetUserId) return true;
+                if (String(req._authUser) === String(targetUserId)) return true;
+                // Admin can access any user's data
+                const authU = db.getUsuario(String(req._authUser));
+                if (authU && authU.es_admin === 1) return true;
+                if (config.ADMIN_TELEGRAM_IDS && config.ADMIN_TELEGRAM_IDS.includes(String(req._authUser))) return true;
+                return false;
+            }
+
+            // Centralized identity check: if request has a "u" param, verify access
+            if (req._authUser && req.method === "GET") {
+                const targetU = url.searchParams.get("u");
+                if (targetU && !verifyUserAccess(targetU)) {
+                    res.writeHead(403);
+                    return res.end(JSON.stringify({ ok: false, error: "No autorizado para acceder a datos de otro usuario" }));
+                }
             }
 
             // ─── DESVINCULAR CUENTA ───
@@ -1618,6 +1743,8 @@ poll();
             function checkAdmin(adminId) {
                 if (!adminId) return false;
                 const id = String(adminId);
+                // SECURITY: verify that the authenticated user matches the claimed admin_id
+                if (req._authUser && String(req._authUser) !== id) return false;
                 // Check WSP usuarios table
                 const u = db.getUsuario(id);
                 if (u && u.es_admin === 1) return true;
@@ -2042,10 +2169,15 @@ poll();
             }
             if (url.pathname === "/api/2fa/disable" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                if (!body.telegram_id || !body.password || !body.totp_code) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id, password o totp_code" })); }
                 const loginCheck = db.panelLogin(body.telegram_id, body.password);
                 if (!loginCheck.ok) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "Contrasena incorrecta" })); }
+                const tfa = db.get2FA(body.telegram_id);
+                if (!tfa || !tfa.enabled) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "2FA no esta activado" })); }
+                const valid = db.verify2FACode(tfa.secret, body.totp_code);
+                if (!valid) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "Codigo 2FA invalido" })); }
                 db.disable2FA(body.telegram_id);
+                db.registrarAuditoria(body.telegram_id, '2fa_disable', '2FA desactivado', getClientIp());
                 res.writeHead(200); return res.end(JSON.stringify({ ok: true }));
             }
             if (url.pathname === "/api/2fa/status" && req.method === "GET") {
@@ -2142,6 +2274,7 @@ poll();
             if (url.pathname === "/api/seller/info" && req.method === "GET") {
                 const uid = url.searchParams.get("u");
                 if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                if (req._authUser && String(req._authUser) !== String(uid)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 const seller = db.isSellerUser(uid);
                 if (!seller) { res.writeHead(200); return res.end(JSON.stringify({ ok: true, es_seller: false })); }
                 const usados = db.getSellerInvitesCount(seller.id, seller.periodo);
@@ -2268,6 +2401,17 @@ poll();
                 return res.end(JSON.stringify({ ok: true, plan: planLabel, seller: result.seller_nombre }));
             }
 
+            // ─── AUDIT LOG ENDPOINTS ───
+            if (url.pathname === "/api/admin/auditoria" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const userId = url.searchParams.get("filter_user");
+                const limit = parseInt(url.searchParams.get("limit")) || 100;
+                const logs = userId ? db.getAuditLogByUser(userId, limit) : db.getAuditLog(limit);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs }));
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
@@ -2346,6 +2490,15 @@ async function startBot() {
     fs.mkdirSync("sessions", { recursive: true });
     fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
     fs.mkdirSync("media", { recursive: true });
+
+    // Periodic cleanup: every 30 minutes
+    setInterval(() => {
+        try {
+            db.limpiarRecoveryCodes();
+            db.limpiarSessionsExpiradas();
+            db.limpiarLoginAttempts();
+        } catch (e) { console.error("Cleanup error:", e.message); }
+    }, 30 * 60 * 1000);
 
     const { state, saveCreds } = await useMultiFileAuthState("sessions");
 

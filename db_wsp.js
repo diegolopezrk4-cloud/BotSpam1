@@ -545,6 +545,34 @@ function init() {
             FOREIGN KEY(seller_id) REFERENCES sellers(id)
         );
     `);
+    // --- LOGIN ATTEMPTS (rate limiting) ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip TEXT NOT NULL,
+            telegram_id TEXT DEFAULT '',
+            success INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+    `);
+    // --- AUDIT LOG ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            accion TEXT NOT NULL,
+            detalle TEXT DEFAULT '',
+            ip TEXT DEFAULT '',
+            fecha TEXT DEFAULT (datetime('now'))
+        );
+    `);
+    // --- GRUPO ACTIVIDAD (persistencia anti-duplicado) ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS grupo_actividad (
+            grupo_jid TEXT PRIMARY KEY,
+            ultima_actividad TEXT DEFAULT (datetime('now'))
+        );
+    `);
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -1849,6 +1877,68 @@ function touchSession(token) {
     db.prepare("UPDATE active_sessions SET last_active = datetime('now') WHERE token = ?").run(token);
 }
 
+function validateSession(token) {
+    if (!token) return null;
+    const session = db.prepare("SELECT * FROM active_sessions WHERE token = ?").get(token);
+    if (!session) return null;
+    // Sessions expire after 7 days of inactivity
+    const lastActive = new Date(session.last_active + "Z");
+    if (Date.now() - lastActive.getTime() > 7 * 86400000) {
+        db.prepare("DELETE FROM active_sessions WHERE id = ?").run(session.id);
+        return null;
+    }
+    db.prepare("UPDATE active_sessions SET last_active = datetime('now') WHERE id = ?").run(session.id);
+    return session;
+}
+
+// --- RATE LIMITING ---
+function getLoginAttempts(ip) {
+    const since = new Date(Date.now() - 15 * 60000).toISOString().replace('T', ' ').slice(0, 19);
+    const row = db.prepare("SELECT COUNT(*) as total FROM login_attempts WHERE ip = ? AND created_at >= ?").get(ip, since);
+    return row ? row.total : 0;
+}
+
+function registrarLoginAttempt(ip, telegramId, success) {
+    db.prepare("INSERT INTO login_attempts (ip, telegram_id, success) VALUES (?, ?, ?)").run(ip, telegramId || '', success ? 1 : 0);
+}
+
+function limpiarLoginAttempts() {
+    const cutoff = new Date(Date.now() - 60 * 60000).toISOString().replace('T', ' ').slice(0, 19);
+    db.prepare("DELETE FROM login_attempts WHERE created_at < ?").run(cutoff);
+}
+
+// --- AUDIT LOG ---
+function registrarAuditoria(userId, accion, detalle, ip) {
+    db.prepare("INSERT INTO audit_log (user_id, accion, detalle, ip) VALUES (?, ?, ?, ?)").run(userId || '', accion, detalle || '', ip || '');
+}
+
+function getAuditLog(limit) {
+    return db.prepare("SELECT * FROM audit_log ORDER BY fecha DESC LIMIT ?").all(limit || 100);
+}
+
+function getAuditLogByUser(userId, limit) {
+    return db.prepare("SELECT * FROM audit_log WHERE user_id = ? ORDER BY fecha DESC LIMIT ?").all(userId, limit || 50);
+}
+
+// --- CLEANUP ---
+function limpiarRecoveryCodes() {
+    db.prepare("DELETE FROM recovery_codes WHERE created_at < datetime('now', '-1 hour')").run();
+}
+
+function limpiarSessionsExpiradas() {
+    db.prepare("DELETE FROM active_sessions WHERE last_active < datetime('now', '-7 days')").run();
+}
+
+// --- GRUPO ACTIVIDAD PERSISTENCIA ---
+function registrarActividadGrupoDB(grupoJid) {
+    db.prepare("INSERT OR REPLACE INTO grupo_actividad (grupo_jid, ultima_actividad) VALUES (?, datetime('now'))").run(grupoJid);
+}
+
+function getUltimaActividadGrupo(grupoJid) {
+    const row = db.prepare("SELECT ultima_actividad FROM grupo_actividad WHERE grupo_jid = ?").get(grupoJid);
+    return row ? new Date(row.ultima_actividad + "Z").getTime() : undefined;
+}
+
 // --- EXPORT/IMPORT CONFIG ---
 function exportFullConfig(userId) {
     const grupos = db.prepare("SELECT * FROM grupos WHERE user_id = ?").all(userId);
@@ -1932,10 +2022,19 @@ function eliminarSeller(id) {
 
 function getSellerInvitesCount(sellerId, periodo) {
     let desde;
+    const now = new Date();
     if (periodo === 'semanal') {
-        desde = new Date(Date.now() - 7 * 86400000).toISOString().replace('T', ' ').replace('Z', '').slice(0, 19);
+        // Start of current week (Monday)
+        const day = now.getDay();
+        const diff = day === 0 ? 6 : day - 1; // Monday = 0
+        const monday = new Date(now);
+        monday.setDate(monday.getDate() - diff);
+        monday.setHours(0, 0, 0, 0);
+        desde = monday.toLocaleString("sv-SE", { timeZone: config.TIMEZONE }).replace("T", " ");
     } else {
-        desde = new Date(Date.now() - 30 * 86400000).toISOString().replace('T', ' ').replace('Z', '').slice(0, 19);
+        // Start of current month
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        desde = firstDay.toLocaleString("sv-SE", { timeZone: config.TIMEZONE }).replace("T", " ");
     }
     const row = db.prepare("SELECT COUNT(*) as total FROM seller_invites WHERE seller_id = ? AND fecha_invitacion >= ?").get(sellerId, desde);
     return row ? row.total : 0;
@@ -2057,7 +2156,15 @@ module.exports = {
     // 2FA
     setup2FA, get2FA, enable2FA, disable2FA, verify2FACode,
     // Active sessions
-    createSession, getSessions, deleteSession, deleteAllSessions, touchSession,
+    createSession, getSessions, deleteSession, deleteAllSessions, touchSession, validateSession,
+    // Rate limiting
+    getLoginAttempts, registrarLoginAttempt, limpiarLoginAttempts,
+    // Audit log
+    registrarAuditoria, getAuditLog, getAuditLogByUser,
+    // Cleanup
+    limpiarRecoveryCodes, limpiarSessionsExpiradas,
+    // Grupo actividad persistencia
+    registrarActividadGrupoDB, getUltimaActividadGrupo,
     // Export/Import config
     exportFullConfig, importFullConfig,
     // Dashboard extended
