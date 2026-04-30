@@ -717,8 +717,7 @@ function tieneMembresia(wspId) {
     const user = getUsuario(wspId);
     if (user && user.activo) {
         if (user.fecha_expira) {
-            const expira = new Date(user.fecha_expira);
-            if (Date.now() > expira.getTime()) {
+            if (nowPeru() > user.fecha_expira) {
                 db.prepare("UPDATE usuarios SET activo = 0, plan = 'expirado' WHERE wsp_id = ?").run(user.wsp_id);
                 return false;
             }
@@ -735,8 +734,7 @@ function tieneMembresia(wspId) {
         const altUser = getUsuario(altJid);
         if (altUser && altUser.activo) {
             if (altUser.fecha_expira) {
-                const expira = new Date(altUser.fecha_expira);
-                if (Date.now() > expira.getTime()) {
+                if (nowPeru() > altUser.fecha_expira) {
                     db.prepare("UPDATE usuarios SET activo = 0, plan = 'expirado' WHERE wsp_id = ?").run(altUser.wsp_id);
                     return false;
                 }
@@ -856,6 +854,10 @@ function getCampanaById(campanaId) {
 
 function actualizarStatsCampana(campanaId, enviados, errores) {
     db.prepare("UPDATE campanas SET enviados = enviados + ?, errores = errores + ? WHERE id = ?").run(enviados, errores, campanaId);
+}
+
+function resetAllCampanasOnStartup() {
+    db.prepare("UPDATE campanas SET activa = 0 WHERE activa = 1").run();
 }
 
 function setCampanaActiva(campanaId, activa) {
@@ -1009,7 +1011,7 @@ function getHistorialEnvios(userId, limite = 50, tipoFiltro = null, resultadoFil
         }
     }
     if (desde) { sql += " AND fecha >= ?"; params.push(desde); }
-    if (hasta) { sql += " AND fecha <= ? || ' 23:59:59'"; params.push(hasta); }
+    if (hasta) { sql += " AND fecha <= (? || ' 23:59:59')"; params.push(hasta); }
     sql += " ORDER BY fecha DESC LIMIT ?";
     params.push(limite);
     return db.prepare(sql).all(...params);
@@ -1308,6 +1310,7 @@ function panelLogin(telegramId, password) {
 
 function panelRegistro(telegramId, password, username) {
     const bcrypt = require("bcryptjs");
+    if (!password || password.length < 4) return { ok: false, error: "La contraseña debe tener al menos 4 caracteres" };
     const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
     if (existing) return { ok: false, error: "ya_registrado" };
     const hashed = bcrypt.hashSync(password, 10);
@@ -1332,6 +1335,7 @@ function panelCambiarPassword(telegramId, oldPass, newPass) {
         passOk = (user.password === oldPass);
     }
     if (!passOk) return { ok: false, error: "Contraseña actual incorrecta" };
+    if (!newPass || newPass.length < 4) return { ok: false, error: "La nueva contraseña debe tener al menos 4 caracteres" };
     const hashed = bcrypt.hashSync(newPass, 10);
     db.prepare("UPDATE panel_users SET password = ? WHERE telegram_id = ?").run(hashed, String(telegramId));
     return { ok: true };
@@ -1364,6 +1368,7 @@ function verificarRecoveryCode(telegramId, code) {
 
 function panelResetPassword(telegramId, code, newPass) {
     const bcrypt = require("bcryptjs");
+    if (!newPass || newPass.length < 4) return { ok: false, error: "La nueva contraseña debe tener al menos 4 caracteres" };
     const v = verificarRecoveryCode(telegramId, code);
     if (!v.ok) return v;
     const user = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
@@ -1385,7 +1390,7 @@ function checkMembresia(userId) {
         } catch (e) {}
     }
     if (!user) return { ok: true, activa: false, es_admin: esAdmin, membresia: null };
-    const activo = user.activo && (user.plan === 'permanente' || !user.fecha_expira || new Date(user.fecha_expira) > new Date());
+    const activo = user.activo && (user.plan === 'permanente' || !user.fecha_expira || user.fecha_expira > nowPeru());
     return {
         ok: true,
         activa: activo || esAdmin,
@@ -2001,7 +2006,7 @@ module.exports = {
     getSesiones, agregarSesion, eliminarSesion,
     getGrupos, agregarGrupo, eliminarGrupo, eliminarGrupoPorLink, eliminarTodosGrupos, actualizarGrupoLink,
     getCampanas, crearCampana, getCampanaById, actualizarStatsCampana,
-    setCampanaActiva, actualizarCampanaMensaje, eliminarCampana, clonarCampana, resetearStatsCampana,
+    setCampanaActiva, resetAllCampanasOnStartup, actualizarCampanaMensaje, eliminarCampana, clonarCampana, resetearStatsCampana,
     getSesionesCampana, agregarSesionCampana, getGruposCampana, agregarGrupoCampana, eliminarGrupoCampana,
     getCampanaConfig, setCampanaConfig,
     getMaxGrupos, setMaxGrupos,

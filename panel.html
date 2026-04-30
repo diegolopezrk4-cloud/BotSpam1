@@ -1922,11 +1922,11 @@ async function loadCuentas(){
   let h='<div class="table-wrap"><div class="table-header"><h3>Cuentas ('+s.length+')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Telefono</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
   s.forEach((x,i)=>{
     const b=ban.includes(x.nombre);
-    h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td>${x.telefono||'?'}</td><td><span class="badge ${b?'badge-danger':'badge-success'}">${b?'BANEADA':'Activa'}</span></td><td><button class="btn btn-danger btn-sm" onclick="eliminarCuenta('${x.nombre}')">🗑 Eliminar</button></td></tr>`;
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre||'?')}</b></td><td>${esc(x.telefono||'?')}</td><td><span class="badge ${b?'badge-danger':'badge-success'}">${b?'BANEADA':'Activa'}</span></td><td><button class="btn btn-danger btn-sm" onclick="eliminarCuenta('${esc(x.nombre)}')">🗑 Eliminar</button></td></tr>`;
   });
   h+='</tbody></table></div>';$('cuentasContent').innerHTML=h;
 }
-function eliminarCuenta(n){showModal(`<h3>⚠ Eliminar Cuenta</h3><p>Eliminar <b>'${n}'</b>?<br>Se desconectara y borrara.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarElimCuenta('${n}')">Eliminar</button></div>`)}
+function eliminarCuenta(n){showModal(`<h3>⚠ Eliminar Cuenta</h3><p>Eliminar <b>'${esc(n)}'</b>?<br>Se desconectara y borrara.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarElimCuenta('${esc(n)}')">Eliminar</button></div>`)}
 async function confirmarElimCuenta(n){if(!requireMembresia())return;closeModal();const r=await api('/api/desvincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n})});toast(r.ok?'Cuenta eliminada':'Error','success');loadCuentas()}
 let wspQrPollTimer=null;
 function vincularCuentaWspQR(){
@@ -2407,7 +2407,7 @@ function filtrarGruposPanel(){
   if(!g.length&&!_gruposData.length){$('gruposContent').innerHTML='<div class="empty-state"><div class="icon">🌐</div><p>No hay grupos.<br>Usa "Detectar" para buscar.</p></div>';return}
   if(!g.length){$('gruposContent').innerHTML='<div class="empty-state"><p>No hay grupos que coincidan con el filtro.</p></div>';return}
   let h='<div class="table-wrap"><div class="table-header"><h3>Grupos ('+g.length+' de '+_gruposData.length+')</h3></div><table><thead><tr><th><input type="checkbox" id="gruposCheckAll" onchange="toggleGruposCheckAll(this)"></th><th>#</th><th>Nombre</th><th>Seccion</th><th>Miembros</th><th>Link/JID</th><th>Acciones</th></tr></thead><tbody>';
-  g.forEach((x,i)=>{const l=x.link||x.jid||'?';const name=x.nombre||x.subject||'';h+=`<tr><td><input type="checkbox" class="grupoCheck" value="${x.id}"></td><td>${i+1}</td><td><b>${name?esc(name):'<span style="color:var(--text2)">—</span>'}</b></td><td style="font-size:11px">${x.seccion?'<span style="background:var(--accent);color:#fff;padding:2px 6px;border-radius:4px;font-size:10px">'+esc(x.seccion)+'</span>':'—'}</td><td style="text-align:center">${x.size||'—'}</td><td style="font-size:11px;color:var(--text2)">${l.length>40?l.slice(0,40)+'...':l}</td><td><button class="btn btn-danger btn-sm" onclick="eliminarGrupo('${encodeURIComponent(l)}')">🗑</button></td></tr>`});
+  g.forEach((x,i)=>{const l=x.link||x.jid||'?';const name=x.nombre||x.subject||'';h+=`<tr><td><input type="checkbox" class="grupoCheck" value="${x.id}"></td><td>${i+1}</td><td><b>${name?esc(name):'<span style="color:var(--text2)">—</span>'}</b></td><td style="font-size:11px">${x.seccion?'<span style="background:var(--accent);color:#fff;padding:2px 6px;border-radius:4px;font-size:10px">'+esc(x.seccion)+'</span>':'—'}</td><td style="text-align:center">${x.size||'—'}</td><td style="font-size:11px;color:var(--text2)">${esc(l.length>40?l.slice(0,40)+'...':l)}</td><td><button class="btn btn-danger btn-sm" onclick="eliminarGrupo('${encodeURIComponent(l)}')">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('gruposContent').innerHTML=h;
 }
 function toggleGruposCheckAll(el){document.querySelectorAll('.grupoCheck').forEach(c=>c.checked=el.checked)}
@@ -2488,7 +2488,7 @@ async function loadMensajes(){
   const m=r.mensajes||[];
   if(!m.length){$('mensajesContent').innerHTML='<div class="empty-state"><div class="icon">✉</div><p>No hay mensajes. Crea uno.</p></div>';return}
   let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre</th><th>Texto</th><th>Acciones</th></tr></thead><tbody>';
-  m.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${(x.texto||'').slice(0,60)}</td><td style="white-space:nowrap"><button class="btn btn-outline btn-sm" onclick="editarMensaje(${x.id})">✏</button> <button class="btn btn-outline btn-sm" onclick="duplicarMensaje(${x.id})">📋</button> <button class="btn btn-danger btn-sm" onclick="eliminarMensaje(${x.id})">🗑</button></td></tr>`});
+  m.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre||'?')}</b></td><td style="font-size:12px;color:var(--text2)">${esc((x.texto||'').slice(0,60))}</td><td style="white-space:nowrap"><button class="btn btn-outline btn-sm" onclick="editarMensaje(${x.id})">✏</button> <button class="btn btn-outline btn-sm" onclick="duplicarMensaje(${x.id})">📋</button> <button class="btn btn-danger btn-sm" onclick="eliminarMensaje(${x.id})">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('mensajesContent').innerHTML=h;
 }
 function showCrearMensaje(){showModal(`<h3>➕ Crear Mensaje</h3><div class="form-group"><label>Nombre</label><input id="msgN" placeholder="Ej: Promo Enero"></div><div class="form-group"><label>Texto</label><textarea id="msgT" rows="5" placeholder="Tu mensaje...&#10;Variables: {nombre} {numero}"></textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearMensaje()">Crear</button></div>`)}
@@ -2504,10 +2504,10 @@ async function loadEnvios(){
   const [ms,hi]=await Promise.all([api('/api/mensajes?u='+userId),api('/api/envios_unicos?u='+userId)]);
   const m=(ms.ok?ms.mensajes:[])||[];
   if(!m.length){$('enviosContent').innerHTML='<div class="empty-state"><p>Crea un mensaje primero</p></div>'}
-  else{let h='<div class="grid">';m.forEach(x=>{h+=`<div class="card" style="cursor:pointer" onclick="enviarUnico(${x.id},'${(x.nombre||'').replace(/'/g,"\\'")}')"><div class="card-title">${x.nombre||'?'}</div><p style="font-size:12px;color:var(--text2)">${(x.texto||'').slice(0,80)}</p><button class="btn btn-primary btn-sm" style="margin-top:10px">📤 Enviar</button></div>`});h+='</div>';$('enviosContent').innerHTML=h}
+  else{let h='<div class="grid">';m.forEach(x=>{h+=`<div class="card" style="cursor:pointer" onclick="enviarUnico(${x.id},'${(x.nombre||'').replace(/'/g,"\\'")}')"><div class="card-title">${esc(x.nombre||'?')}</div><p style="font-size:12px;color:var(--text2)">${esc((x.texto||'').slice(0,80))}</p><button class="btn btn-primary btn-sm" style="margin-top:10px">📤 Enviar</button></div>`});h+='</div>';$('enviosContent').innerHTML=h}
   const e=(hi.ok?hi.envios:[])||[];
   if(!e.length){$('enviosHistorial').innerHTML='<div class="empty-state"><p>Sin envios</p></div>'}
-  else{let h='<table><thead><tr><th>Fecha</th><th>Mensaje</th><th>Grupos</th><th>OK</th><th>Error</th></tr></thead><tbody>';e.slice(0,20).forEach(x=>{h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.nombre||x.mensaje_id||'?'}</td><td>${x.total_grupos||'?'}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td></tr>`});h+='</tbody></table>';$('enviosHistorial').innerHTML=h}
+  else{let h='<table><thead><tr><th>Fecha</th><th>Mensaje</th><th>Grupos</th><th>OK</th><th>Error</th></tr></thead><tbody>';e.slice(0,20).forEach(x=>{h+=`<tr><td style="font-size:11px">${esc(x.fecha||'?')}</td><td>${esc(x.nombre||String(x.mensaje_id)||'?')}</td><td>${x.total_grupos||'?'}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td></tr>`});h+='</tbody></table>';$('enviosHistorial').innerHTML=h}
 }
 function enviarUnico(id,n){if(!requireMembresia())return;showModal(`<h3>📤 Enviar</h3><p>Enviar <b>"${n}"</b> a todos tus grupos?</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="confEnvio(${id})">Enviar</button></div>`)}
 async function confEnvio(id){if(!requireMembresia())return;closeModal();toast('Enviando...','success');const r=await api('/api/enviar_unico',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje_id:id})});toast(r.ok?'Envio: '+(r.exitosos||0)+' ok, '+(r.fallidos||0)+' error':'Error: '+(r.error||''),r.ok?'success':'error');loadEnvios()}
@@ -2519,7 +2519,7 @@ async function loadProgramados(){
   const p=r.programados||[];
   if(!p.length){$('programadosContent').innerHTML='<div class="empty-state"><div class="icon">⏰</div><p>No hay envios programados.</p></div>';return}
   let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Mensaje</th><th>Hora</th><th>Repetir</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
-  p.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td>${x.nombre||x.mensaje_id}</td><td><b>${x.hora||'?'}</b></td><td>${x.repetir?'Diario':'Una vez'}</td><td><span class="badge ${x.activo?'badge-success':'badge-warn'}">${x.activo?'Activo':'Pausado'}</span></td><td><button class="btn btn-outline btn-sm" onclick="toggleProg(${x.id})">${x.activo?'⏸':'▶'}</button> <button class="btn btn-danger btn-sm" onclick="elimProg(${x.id})">🗑</button></td></tr>`});
+  p.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td>${esc(x.nombre||String(x.mensaje_id))}</td><td><b>${esc(x.hora||'?')}</b></td><td>${x.repetir?'Diario':'Una vez'}</td><td><span class="badge ${x.activo?'badge-success':'badge-warn'}">${x.activo?'Activo':'Pausado'}</span></td><td><button class="btn btn-outline btn-sm" onclick="toggleProg(${x.id})">${x.activo?'⏸':'▶'}</button> <button class="btn btn-danger btn-sm" onclick="elimProg(${x.id})">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('programadosContent').innerHTML=h;
 }
 function showCrearProgramado(){showModal(`<h3>➕ Programar</h3><div class="form-group"><label>ID Mensaje</label><input id="pI" type="number" placeholder="ID"></div><div class="form-group"><label>Hora (HH:MM)</label><input id="pH" placeholder="09:30"></div><div class="form-group"><label><input type="checkbox" id="pR"> Repetir diario</label></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearProg()">Programar</button></div>`)}
@@ -2771,7 +2771,7 @@ async function loadEnvioPersonal(){
   sel.innerHTML='<option value="">-- Selecciona cuenta --</option>';
   if(r.ok){
     (r.sesiones||[]).forEach(s=>{
-      sel.innerHTML+=`<option value="${s.nombre}">${s.nombre} (${s.telefono||'?'})</option>`;
+      sel.innerHTML+=`<option value="${esc(s.nombre)}">${esc(s.nombre)} (${esc(s.telefono||'?')})</option>`;
     });
   }
   refreshPlantillasSelect('epPlantillaSelect');
@@ -2794,7 +2794,7 @@ function renderChatsPersonales(chats,cuenta){
     const nombre=c.nombre||c.name||c.jid||'?';
     const numero=c.numero||c.jid?.replace(/@s\.whatsapp\.net$/,'')||'';
     const jid=c.jid||c.id||'';
-    h+=`<tr><td>${i+1}</td><td>${nombre}</td><td style="font-size:11px;color:var(--text2)">${numero}</td>`;
+    h+=`<tr><td>${i+1}</td><td>${esc(nombre)}</td><td style="font-size:11px;color:var(--text2)">${esc(numero)}</td>`;
     h+=`<td><button class="btn btn-sm btn-danger" onclick="eliminarChatPersonal('${jid}')">🗑</button></td></tr>`;
   });
   h+='</tbody></table></div>';
@@ -2865,7 +2865,7 @@ async function loadEnvioMiembros(){
   sel.innerHTML='<option value="">-- Selecciona cuenta --</option>';
   if(r.ok){
     (r.sesiones||[]).forEach(s=>{
-      sel.innerHTML+=`<option value="${s.nombre}">${s.nombre} (${s.telefono||'?'})</option>`;
+      sel.innerHTML+=`<option value="${esc(s.nombre)}">${esc(s.nombre)} (${esc(s.telefono||'?')})</option>`;
     });
   }
   $('emGrupo').innerHTML='<option value="">-- Carga grupos primero --</option>';
@@ -2927,8 +2927,8 @@ async function cargarGruposCuenta(forceRefresh){
       const name=g.subject||'Sin nombre';
       const badge=g.esAdmin?' [Admin]':'';
       const info=name+badge+' ('+g.size+' miembros)';
-      sel.innerHTML+=`<option value="${g.jid}">${info}</option>`;
-      sel2.innerHTML+=`<option value="${g.jid}">${info}</option>`;
+      sel.innerHTML+=`<option value="${esc(g.jid)}">${esc(info)}</option>`;
+      sel2.innerHTML+=`<option value="${esc(g.jid)}">${esc(info)}</option>`;
     });
     const cacheMsg=r.from_cache?' (desde cache)':' (actualizado)';
     toast(postables.length+' grupos cargados'+cacheMsg,'success');
@@ -3465,7 +3465,7 @@ async function cargarGruposPromoMiembros(forceRefresh){
     grupos.forEach(g=>{
       const name=g.subject||'Sin nombre';
       const badge=g.esAdmin?' [Admin]':'';
-      sel.innerHTML+=`<option value="${g.jid}">${name}${badge} (${g.size} miembros)</option>`;
+      sel.innerHTML+=`<option value="${esc(g.jid)}">${esc(name)}${badge} (${g.size} miembros)</option>`;
     });
     const cacheMsg=r.from_cache?' (desde cache)':' (actualizado)';
     toast(grupos.length+' grupos cargados'+cacheMsg,'success');
@@ -3557,10 +3557,10 @@ async function loadAdminUsuarios(){
     const exp=u.plan==='permanente'?'\u221e':(u.fecha_expira?new Date(u.fecha_expira).toLocaleDateString('es'):'N/A');
     const reg=u.fecha_registro?new Date(u.fecha_registro).toLocaleDateString('es'):'?';
     const activo=u.es_admin||u.plan==='permanente'||(!u.fecha_expira?false:new Date(u.fecha_expira)>new Date());
-    const planBadge=u.es_admin?'<span class="badge badge-info">Admin</span>':u.plan==='permanente'?'<span class="badge badge-success">Permanente</span>':activo?'<span class="badge badge-success">'+u.plan+'</span>':'<span class="badge badge-danger">'+(u.plan||'sin plan')+' (exp)</span>';
-    const tipoBadge=(u.tipo_membresia||'wsp+tg');
+    const planBadge=u.es_admin?'<span class="badge badge-info">Admin</span>':u.plan==='permanente'?'<span class="badge badge-success">Permanente</span>':activo?'<span class="badge badge-success">'+esc(u.plan)+'</span>':'<span class="badge badge-danger">'+esc(u.plan||'sin plan')+' (exp)</span>';
+    const tipoBadge=esc(u.tipo_membresia||'wsp+tg');
     const origenTag=u.origen==='bot'?' <span class="badge badge-info" style="font-size:9px">Bot</span>':'';
-    h+=`<tr><td style="font-size:11px">${u.telegram_id}${origenTag}</td><td>${u.username||'-'}</td><td>${planBadge}</td>`;
+    h+=`<tr><td style="font-size:11px">${esc(u.telegram_id)}${origenTag}</td><td>${esc(u.username||'-')}</td><td>${planBadge}</td>`;
     h+=`<td style="font-size:11px">${tipoBadge}</td>`;
     h+=`<td style="font-size:11px">${exp}</td>`;
     h+=`<td style="font-size:11px">${reg}</td>`;
@@ -3649,8 +3649,8 @@ async function loadSellersAdmin(){
     const barColor=pct>=90?'var(--danger)':pct>=60?'var(--warn)':'var(--success)';
     const fecha=s.fecha_creado?new Date(s.fecha_creado).toLocaleDateString('es'):'?';
     h+=`<tr>`;
-    h+=`<td style="font-size:11px">${s.telegram_id}</td>`;
-    h+=`<td>${s.nombre||'-'}</td>`;
+    h+=`<td style="font-size:11px">${esc(s.telegram_id)}</td>`;
+    h+=`<td>${esc(s.nombre||'-')}</td>`;
     h+=`<td>${s.max_invites}</td>`;
     h+=`<td>${periodoLabel}</td>`;
     h+=`<td>${planLabel}</td>`;
@@ -3821,11 +3821,11 @@ async function canjearCodigo(){
   const el=$('canjearResult');
   el.style.display='block';
   if(r.ok){
-    el.innerHTML=`<div style="background:var(--success);color:white;padding:15px;border-radius:8px;text-align:center"><div style="font-size:24px;margin-bottom:8px">\ud83c\udf89</div><div style="font-size:16px;font-weight:bold">Membresia Activada!</div><div style="margin-top:8px">Plan: <b>${r.plan}</b></div>${r.seller?'<div style="font-size:12px;margin-top:4px;opacity:0.8">Seller: '+r.seller+'</div>':''}</div>`;
+    el.innerHTML=`<div style="background:var(--success);color:white;padding:15px;border-radius:8px;text-align:center"><div style="font-size:24px;margin-bottom:8px">\ud83c\udf89</div><div style="font-size:16px;font-weight:bold">Membresia Activada!</div><div style="margin-top:8px">Plan: <b>${esc(r.plan)}</b></div>${r.seller?'<div style="font-size:12px;margin-top:4px;opacity:0.8">Seller: '+esc(r.seller)+'</div>':''}</div>`;
     $('canjearCodigoInput').value='';
     toast('Membresia activada exitosamente!','success');
   }else{
-    el.innerHTML=`<div style="background:var(--danger);color:white;padding:15px;border-radius:8px;text-align:center"><div style="font-size:24px;margin-bottom:8px">\u274c</div><div>${r.error||'Error al canjear codigo'}</div></div>`;
+    el.innerHTML=`<div style="background:var(--danger);color:white;padding:15px;border-radius:8px;text-align:center"><div style="font-size:24px;margin-bottom:8px">\u274c</div><div>${esc(r.error||'Error al canjear codigo')}</div></div>`;
   }
 }
 

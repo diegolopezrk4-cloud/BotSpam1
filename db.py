@@ -190,6 +190,22 @@ async def tiene_membresia_activa(telegram_id):
             return False
     return True
 
+async def desactivar_usuario(telegram_id):
+    async with _connect() as db:
+        await db.execute(
+            "UPDATE usuarios SET activo=0 WHERE telegram_id=?",
+            (telegram_id,)
+        )
+        await db.commit()
+
+async def ban_usuario(telegram_id):
+    async with _connect() as db:
+        await db.execute(
+            "UPDATE usuarios SET activo=0, plan='baneado' WHERE telegram_id=?",
+            (telegram_id,)
+        )
+        await db.commit()
+
 async def get_todos_usuarios():
     async with _connect() as db:
         db.row_factory = aiosqlite.Row

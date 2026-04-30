@@ -45,12 +45,20 @@ function getState(jid) {
 }
 
 function setState(jid, screen, data = {}) {
-    userState[jid] = { screen, data };
+    userState[jid] = { screen, data, _ts: Date.now() };
 }
 
 function clearState(jid) {
     delete userState[jid];
 }
+
+// Limpiar userState cada 30 minutos: eliminar entradas inactivas >1 hora
+setInterval(() => {
+    const cutoff = Date.now() - 3600 * 1000;
+    for (const jid of Object.keys(userState)) {
+        if ((userState[jid]._ts || 0) < cutoff) delete userState[jid];
+    }
+}, 1800000);
 
 // --- Variables globales ---
 let botSock = null;
@@ -61,6 +69,11 @@ let botStatus = "desconectado";
 const botSentIds = new Set();
 const processedMsgIds = new Set();
 let botIsSending = false;
+
+// Limpiar processedMsgIds cada 30 min para evitar memory leak
+setInterval(() => {
+    if (processedMsgIds.size > 10000) processedMsgIds.clear();
+}, 1800000);
 
 function trackSent(result) {
     if (result && result.key && result.key.id) {
@@ -88,6 +101,10 @@ function isAdmin(jid) {
 
 // --- Enviar mensaje helper ---
 async function send(jid, text) {
+    if (!botSock || !botSock.user) {
+        console.error("[send] botSock no disponible, mensaje descartado para:", jid);
+        return;
+    }
     botIsSending = true;
     try {
         const result = await botSock.sendMessage(jid, { text });
@@ -98,6 +115,10 @@ async function send(jid, text) {
 }
 
 async function sendImage(jid, imagePath, caption = "") {
+    if (!botSock || !botSock.user) {
+        console.error("[sendImage] botSock no disponible, mensaje descartado para:", jid);
+        return;
+    }
     botIsSending = true;
     try {
         if (fs.existsSync(imagePath)) {
@@ -237,11 +258,20 @@ poll();
     if (url.pathname.startsWith("/api/")) {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
 
-        // Helper para leer body POST
+        // Helper para leer body POST (max 5MB)
+        const MAX_BODY = 5 * 1024 * 1024;
         const readBody = () => new Promise((resolve) => {
             let data = "";
-            req.on("data", c => data += c);
-            req.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve({}); } });
+            let overflow = false;
+            req.on("data", c => {
+                if (overflow) return;
+                data += c;
+                if (data.length > MAX_BODY) { overflow = true; data = ""; }
+            });
+            req.on("end", () => {
+                if (overflow) return resolve({});
+                try { resolve(JSON.parse(data)); } catch { resolve({}); }
+            });
         });
 
         try {
@@ -405,7 +435,11 @@ poll();
                 if (!body.u || !campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
                 const camp = db.getCampanaById(campId);
                 if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "campana no encontrada" })); }
-                motor.iniciarCampana(campId, body.u, botSock);
+                const started = motor.iniciarCampana(campId, body.u, botSock);
+                if (!started) {
+                    res.writeHead(409);
+                    return res.end(JSON.stringify({ ok: false, error: "Campana ya esta activa" }));
+                }
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campana: camp.nombre }));
             }
@@ -488,7 +522,8 @@ poll();
             // POST /api/activar — Activar membresía WSP { wsp_id, dias }
             if (url.pathname === "/api/activar" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.wsp_id || !body.dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta wsp_id o dias" })); }
+                const diasVal = parseInt(body.dias) || 0;
+                if (!body.wsp_id || !body.dias || diasVal < 1) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta wsp_id o dias (debe ser >= 1)" })); }
                 // Buscar usuario por número o ID
                 let user = db.getUsuario(body.wsp_id);
                 if (!user) {
@@ -1413,7 +1448,11 @@ poll();
                     }
                     const batchSize = parseInt(body.batch_size) || 0;
                     const delayMinutes = parseInt(body.delay_minutes) || 5;
-                    motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    const started = await motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    if (!started) {
+                        res.writeHead(409);
+                        return res.end(JSON.stringify({ ok: false, error: "Ya hay un envio activo para este usuario" }));
+                    }
                     res.writeHead(200);
                     return res.end(JSON.stringify({
                         ok: true,
@@ -1639,7 +1678,7 @@ poll();
                 const tid = body.telegram_id || body.user_id;
                 const dias = parseInt(body.dias) || 0;
                 const plan = body.plan || (dias >= 36500 ? "permanente" : dias >= 30 ? "mensual" : dias >= 7 ? "semanal" : "diario");
-                if (!tid || !dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o dias" })); }
+                if (!tid || !dias || dias < 1) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o dias (debe ser >= 1)" })); }
                 let user = db.getUsuario(tid);
                 if (!user) user = db.findUserByNumber(tid);
                 if (!user) {
@@ -2317,6 +2356,7 @@ server.listen(QR_PORT, "0.0.0.0", () => {
 // --- INICIO DEL BOT ---
 async function startBot() {
     db.init();
+    db.resetAllCampanasOnStartup();
     db.setAdminJids(adminJids);
     fs.mkdirSync("sessions", { recursive: true });
     fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
