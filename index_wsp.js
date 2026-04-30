@@ -1840,7 +1840,10 @@ poll();
                         jids = jids.filter(j => j.replace(/@s\.whatsapp\.net$/, '').startsWith(body.filtro_pais));
                     }
                     if (!jids.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros en el grupo" + (body.filtro_pais ? " con codigo +" + body.filtro_pais : "") })); }
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, 0, 5, grupoNombre, body.grupo);
+                    const envioConfig = db.getUserEnvioConfig(body.u);
+                    const batchSize = body.batch_size || envioConfig.lote_tamano || 0;
+                    const delayMinutes = body.delay_minutes || Math.ceil((envioConfig.lote_pausa_seg || 300) / 60);
+                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo);
                     db.agregarLog(body.u, 'promo', `Promo enviada a ${jids.length} miembros de ${grupoNombre} + escucha activada`);
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, message: `promo enviada a ${jids.length} miembros y escucha activada`, total: jids.length, grupo_nombre: grupoNombre }));

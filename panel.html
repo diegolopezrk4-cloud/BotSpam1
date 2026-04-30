@@ -1009,12 +1009,16 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <div class="form-group">
           <label>📋 Cargar mensaje guardado</label>
           <div style="display:flex;gap:10px;align-items:center">
-            <select id="promoPlantillaSelect" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" onchange="cargarPlantillaEn('promoPlantillaSelect','promoMensaje')"><option value="">-- Escribir manualmente --</option></select>
-            <button class="btn btn-outline btn-sm" onclick="refreshPlantillasSelect('promoPlantillaSelect')">🔄</button>
+            <select id="promoMsgSelect" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" onchange="cargarPlantillaEn('promoMsgSelect','promoMensaje')"><option value="">-- Escribir manualmente --</option></select>
+            <button class="btn btn-outline btn-sm" onclick="refreshPlantillasSelect('promoMsgSelect')">🔄</button>
           </div>
         </div>
         <div class="form-group">
           <label>📝 Mensaje de la promo</label>
+          <div style="display:flex;gap:8px;margin-bottom:6px">
+            <button class="btn btn-outline btn-sm" onclick="promoMsgRandom()" title="Usar pregunta random/graciosa">🎲 Pregunta Random</button>
+            <button class="btn btn-outline btn-sm" onclick="promoMsgRandom(true)" title="Siguiente pregunta">🔀 Otra</button>
+          </div>
           <textarea id="promoMensaje" rows="3" placeholder="Ej: Hola! Tenemos una oferta especial para ti. Responde SI si te interesa o NO si no." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:14px;resize:vertical"></textarea>
         </div>
         <div class="form-group">
@@ -1049,7 +1053,16 @@ table tr:hover { background: rgba(108,92,231,0.05); }
             <option value="">-- Usar cuenta principal --</option>
           </select>
         </div>
-        <button class="btn btn-primary" onclick="enviarPromoTodoEnUno()" style="width:100%">🚀 Enviar Promo y Activar Escucha</button>
+        <div style="display:flex;gap:10px;margin-bottom:10px">
+          <button class="btn btn-primary" onclick="enviarPromoTodoEnUno()" style="flex:1">🚀 Enviar Promo y Activar Escucha</button>
+          <button class="btn btn-danger" onclick="pausarPromoEnvio()" style="flex:0 0 auto">🛑 Pausar</button>
+        </div>
+        <div id="promoResumeBar" style="display:none;background:var(--bg2);padding:10px 15px;border-radius:8px;border:1px solid var(--accent2);display:none;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px">
+          <span style="color:var(--accent2);font-weight:bold">🔄 Envio pendiente:</span>
+          <span id="promoResumeInfo" style="color:var(--text2);font-size:13px"></span>
+          <button class="btn btn-success btn-sm" onclick="reanudarPromoEnvio()">▶ Reanudar</button>
+          <button class="btn btn-danger btn-sm" onclick="descartarPromoProgreso()">✖ Descartar</button>
+        </div>
       </div>
 
       <!-- Multi-keyword (Mejora 7) -->
@@ -1882,7 +1895,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoPlantillaSelect')},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){}};
+    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoMsgSelect');checkPromoEnvioProgreso()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){}};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -3343,6 +3356,74 @@ async function enviarPromoTodoEnUno(){
     if(promoRefreshTimer)clearInterval(promoRefreshTimer);
     promoRefreshTimer=setInterval(verRespuestasPromo,5000);
   }else{toast('Error: '+(r.error||r.message||''),'error')}
+}
+// --- PREGUNTAS RANDOM / GRACIOSAS ---
+const _preguntasRandom=[
+  "Si pudieras cenar con cualquier persona viva o muerta, quien seria? Responde SI para saber mas o NO para pasar 😄",
+  "Que prefieres: poder volar o ser invisible? Responde SI si volar, NO si invisible 🦸",
+  "Si ganaras la loteria manana, que es lo PRIMERO que harias? Responde SI para contarnos! 💰",
+  "Que superheroe serias por un dia? Responde SI para ver nuestra oferta heroica 🦸‍♂️",
+  "Pizza o tacos? (la respuesta correcta es SI 😂) Responde SI o NO",
+  "Si tu vida fuera una pelicula, de que genero seria? Responde SI para saber mas 🎬",
+  "Que animal te gustaria ser por un dia? Responde SI si te interesa algo increible 🐾",
+  "Lunes o viernes? (todos sabemos la respuesta 😂) Responde SI para algo que hara tu dia mejor",
+  "Si pudieras teletransportarte ahora, a donde irias? Responde SI para una sorpresa ✈️",
+  "Cafe o te por la manana? Responde SI si quieres despertar con algo mejor ☕",
+  "Que cancion no puedes dejar de escuchar? Responde SI para descubrir algo que te encantara 🎵",
+  "Si pudieras aprender algo nuevo al instante, que seria? Responde SI para saber mas 🧠",
+  "Playa o montana? Responde SI si eres de playa, NO si eres de montana 🏖️🏔️",
+  "Que emoji te representa mas? Responde SI para ver algo que te hara sonreir 😎",
+  "Si tuvieras una maquina del tiempo, irias al pasado o al futuro? Responde SI para descubrirlo ⏰",
+  "Perros o gatos? La eterna pregunta 🐶🐱 Responde SI para algo especial",
+  "Cual es tu comida favorita de toda la vida? Responde SI si te gustan las sorpresas 🍕",
+  "Si pudieras tener un superpoder, cual elegirias? Responde SI para activar tu poder 💪",
+  "Netflix o dormir? (la pregunta mas dificil 😴) Responde SI para algo mejor que ambos",
+  "Si tu mascota pudiera hablar, que crees que diria? Responde SI para reir un rato 😂",
+  "Helado de chocolate o vainilla? Responde SI si te interesan cosas dulces 🍦",
+  "Que harias si manaana no tuvieras que trabajar? Responde SI para descubrirlo 🎉",
+  "Si pudieras vivir en cualquier pais, cual elegirias? Responde SI para una propuesta que no podras rechazar 🌍",
+  "Eres mas de madrugar o desvelarte? Responde SI para algo que vale la pena 🌙",
+  "Cual fue la ultima vez que te reiste tanto que lloraste? Responde SI para mas risas 😂"
+];
+let _preguntaIdx=Math.floor(Math.random()*_preguntasRandom.length);
+function promoMsgRandom(next){
+  if(next)_preguntaIdx=(_preguntaIdx+1)%_preguntasRandom.length;
+  else _preguntaIdx=Math.floor(Math.random()*_preguntasRandom.length);
+  $('promoMensaje').value=_preguntasRandom[_preguntaIdx];
+  toast('Pregunta random cargada 🎲','success');
+}
+// --- PAUSAR / REANUDAR ENVIO PROMO ---
+async function pausarPromoEnvio(){
+  const r=await api('/api/cancelar_envio_personal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  if(r.ok){toast('Envio pausado! Puedes reanudar despues','success');checkPromoEnvioProgreso();}
+  else{toast('No hay envio activo para pausar','error')}
+}
+async function checkPromoEnvioProgreso(){
+  const r=await api('/api/envio_progreso?u='+userId);
+  const bar=$('promoResumeBar');
+  if(!bar)return;
+  if(r.ok&&r.tiene_progreso){
+    const restantes=r.total-r.ultimo_indice;
+    $('promoResumeInfo').textContent='Grupo: '+(r.grupo_nombre||r.grupo_jid||'personal')+' | Enviados: '+r.ultimo_indice+'/'+r.total+' | Restantes: '+restantes;
+    bar.style.display='flex';
+  }else{bar.style.display='none'}
+}
+async function reanudarPromoEnvio(){
+  if(!requireMembresia())return;
+  if(!confirm('Reanudar envio pendiente?'))return;
+  toast('Reanudando envio...','success');
+  const cuenta=$('promoCuenta')?.value||'';
+  const payload={u:userId};
+  if(cuenta)payload.cuenta=cuenta;
+  const r=await api('/api/enviar_miembros_reanudar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r.ok){toast('Reanudado: '+r.restantes+' restantes de '+r.total,'success');$('promoResumeBar').style.display='none'}
+  else{toast('Error: '+(r.error||''),'error')}
+}
+async function descartarPromoProgreso(){
+  if(!confirm('Descartar progreso? No podras reanudar despues.'))return;
+  await api('/api/envio_progreso_cancelar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});
+  $('promoResumeBar').style.display='none';
+  toast('Progreso descartado','success');
 }
 // Mejora 7: Keywords management
 async function loadKeywords(){

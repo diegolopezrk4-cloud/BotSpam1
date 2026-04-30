@@ -209,6 +209,7 @@ async function linkAccount(userId, nombre) {
                         clearTimeout(globalTimeout);
                         reject(new Error("Sesion rechazada"));
                     } else {
+                        try { sock.end(); } catch (e) {}
                         linkData.status = "conectando";
                         await delay(3000);
                         tryConnect();
@@ -353,21 +354,33 @@ function grupoTieneActividadNueva(campanaId, grupoJid) {
 async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
     const textoFinal = addInvisibleChars(mensaje);
     try {
-        try {
-            const metadata = await sock.groupMetadata(groupJid);
-            if (metadata.announce) {
-                const myJid = sock.user?.id;
-                const myNum = myJid ? myJid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "") : "";
-                const meParticipant = metadata.participants?.find(p => {
-                    const pNum = p.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
-                    return pNum === myNum;
-                });
-                if (!meParticipant || (meParticipant.admin !== "admin" && meParticipant.admin !== "superadmin")) {
-                    return { sent: false, delivered: false, reason: "readonly" };
+        let metadata = null;
+        for (let metaRetry = 0; metaRetry < 2; metaRetry++) {
+            try {
+                metadata = await sock.groupMetadata(groupJid);
+                break;
+            } catch (metaErr) {
+                const errMsg = (metaErr.message || "").toLowerCase();
+                if (errMsg.includes("not-authorized") || errMsg.includes("forbidden") || errMsg.includes("item-not-found") || errMsg.includes("404")) {
+                    return { sent: false, delivered: false, reason: "not_member" };
                 }
+                if (metaRetry === 0) {
+                    await delay(2000);
+                    continue;
+                }
+                return { sent: false, delivered: false, reason: "metadata_error" };
             }
-        } catch (metaErr) {
-            return { sent: false, delivered: false, reason: "not_member" };
+        }
+        if (metadata && metadata.announce) {
+            const myJid = sock.user?.id;
+            const myNum = myJid ? myJid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "") : "";
+            const meParticipant = metadata.participants?.find(p => {
+                const pNum = p.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+                return pNum === myNum;
+            });
+            if (!meParticipant || (meParticipant.admin !== "admin" && meParticipant.admin !== "superadmin")) {
+                return { sent: false, delivered: false, reason: "readonly" };
+            }
         }
 
         let result;
@@ -708,6 +721,10 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 gruposEliminados.push(grupoLink);
                                 const idx = gruposLinks.indexOf(grupoLink);
                                 if (idx !== -1) gruposLinks.splice(idx, 1);
+                            } else if (result.reason === "metadata_error") {
+                                db.registrarEnvio(userId, campanaId, grupoLink, "error_temporal");
+                                db.actualizarGrupoStats(userId, grupoLink, "fallido");
+                                console.log(`[Campana] Grupo ${grupoLink}: error temporal de metadata, NO eliminado`);
                             }
                             db.actualizarStatsCampana(campanaId, 0, 1);
                             consecutiveErrors++;
