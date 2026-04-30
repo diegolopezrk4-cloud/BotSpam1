@@ -599,12 +599,12 @@ Cuando un pago es confirmado (automatico por Binance webhook o manual por admin)
 
 ## Bugs Conocidos (Pendientes de Corregir)
 
-### BUG-001: Comprobante imagen no carga en panel admin
+### BUG-001: Comprobante imagen no carga en panel admin — CORREGIDO
 - **Donde**: Admin > Gestion Pagos > Pendientes > click "Ver" en comprobante
 - **Sintoma**: Modal muestra "Error al cargar imagen" en vez de la foto del comprobante
-- **Causa probable**: El endpoint `/api/comprobante/imagen` no encuentra el archivo, o el path guardado en DB no coincide con la ubicacion real del archivo subido
-- **Archivos relevantes**:
-  - `index_wsp.js` — buscar `/api/comprobante/imagen` y `/api/comprobante/subir`
-  - `db_wsp.js` — funcion `crearComprobante()` (donde se guarda el path)
-  - `panel.html` — funcion `verComprobante(id)` (modal que muestra la imagen)
-- **Directorio de comprobantes**: `comprobantes/` (verificar que existe y tiene permisos)
+- **Causa**: 3 problemas combinados:
+  1. Directorio `comprobantes/` no se creaba automaticamente antes de escribir archivos
+  2. Rutas de archivo se guardaban relativas (`comprobantes/...`) pero el servidor las leia sin resolver la ruta absoluta
+  3. Los planes custom editados por admin no se consultaban en el endpoint de subir comprobante (solo buscaba en config.PLANES)
+- **Fix**: Ahora se usa `path.join(__dirname, "comprobantes")` para rutas absolutas, se crea el directorio si no existe, y se consultan planes desde DB ademas de config
+- **NOTA**: Los comprobantes subidos ANTES del fix tienen path relativo y seguiran fallando. Nuevos comprobantes funcionaran correctamente.

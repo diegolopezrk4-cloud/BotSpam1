@@ -2783,18 +2783,27 @@ poll();
 
             // POST /api/comprobante/subir — Cliente sube comprobante de pago
             if (url.pathname === "/api/comprobante/subir" && req.method === "POST") {
+                // Ensure comprobantes directory exists
+                const compDir = path.join(__dirname, "comprobantes");
+                if (!fs.existsSync(compDir)) fs.mkdirSync(compDir, { recursive: true });
+                // Helper to resolve plan from DB or config
+                function resolvePlan(planKey) {
+                    const customPlanes = db.getPlanes();
+                    const allPlanes = customPlanes || config.PLANES;
+                    return allPlanes[planKey] || null;
+                }
                 // Parse multipart form data manually
                 const contentType = req.headers["content-type"] || "";
                 if (!contentType.includes("multipart/form-data")) {
                     // JSON fallback (for base64 image)
                     const body = await readBody();
                     if (!body.plan || !body.metodo_pago) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta plan o metodo_pago" })); }
-                    const plan = config.PLANES[body.plan];
+                    const plan = resolvePlan(body.plan);
                     if (!plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan invalido" })); }
                     const userId = req._authUser || body.u;
                     let imagenPath = null;
                     if (body.imagen_base64) {
-                        const fname = `comprobantes/${userId}_${Date.now()}.jpg`;
+                        const fname = path.join(compDir, `${userId}_${Date.now()}.jpg`);
                         const buf = Buffer.from(body.imagen_base64, "base64");
                         fs.writeFileSync(fname, buf);
                         imagenPath = fname;
@@ -2834,12 +2843,12 @@ poll();
                     }
                 }
                 if (!fields.plan || !fields.metodo_pago) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta plan o metodo_pago" })); }
-                const plan = config.PLANES[fields.plan];
+                const plan = resolvePlan(fields.plan);
                 if (!plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan invalido" })); }
                 const userId = req._authUser || fields.u;
                 let imagenPath = null;
                 if (fileBuffer && fileBuffer.length > 0) {
-                    imagenPath = `comprobantes/${userId}_${Date.now()}.${fileExt}`;
+                    imagenPath = path.join(compDir, `${userId}_${Date.now()}.${fileExt}`);
                     fs.writeFileSync(imagenPath, fileBuffer);
                 }
                 const comp = db.crearComprobante(userId, fields.plan, plan.dias, fields.metodo_pago, fields.monto || plan.precio, imagenPath, fields.nota || '');
@@ -2867,12 +2876,15 @@ poll();
                 const isAdmin = checkAdmin(url.searchParams.get("admin") || req._authUser);
                 if (!isAdmin && String(comp.user_id) !== String(req._authUser)) { res.writeHead(403); return res.end("No autorizado"); }
                 try {
-                    const imgData = fs.readFileSync(comp.imagen_path);
-                    const ext = comp.imagen_path.split(".").pop().toLowerCase();
+                    // Resolve path: handle both absolute and relative paths
+                    let imgPath = comp.imagen_path;
+                    if (!path.isAbsolute(imgPath)) imgPath = path.join(__dirname, imgPath);
+                    const imgData = fs.readFileSync(imgPath);
+                    const ext = imgPath.split(".").pop().toLowerCase();
                     const mimeTypes = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
                     res.writeHead(200, { "Content-Type": mimeTypes[ext] || "image/jpeg" });
                     return res.end(imgData);
-                } catch (_) { res.writeHead(404); return res.end("Imagen no encontrada"); }
+                } catch (_) { res.writeHead(404); return res.end("Imagen no encontrada en " + comp.imagen_path); }
             }
 
             // GET /api/admin/comprobantes — Admin: todos los comprobantes
