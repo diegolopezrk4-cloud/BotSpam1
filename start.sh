@@ -35,7 +35,7 @@ echo "📦 Instalando dependencias Python..."
 pip3 install --break-system-packages telethon aiohttp aiogram qrcode pillow 2>/dev/null
 
 echo "🚀 Iniciando servicios..."
-cd /root/BotSpam1
+cd "${BOTSPAM_DIR:-/root/BotSpam1}"
 nohup node index_wsp.js >> wsp.log 2>&1 &
 echo "   ✅ WSP API iniciado (puerto 3000) - PID: $!"
 nohup node panel_server.js >> panel.log 2>&1 &
