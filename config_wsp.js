@@ -3,6 +3,9 @@ module.exports = {
     // Formato: "51987654321" (Peru = 51)
     ADMIN_NUMBER: "51976680776",
 
+    // Telegram IDs de admins (para el panel web)
+    ADMIN_TELEGRAM_IDS: ["8001675901"],
+
     // Numero del bot (para darle membresia ilimitada)
     BOT_NUMBER: "51907394660",
 
