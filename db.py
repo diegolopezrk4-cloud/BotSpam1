@@ -180,6 +180,16 @@ async def activar_membresia(telegram_id, dias):
         )
         await db.commit()
 
+async def desactivar_membresia(telegram_id):
+    async with _connect() as d:
+        await d.execute("UPDATE usuarios SET activo=0 WHERE telegram_id=?", (telegram_id,))
+        await d.commit()
+
+async def ban_usuario(telegram_id):
+    async with _connect() as d:
+        await d.execute("UPDATE usuarios SET activo=0, plan='baneado' WHERE telegram_id=?", (telegram_id,))
+        await d.commit()
+
 async def tiene_membresia_activa(telegram_id):
     user = await get_usuario(telegram_id)
     if not user or not user["activo"]:

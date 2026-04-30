@@ -196,3 +196,22 @@ async def wsp_enviar_miembros(user_id, grupo, mensaje):
 # --- DETECTAR GRUPOS CLIENTE ---
 async def wsp_detectar_cliente(user_id):
     return await _get("/api/detectar_cliente", {"u": str(user_id)})
+
+# --- DASHBOARD EXTENDED ---
+async def wsp_dashboard_extended(user_id):
+    return await _get("/api/dashboard/extended", {"u": str(user_id)})
+
+# --- BACKUP / RESTORE ---
+async def wsp_config_exportar(user_id):
+    return await _get("/api/config/exportar", {"u": str(user_id)})
+
+async def wsp_config_importar(user_id, data):
+    return await _post("/api/config/importar", {"u": str(user_id), "data": data})
+
+# --- 2FA STATUS ---
+async def wsp_2fa_status(user_id):
+    return await _get("/api/2fa/status", {"u": str(user_id)})
+
+# --- SESSIONS ---
+async def wsp_panel_sessions(user_id):
+    return await _get("/api/panel_sessions", {"u": str(user_id)})
