@@ -826,6 +826,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                         ? `\u23F0 Esperando 10 min...`
                         : `\u23F0 Esperando ${conf.espera_ciclo || 600}s...`;
 
+                    // Mark campaign as "en_reposo" during the pause
+                    db.setCampanaEstadoDetalle(campanaId, 'en_reposo');
+
                     try {
                         await botSock.sendMessage(userId, {
                             text: `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c.enviados} env | \u274C ${c.errores} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`,
@@ -838,6 +841,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                         await delay((conf.espera_ciclo || 600) * 1000);
                     }
                     delayMultiplier = Math.max(1.0, delayMultiplier - 0.5);
+
+                    // Back to active after pause ends
+                    if (!cancelled) db.setCampanaEstadoDetalle(campanaId, 'activa');
                 }
             }
         } catch (e) {

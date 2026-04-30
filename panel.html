@@ -2201,7 +2201,7 @@ async function loadTgCampanas(){
   let h='';
   c.forEach(x=>{
     _tgCampanasData[x.id]=x;
-    const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
+    const estado=getEstadoCampanaBadge(x);
     h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
     const runBtn=x.en_ejecucion?`<button class="btn btn-danger btn-sm" onclick="detenerTgCampana(${x.id})">⏹ Detener</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarTgCampana(${x.id})">🚀 Iniciar</button>`;
     h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div style="display:flex;gap:6px;align-items:center">${estado} ${runBtn} <button class="btn btn-primary btn-sm" onclick="showEditTgCampMsg(${x.id})">✏ Editar</button> <button class="btn btn-danger btn-sm" onclick="delTgCampanaPanel(${x.id})">🗑</button></div></div>`;
@@ -2695,6 +2695,14 @@ async function toggleProg(id){await api('/api/programados/toggle',{method:'POST'
 async function elimProg(id){await api('/api/programados/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminado','success');loadProgramados()}
 
 // --- CAMPANAS ---
+function getEstadoCampanaBadge(x){
+  if(x.activa){
+    if(x.estado_detalle==='en_reposo') return '<span class="badge" style="background:#f39c12;color:#fff">En reposo</span>';
+    return '<span class="badge badge-success">Activa</span>';
+  }
+  if(x.estado_detalle==='detenida_actualizacion') return '<span class="badge" style="background:#e67e22;color:#fff">Detenida (actualización)</span>';
+  return '<span class="badge badge-danger">Detenida</span>';
+}
 let _wspCampanasData={};
 async function loadCampanas(){
   const r=await api('/api/campanas?u='+userId);
@@ -2705,7 +2713,7 @@ async function loadCampanas(){
   let h='';
   c.forEach(x=>{
     _wspCampanasData[x.id]=x;
-    const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
+    const estado=getEstadoCampanaBadge(x);
     h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
     const runBtn=x.activa?`<button class="btn btn-danger btn-sm" onclick="detenerCamp(${x.id})">⏹ Detener</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})">🚀 Iniciar</button>`;
     h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div style="display:flex;gap:6px;align-items:center">${estado} ${runBtn} <button class="btn btn-primary btn-sm" onclick="showEditWspCamp(${x.id})">✏ Editar</button> <button class="btn btn-danger btn-sm" onclick="elimCamp(${x.id})">🗑</button></div></div>`;

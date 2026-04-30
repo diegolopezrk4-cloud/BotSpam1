@@ -580,6 +580,13 @@ function init() {
         db.exec("ALTER TABLE panel_users ADD COLUMN verificado INTEGER DEFAULT 0");
         console.log("   Columna 'verificado' agregada a panel_users (existentes = 0, no verificados)");
     }
+    // --- MIGRATION: estado_detalle column in campanas ---
+    try {
+        db.prepare("SELECT estado_detalle FROM campanas LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE campanas ADD COLUMN estado_detalle TEXT DEFAULT 'detenida'");
+        console.log("   Columna 'estado_detalle' agregada a campanas");
+    }
 
     // --- REGISTRATION CODES (verificacion para crear cuenta) ---
     db.exec(`
@@ -1025,13 +1032,27 @@ function actualizarStatsCampana(campanaId, enviados, errores) {
     db.prepare("UPDATE campanas SET enviados = enviados + ?, errores = errores + ? WHERE id = ?").run(enviados, errores, campanaId);
 }
 
-function setCampanaActiva(campanaId, activa) {
+function setCampanaActiva(campanaId, activa, estado_detalle) {
     if (activa) {
         const inicio = nowPeru();
-        db.prepare("UPDATE campanas SET activa = 1, inicio = ? WHERE id = ?").run(inicio, campanaId);
+        db.prepare("UPDATE campanas SET activa = 1, inicio = ?, estado_detalle = ? WHERE id = ?").run(inicio, estado_detalle || 'activa', campanaId);
     } else {
-        db.prepare("UPDATE campanas SET activa = 0 WHERE id = ?").run(campanaId);
+        db.prepare("UPDATE campanas SET activa = 0, estado_detalle = ? WHERE id = ?").run(estado_detalle || 'detenida', campanaId);
     }
+}
+
+function setCampanaEstadoDetalle(campanaId, estado_detalle) {
+    db.prepare("UPDATE campanas SET estado_detalle = ? WHERE id = ?").run(estado_detalle, campanaId);
+}
+
+function marcarCampanasDetenidaPorActualizacion() {
+    // On server start: all campaigns that were 'activa' are no longer running
+    const activas = db.prepare("SELECT id FROM campanas WHERE activa = 1").all();
+    if (activas.length > 0) {
+        db.prepare("UPDATE campanas SET activa = 0, estado_detalle = 'detenida_actualizacion' WHERE activa = 1").run();
+        console.log(`   ${activas.length} campaña(s) marcadas como 'detenida por actualización'`);
+    }
+    return activas.length;
 }
 
 function actualizarCampanaMensaje(campanaId, mensaje, imagenPath) {
@@ -2615,7 +2636,7 @@ module.exports = {
     getSesiones, agregarSesion, eliminarSesion,
     getGrupos, agregarGrupo, eliminarGrupo, eliminarGrupoPorLink, eliminarTodosGrupos, actualizarGrupoLink,
     getCampanas, crearCampana, getCampanaById, actualizarStatsCampana,
-    setCampanaActiva, actualizarCampanaMensaje, eliminarCampana, clonarCampana, resetearStatsCampana,
+    setCampanaActiva, setCampanaEstadoDetalle, marcarCampanasDetenidaPorActualizacion, actualizarCampanaMensaje, eliminarCampana, clonarCampana, resetearStatsCampana,
     getSesionesCampana, agregarSesionCampana, getGruposCampana, agregarGrupoCampana, eliminarGrupoCampana,
     getCampanaConfig, setCampanaConfig,
     getMaxGrupos, setMaxGrupos,

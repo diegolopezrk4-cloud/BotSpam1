@@ -3647,6 +3647,8 @@ async function startBot() {
     db.init();
     db.initDefaultMetodosPago();
     db.setAdminJids(adminJids);
+    // Mark campaigns that were running before restart as stopped
+    db.marcarCampanasDetenidaPorActualizacion();
     fs.mkdirSync("sessions", { recursive: true });
     fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
     fs.mkdirSync("media", { recursive: true });
