@@ -606,16 +606,19 @@ function iniciarCampana(campanaId, userId, botSock) {
                 );
             }
 
+            db.agregarLog(userId, 'campana', `${campana.nombre}: Entrando al bucle de envio...`);
+
             while (!cancelled) {
                 ciclo++;
-                console.log(`[Campana ${campana.nombre}] Ciclo #${ciclo}`);
+                db.agregarLog(userId, 'campana', `${campana.nombre}: Ciclo #${ciclo} iniciando`);
 
                 // MEJORA 3: Verificar horario programado
-                if (!dentroDeHorario(campanaId)) {
+                const enHorario = dentroDeHorario(campanaId);
+                db.agregarLog(userId, 'campana', `${campana.nombre}: Horario OK=${enHorario}`);
+                if (!enHorario) {
                     const hor = db.getCampanaHorario(campanaId);
-                    console.log(`   [Horario] Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00). Esperando...`);
+                    db.agregarLog(userId, 'campana', `${campana.nombre}: Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00). Esperando...`);
                     await notificarUsuario(botSock, userId, `\u{1F553} *${campana.nombre}*: Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00).\n\u23F3 Esperando hasta la proxima ventana...`);
-                    // Revisar cada 5 minutos
                     while (!dentroDeHorario(campanaId) && !cancelled) {
                         await delay(300 * 1000);
                     }
@@ -624,7 +627,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                 }
 
                 gruposLinks = db.getGruposCampana(campanaId);
+                db.agregarLog(userId, 'campana', `${campana.nombre}: Grupos obtenidos=${gruposLinks.length}`);
                 if (!gruposLinks.length) {
+                    db.agregarLog(userId, 'campana', `${campana.nombre}: Sin grupos, deteniendo`);
                     await notificarUsuario(botSock, userId, `\u26A0 *${campana.nombre}*: No quedan grupos validos. Campana detenida.` + (gruposEliminados.length ? `\n\u{1F5D1} Se eliminaron ${gruposEliminados.length} grupo(s).` : ""));
                     break;
                 }
@@ -633,6 +638,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                 const blacklist = db.getBlacklist(userId);
                 const blLinks = new Set(blacklist.map(b => b.grupo_link));
                 gruposLinks = gruposLinks.filter(gl => !blLinks.has(gl));
+                db.agregarLog(userId, 'campana', `${campana.nombre}: Grupos despues de blacklist=${gruposLinks.length}`);
 
                 for (let si = 0; si < socks.length; si++) {
                     if (cancelled) break;
@@ -640,8 +646,9 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                     // MEJORA 9: Verificar limite diario
                     const enviosHoy = db.getEnviosDiarios(userId, currentSock.nombre);
+                    db.agregarLog(userId, 'campana', `${campana.nombre}: Limite diario ${currentSock.nombre}: ${enviosHoy}/${LIMITE_ENVIOS_DIARIOS}`);
                     if (enviosHoy >= LIMITE_ENVIOS_DIARIOS) {
-                        console.log(`   [Limite] Cuenta '${currentSock.nombre}' alcanzo limite diario (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS})`);
+                        db.agregarLog(userId, 'campana', `${campana.nombre}: Cuenta '${currentSock.nombre}' alcanzo limite diario`);
                         await notificarUsuario(botSock, userId, `\u26A0 *${currentSock.nombre}*: Limite diario alcanzado (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS}). Saltando cuenta.`);
                         continue;
                     }
@@ -841,7 +848,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             }
         } catch (e) {
             console.error(`[Campana ${campanaId}] ERROR FATAL: ${e.message}\n${e.stack}`);
-            db.agregarLog(userId, 'error', `Campana ${campanaId} ERROR FATAL: ${e.message}`);
+            db.agregarLog(userId, 'error', `Campana ${campanaId} ERROR FATAL: ${e.message} | Stack: ${(e.stack||'').split('\n').slice(0,3).join(' | ')}`);
             await notificarUsuario(botSock, userId, `\u274C *ERROR en campana*: ${e.message}\n\nLa campana se detuvo. Revisa los logs del bot para mas detalles.`);
         } finally {
             db.setCampanaActiva(campanaId, false);
