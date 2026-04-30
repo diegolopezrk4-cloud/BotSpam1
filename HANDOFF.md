@@ -323,6 +323,52 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 40. **Registro de Auditoria**: Tabla `audit_log` registra logins, cambios de 2FA, acciones admin. Endpoint: `GET /api/admin/auditoria?u=ADMIN_ID&filter_user=X&limit=200`. Seccion nueva en panel: "Auditoria" (admin-only). (`db_wsp.js:558-567,1883-1893`, `index_wsp.js:2336-2345`, `panel.html:1544-1553,4411-4426`)
 41. **Panel envia token en cada request**: La funcion `api()` ahora incluye `Authorization: Bearer <token>` en headers. Si recibe 401, hace logout automatico. (`panel.html:1616-1632`)
 
+#### Escaneo Post-Mejoras (Bugs adicionales encontrados)
+42. **panel_cambiar_password publico sin auth**: Endpoint era accesible sin token, permitia brute force del old_password. Fix: ahora valida token antes de procesar. (`index_wsp.js:740-751`)
+43. **Sin validacion de membresia en servidor**: El panel bloqueaba UI pero el API no verificaba membresia. Clientes con demo expirado podian usar API directamente. Fix: middleware retorna 403 si membresia inactiva (admins/sellers excluidos). (`index_wsp.js:829-851`)
+44. **Logout no invalidaba sesion en servidor**: Token seguia valido 7 dias post-logout. Fix: nuevo endpoint `/api/panel_logout` borra sesion del DB. (`index_wsp.js:802-814`, `panel.html:1838-1842`)
+45. **Proxy no enviaba X-Forwarded-For**: Rate limiting veia TODAS las conexiones como 127.0.0.1. Un usuario bloqueado = todos bloqueados. Fix: proxy envia IP real del cliente. (`panel_server.js:22-23,32,61`)
+46. **Bug double-read en api() con 403**: Cuerpo de response se leia dos veces causando error. Fix: siempre retorna despues del primer parse de 403. (`panel.html:1640-1646`)
+
+---
+
+## Mejoras Futuras (Ideas para Implementar)
+
+### Prioridad Alta
+1. **Sistema de pagos automatico (Binance Pay)** — Crear ordenes de pago → webhook confirma → activa membresia automatica. Requiere API Key de Binance.
+2. **Sistema de pagos manual (Yape)** — Cliente sube comprobante → admin/seller aprueba → se activa. Seccion nueva "Pagos Pendientes" para admin.
+3. **Notificaciones push reales** — Usar Web Push API con VAPID keys para notificar envios completados, campanas terminadas, membresia por expirar.
+4. **Panel de analytics avanzado** — Graficos de envios/dia, tasa de entrega por cuenta, horas mas activas, clientes mas activos. Chart.js ya importado.
+
+### Prioridad Media
+5. **Sistema de tickets/soporte** — Clientes envian dudas desde el panel → admin las ve en una bandeja. Historial de conversacion.
+6. **Rotacion inteligente de cuentas** — Si una cuenta tiene tasa de entrega baja, el bot automaticamente usa otra cuenta para esos envios.
+7. **Deteccion de ban preventiva** — Monitorear patrones (muchos mensajes no entregados en poco tiempo) y pausar automaticamente antes de un ban real.
+8. **Templates con variables** — Soportar `{nombre}`, `{fecha}`, `{random}` en mensajes para personalizacion masiva.
+9. **Exportar/Importar configuracion completa** — Un solo archivo JSON con toda la config de un usuario (grupos, campanas, plantillas, etc.) para migrar entre cuentas.
+10. **Dashboard de sellers** — Los sellers ven cuantos clientes activos tienen, ingresos generados, codigos mas usados, graficos de crecimiento.
+
+### Prioridad Baja (Ideas Creativas)
+11. **Modo vacaciones** — Pausar todas las campanas y envios con un solo boton. Reanudar todo al volver.
+12. **Programacion recurrente avanzada** — "Enviar todos los lunes y miercoles a las 9am" (cron-like) en vez de solo intervalos.
+13. **A/B Testing de mensajes** — Enviar variante A al 50% y variante B al otro 50%, comparar tasas de respuesta.
+14. **Auto-limpieza de grupos muertos** — Detectar grupos donde nunca hay actividad y sugerir eliminarlos de campanas.
+15. **Respaldo automatico diario** — Exportar DB a un archivo cada dia a las 3am y mantener ultimos 7 dias. Facil de implementar con cron.
+16. **Integracion con Google Sheets** — Importar/exportar numeros, grupos, estadisticas a una hoja de calculo del usuario.
+17. **Multi-idioma para el bot TG** — Responder en el idioma del usuario (detectar por locale de Telegram).
+18. **Rate limiting adaptativo** — Si un usuario envia mucho y la tasa de entrega baja, reducir automaticamente la velocidad de envio.
+19. **Webhook de eventos** — Permitir al usuario configurar una URL donde recibir notificaciones de eventos (envio completado, nuevo miembro, etc.)
+20. **Panel mobile nativo (React Native)** — Convertir la PWA a app nativa para mejor experiencia en celular.
+
+### Mejoras de Infraestructura
+21. **Separar panel.html en componentes** — Eventualmente dividir las 4700+ lineas en modulos ES6 con bundler (webpack/vite) para mantenibilidad.
+22. **Migrar SQLite a PostgreSQL** — Para cuando haya muchos usuarios concurrentes. SQLite tiene problemas con escrituras concurrentes.
+23. **Docker compose** — Empaquetar los 3 servicios + DB en contenedores para deploy facil en cualquier VPS.
+24. **CI/CD automatico** — GitHub Actions que corra tests y deploys automaticos al hacer push.
+25. **Monitoreo con alertas** — Conectar con UptimeRobot o similar para saber si el bot se cae.
+
+---
+
 ## Respuesta a la Pregunta del Handoff
 
 > Si fueras un bug en este codigo, en que archivo te esconderias y por que?
