@@ -28,7 +28,7 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 - **Panel Web** (puerto 3001) — `panel_server.js` sirve `panel.html` y proxea API
 - **TG API** (puerto 3002) — `bot.py` + `motor.py` + `db.py`
 - **Base de datos**: SQLite (`wsp_titan.db` para WSP, `titan.db` para TG)
-- **Bot Token**: 8779002740:AAEGu8ML62y0uFAqpbpSwStm7FJBn3d-KMo
+- **Bot Token**: (ver bot.py linea 34 — NO commitear tokens en documentacion)
 - **Admin ID**: 8001675901
 
 ## Archivos Principales

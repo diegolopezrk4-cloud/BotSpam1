@@ -84,53 +84,47 @@ async function connectClientAccount(userId, nombre, telefono) {
         let reconnectAttempts = 0;
         const MAX_RECONNECT = 5;
 
-        sock.ev.on("connection.update", async (update) => {
-            const { connection, lastDisconnect } = update;
-            if (connection === "open") {
-                reconnectAttempts = 0;
-                clientSessions[key] = sock;
-                if (!resolved) {
-                    resolved = true;
-                    resolve(sock);
-                }
-            }
-            if (connection === "close") {
-                const code = lastDisconnect?.error?.output?.statusCode;
-                if (clientSessions[key] === sock) {
-                    delete clientSessions[key];
-                }
-                if (code === 401 || code === DisconnectReason.loggedOut) {
-                    try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
+        function attachConnectionHandler(currentSock) {
+            currentSock.ev.on("connection.update", async (update) => {
+                const { connection, lastDisconnect } = update;
+                if (connection === "open") {
+                    reconnectAttempts = 0;
+                    clientSessions[key] = currentSock;
                     if (!resolved) {
                         resolved = true;
-                        reject(new Error("Sesion WSP expirada o cerrada. Re-vincula tu cuenta desde Cuentas WSP."));
+                        resolve(currentSock);
                     }
-                } else if (resolved && reconnectAttempts < MAX_RECONNECT) {
-                    reconnectAttempts++;
-                    console.log(`[WSP] Cuenta ${nombre} desconectada (code ${code}). Reconectando intento ${reconnectAttempts}/${MAX_RECONNECT}...`);
-                    await delay(3000 * reconnectAttempts);
-                    try {
-                        const newSock = await createSocket();
-                        clientSessions[key] = newSock;
-                        newSock.ev.on("connection.update", async (upd2) => {
-                            if (upd2.connection === "open") {
-                                reconnectAttempts = 0;
-                                clientSessions[key] = newSock;
-                                console.log(`[WSP] Cuenta ${nombre} reconectada OK`);
-                            }
-                            if (upd2.connection === "close") {
-                                if (clientSessions[key] === newSock) delete clientSessions[key];
-                            }
-                        });
-                    } catch (e) {
-                        console.log(`[WSP] Reconexion fallida para ${nombre}: ${e.message}`);
-                    }
-                } else if (!resolved) {
-                    resolved = true;
-                    reject(new Error("Conexion cerrada" + (code ? ` (code ${code})` : "") + ". Intenta de nuevo."));
                 }
-            }
-        });
+                if (connection === "close") {
+                    const code = lastDisconnect?.error?.output?.statusCode;
+                    if (clientSessions[key] === currentSock) {
+                        delete clientSessions[key];
+                    }
+                    if (code === 401 || code === DisconnectReason.loggedOut) {
+                        try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
+                        if (!resolved) {
+                            resolved = true;
+                            reject(new Error("Sesion WSP expirada o cerrada. Re-vincula tu cuenta desde Cuentas WSP."));
+                        }
+                    } else if (resolved && reconnectAttempts < MAX_RECONNECT) {
+                        reconnectAttempts++;
+                        console.log(`[WSP] Cuenta ${nombre} desconectada (code ${code}). Reconectando intento ${reconnectAttempts}/${MAX_RECONNECT}...`);
+                        await delay(3000 * reconnectAttempts);
+                        try {
+                            const newSock = await createSocket();
+                            clientSessions[key] = newSock;
+                            attachConnectionHandler(newSock);
+                        } catch (e) {
+                            console.log(`[WSP] Reconexion fallida para ${nombre}: ${e.message}`);
+                        }
+                    } else if (!resolved) {
+                        resolved = true;
+                        reject(new Error("Conexion cerrada" + (code ? ` (code ${code})` : "") + ". Intenta de nuevo."));
+                    }
+                }
+            });
+        }
+        attachConnectionHandler(sock);
         setTimeout(() => {
             if (!resolved) {
                 resolved = true;
