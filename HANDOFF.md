@@ -338,6 +338,18 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 47. **readBody sin limite** — El parser JSON del API no tenia limite de tamaño. Fix: max 10MB.
 48. **Proxy sin X-Forwarded-For** — panel_server.js no pasaba IP del cliente a los backends. Fix: header `x-forwarded-for` en ambos proxies.
 
+#### Fixes de Campañas y Panel (Session 4 — 5 bugs)
+
+49. **Campañas zombie tras reinicio** — Cuando el bot se reinicia (update/crash), las campañas activas en la BD quedaban con `activa=1` pero sin tarea en memoria (`tareasActivas` vacio). El usuario veia "Activa" pero la campana no enviaba nada. Fix: al conectar el bot (`connection === "open"`), `db.resetZombieCampanas()` detecta campanas con `activa=1`, las resetea a `activa=0`, y notifica a cada usuario via WhatsApp con la lista de campanas detenidas. (`index_wsp.js:2467-2495`, `db_wsp.js:870-880`)
+
+50. **botSock null crasheaba campañas silenciosamente** — `iniciarCampana()` usaba `botSock.sendMessage(userId, ...)` directamente. Si botSock era null (bot no conectado), el error era atrapado por el catch generico y la campana terminaba sin feedback al usuario. Fix: nuevo helper `notificarUsuario(botSock, userId, text)` que: (a) si botSock es null, no hace nada (no crashea), (b) resuelve userId a JID automaticamente, (c) envuelve en try-catch. Reemplazados los 12 `botSock.sendMessage` dentro de la campana. (`motor_wsp.js:494-512`)
+
+51. **Iniciar campaña sin validación previa** — `/api/iniciar` no verificaba si la campana tenia cuentas o grupos asignados antes de llamar a `motor.iniciarCampana()`. La campana se marcaba como iniciada pero fallaba silenciosamente adentro. Fix: endpoint ahora valida `sesiones.length` y `grupos.length` antes de iniciar, devuelve error descriptivo ("Campana sin cuentas asignadas. Edita la campana y asigna al menos una cuenta."). Tambien detecta si la campana ya esta corriendo (HTTP 409). Panel muestra warning visual si una campana tiene 0 cuentas o 0 grupos. (`index_wsp.js:421-431`, `panel.html:2558`)
+
+52. **Botón Detener siempre mostraba "Detenida"** — `detenerCamp()` en el frontend ignoraba la respuesta del API y siempre mostraba toast("Detenida", "success"). Si habia un error de red o del servidor, el usuario no lo sabia. Fix: ahora verifica `r.ok` y muestra el error si falla. (`panel.html:2570`)
+
+53. **Dropdown "Cargar mensaje guardado" vacio + mensajes sin texto** — `refreshPlantillasSelect()` usaba `m.texto` para acceder al contenido del mensaje, pero la columna en la BD es `mensaje` (no `texto`). Resultado: el dropdown mostraba nombres pero al seleccionar uno, el textarea quedaba vacio. Mismo bug en: tabla de mensajes (`loadMensajes`), modal de editar mensaje, y cards de Envio Unico. Tambien eliminada duplicacion (antes cargaba `/api/mensajes` + `/api/plantillas` que retornan los mismos datos). Fix: cambiado `m.texto` a `m.mensaje` en todas las instancias. (`panel.html:2504,2509,2520,2759-2768`)
+
 ## Notas Importantes para la Siguiente IA
 1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.
 2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).

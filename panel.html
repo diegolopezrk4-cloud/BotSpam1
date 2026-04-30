@@ -2501,12 +2501,12 @@ async function loadMensajes(){
   const m=r.mensajes||[];
   if(!m.length){$('mensajesContent').innerHTML='<div class="empty-state"><div class="icon">✉</div><p>No hay mensajes. Crea uno.</p></div>';return}
   let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Nombre</th><th>Texto</th><th>Acciones</th></tr></thead><tbody>';
-  m.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${(x.texto||'').slice(0,60)}</td><td style="white-space:nowrap"><button class="btn btn-outline btn-sm" onclick="editarMensaje(${x.id})">✏</button> <button class="btn btn-outline btn-sm" onclick="duplicarMensaje(${x.id})">📋</button> <button class="btn btn-danger btn-sm" onclick="eliminarMensaje(${x.id})">🗑</button></td></tr>`});
+  m.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${(x.mensaje||'').slice(0,60)}</td><td style="white-space:nowrap"><button class="btn btn-outline btn-sm" onclick="editarMensaje(${x.id})">✏</button> <button class="btn btn-outline btn-sm" onclick="duplicarMensaje(${x.id})">📋</button> <button class="btn btn-danger btn-sm" onclick="eliminarMensaje(${x.id})">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('mensajesContent').innerHTML=h;
 }
 function showCrearMensaje(){showModal(`<h3>➕ Crear Mensaje</h3><div class="form-group"><label>Nombre</label><input id="msgN" placeholder="Ej: Promo Enero"></div><div class="form-group"><label>Texto</label><textarea id="msgT" rows="5" placeholder="Tu mensaje...&#10;Variables: {nombre} {numero}"></textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearMensaje()">Crear</button></div>`)}
 async function crearMensaje(){if(!requireMembresia())return;const n=$('msgN').value.trim(),t=$('msgT').value.trim();if(!n||!t){toast('Completa campos','error');return}closeModal();const r=await api('/api/mensajes/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,texto:t})});toast(r.ok?'Creado':'Error',r.ok?'success':'error');loadMensajes()}
-async function editarMensaje(id){const r=await api('/api/mensajes?u='+userId);const m=(r.mensajes||[]).find(x=>x.id===id);if(!m)return;showModal(`<h3>✏ Editar</h3><div class="form-group"><label>Nombre</label><input id="eN" value="${m.nombre||''}"></div><div class="form-group"><label>Texto</label><textarea id="eT" rows="5">${m.texto||''}</textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="guardarMsg(${id})">Guardar</button></div>`)}
+async function editarMensaje(id){const r=await api('/api/mensajes?u='+userId);const m=(r.mensajes||[]).find(x=>x.id===id);if(!m)return;showModal(`<h3>✏ Editar</h3><div class="form-group"><label>Nombre</label><input id="eN" value="${m.nombre||''}"></div><div class="form-group"><label>Texto</label><textarea id="eT" rows="5">${m.mensaje||''}</textarea></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="guardarMsg(${id})">Guardar</button></div>`)}
 async function guardarMsg(id){if(!requireMembresia())return;closeModal();const r=await api('/api/mensajes/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id,nombre:$('eN').value.trim(),texto:$('eT').value.trim()})});toast(r.ok?'Editado':'Error',r.ok?'success':'error');loadMensajes()}
 async function duplicarMensaje(id){if(!requireMembresia())return;const r=await api('/api/mensajes/duplicar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast(r.ok?'Duplicado':'Error',r.ok?'success':'error');loadMensajes()}
 function eliminarMensaje(id){showModal(`<h3>🗑 Eliminar?</h3><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confElimMsg(${id})">Eliminar</button></div>`)}
@@ -2517,7 +2517,7 @@ async function loadEnvios(){
   const [ms,hi]=await Promise.all([api('/api/mensajes?u='+userId),api('/api/envios_unicos?u='+userId)]);
   const m=(ms.ok?ms.mensajes:[])||[];
   if(!m.length){$('enviosContent').innerHTML='<div class="empty-state"><p>Crea un mensaje primero</p></div>'}
-  else{let h='<div class="grid">';m.forEach(x=>{h+=`<div class="card" style="cursor:pointer" onclick="enviarUnico(${x.id},'${(x.nombre||'').replace(/'/g,"\\'")}')"><div class="card-title">${x.nombre||'?'}</div><p style="font-size:12px;color:var(--text2)">${(x.texto||'').slice(0,80)}</p><button class="btn btn-primary btn-sm" style="margin-top:10px">📤 Enviar</button></div>`});h+='</div>';$('enviosContent').innerHTML=h}
+  else{let h='<div class="grid">';m.forEach(x=>{h+=`<div class="card" style="cursor:pointer" onclick="enviarUnico(${x.id},'${(x.nombre||'').replace(/'/g,"\\'")}')"><div class="card-title">${x.nombre||'?'}</div><p style="font-size:12px;color:var(--text2)">${(x.mensaje||'').slice(0,80)}</p><button class="btn btn-primary btn-sm" style="margin-top:10px">📤 Enviar</button></div>`});h+='</div>';$('enviosContent').innerHTML=h}
   const e=(hi.ok?hi.envios:[])||[];
   if(!e.length){$('enviosHistorial').innerHTML='<div class="empty-state"><p>Sin envios</p></div>'}
   else{let h='<table><thead><tr><th>Fecha</th><th>Mensaje</th><th>Grupos</th><th>OK</th><th>Error</th></tr></thead><tbody>';e.slice(0,20).forEach(x=>{h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.nombre||x.mensaje_id||'?'}</td><td>${x.total_grupos||'?'}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td></tr>`});h+='</tbody></table>';$('enviosHistorial').innerHTML=h}
@@ -2555,6 +2555,7 @@ async function loadCampanas(){
     h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
     const runBtn=x.activa?`<button class="btn btn-danger btn-sm" onclick="detenerCamp(${x.id})">⏹ Detener</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})">🚀 Iniciar</button>`;
     h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div style="display:flex;gap:6px;align-items:center">${estado} ${runBtn} <button class="btn btn-primary btn-sm" onclick="showEditWspCamp(${x.id})">✏ Editar</button> <button class="btn btn-danger btn-sm" onclick="elimCamp(${x.id})">🗑</button></div></div>`;
+    if(!x.sesiones_count||!x.grupos_count){h+=`<p style="font-size:12px;color:var(--danger);margin-bottom:5px;font-weight:bold">${!x.sesiones_count?'⚠ Sin cuentas asignadas. ':''} ${!x.grupos_count?'⚠ Sin grupos asignados.':''} Edita la campana para asignar.</p>`}
     h+=`<p style="font-size:12px;color:var(--text2);margin-bottom:5px">${x.mensaje?esc(x.mensaje.slice(0,100)):'<i style="color:var(--danger)">Sin mensaje</i>'}</p>`;
     if(x.imagen_path)h+=`<p style="font-size:11px;color:var(--accent);margin-bottom:5px">📷 Foto adjunta</p>`;
     h+=`<div style="display:flex;gap:15px;font-size:12px;color:var(--text2);flex-wrap:wrap"><span>📤 Enviados: <b style="color:var(--success)">${x.enviados||0}</b></span><span>❌ Errores: <b style="color:var(--danger)">${x.errores||0}</b></span>`;
@@ -2567,7 +2568,7 @@ async function loadCampanas(){
 function showCrearCampana(){showModal(`<h3>➕ Crear Campana WSP</h3><div class="form-group"><label>Nombre</label><input id="cN" placeholder="Nombre"></div><div class="form-group"><label>Mensaje</label><textarea id="cM" rows="4" placeholder="Texto a enviar a los grupos"></textarea></div><div class="form-group"><label>Intervalo entre grupos (seg)</label><input id="cI" type="number" value="20" min="5"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearCamp()">Crear</button></div>`)}
 async function crearCamp(){const n=$('cN').value.trim(),m=$('cM').value.trim(),iv=parseInt($('cI').value)||60;if(!n||!m){toast('Completa','error');return}closeModal();const r=await api('/api/campanas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,mensaje:m,intervalo:iv})});toast(r.ok?'Creada':'Error',r.ok?'success':'error');loadCampanas()}
 async function iniciarCamp(id){const r=await api('/api/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast(r.ok?'Iniciada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas()}
-async function detenerCamp(id){await api('/api/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast('Detenida','success');loadCampanas()}
+async function detenerCamp(id){const r=await api('/api/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast(r.ok?'Detenida':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas()}
 async function elimCamp(id){await api('/api/campanas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminada','success');loadCampanas()}
 async function showEditWspCamp(id){
   if(!requireMembresia())return;
@@ -2758,17 +2759,11 @@ let epCuentaActual='';
 async function refreshPlantillasSelect(selectId){
   const sel=$(selectId);if(!sel)return;
   sel.innerHTML='<option value="">-- Escribir manualmente --</option>';
-  const [mr,pr]=await Promise.all([api('/api/mensajes?u='+userId),api('/api/plantillas?u='+userId)]);
+  const mr=await api('/api/mensajes?u='+userId);
   const msgs=(mr.ok?mr.mensajes:[])||[];
-  const plts=(pr.ok?pr.plantillas:[])||[];
   if(msgs.length){
-    const og=document.createElement('optgroup');og.label='Mensajes';
-    msgs.forEach(m=>{const o=document.createElement('option');o.value='msg:'+m.id;o.textContent='✉ '+m.nombre;o.dataset.texto=m.texto||'';og.appendChild(o)});
-    sel.appendChild(og);
-  }
-  if(plts.length){
-    const og=document.createElement('optgroup');og.label='Plantillas';
-    plts.forEach(p=>{const o=document.createElement('option');o.value='plt:'+p.id;o.textContent='📋 '+p.nombre;o.dataset.texto=p.mensaje||'';og.appendChild(o)});
+    const og=document.createElement('optgroup');og.label='Mensajes guardados';
+    msgs.forEach(m=>{const o=document.createElement('option');o.value='msg:'+m.id;o.textContent='✉ '+m.nombre;o.dataset.texto=m.mensaje||'';og.appendChild(o)});
     sel.appendChild(og);
   }
 }

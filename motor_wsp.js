@@ -490,6 +490,27 @@ function dentroDeHorario(campanaId) {
 // ============================================================
 // CAMPANA ENGINE con las 10 mejoras
 // ============================================================
+
+// Safe notification helper — handles null botSock and resolves userId to JID
+async function notificarUsuario(botSock, userId, text) {
+    if (!botSock) return;
+    try {
+        // If userId looks like a JID already, use it directly
+        let jid = userId;
+        if (!userId.includes("@")) {
+            const results = await botSock.onWhatsApp(userId + "@s.whatsapp.net");
+            if (results && results.length > 0) {
+                jid = results[0].jid;
+            } else {
+                jid = userId + "@s.whatsapp.net";
+            }
+        }
+        await botSock.sendMessage(jid, { text });
+    } catch (e) {
+        console.log(`[Notif] No se pudo notificar a ${userId}: ${e.message}`);
+    }
+}
+
 function iniciarCampana(campanaId, userId, botSock) {
     if (tareasActivas[campanaId]) return false;
 
@@ -512,7 +533,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             const horario = db.getCampanaHorario(campanaId);
 
             if (!sesionesNombres.length || !gruposLinks.length) {
-                await botSock.sendMessage(userId, { text: "\u26A0 Campana sin cuentas o grupos asignados." });
+                await notificarUsuario(botSock, userId, "\u26A0 Campana sin cuentas o grupos asignados.");
                 return;
             }
 
@@ -533,7 +554,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                 }
             }
             if (!socks.length) {
-                await botSock.sendMessage(userId, { text: "\u274C No se pudo conectar ninguna cuenta." });
+                await notificarUsuario(botSock, userId, "\u274C No se pudo conectar ninguna cuenta.");
                 return;
             }
 
@@ -545,7 +566,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             const MAX_CONSECUTIVE_PENDING = 3;
             const PAUSA_RATE_LIMIT = 300;
 
-            try {
+            {
                 let tiempoMsg = "";
                 if (numCuentas === 1) {
                     tiempoMsg = `\u23F1 Entre grupos: ${conf.intervalo_min}-${conf.intervalo_max}s\n\u23F0 Entre ciclos: 10 min (1 cuenta)`;
@@ -556,10 +577,10 @@ function iniciarCampana(campanaId, userId, botSock) {
                 if (horario.hora_inicio !== 0 || horario.hora_fin !== 24) {
                     horarioMsg = `\n\u{1F553} Horario: ${horario.hora_inicio}:00 - ${horario.hora_fin}:00`;
                 }
-                await botSock.sendMessage(userId, {
-                    text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`,
-                });
-            } catch (e) {}
+                await notificarUsuario(botSock, userId,
+                    `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`
+                );
+            }
 
             while (!cancelled) {
                 ciclo++;
@@ -569,31 +590,18 @@ function iniciarCampana(campanaId, userId, botSock) {
                 if (!dentroDeHorario(campanaId)) {
                     const hor = db.getCampanaHorario(campanaId);
                     console.log(`   [Horario] Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00). Esperando...`);
-                    try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u{1F553} *${campana.nombre}*: Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00).\n\u23F3 Esperando hasta la proxima ventana...`,
-                        });
-                    } catch (e) {}
+                    await notificarUsuario(botSock, userId, `\u{1F553} *${campana.nombre}*: Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00).\n\u23F3 Esperando hasta la proxima ventana...`);
                     // Revisar cada 5 minutos
                     while (!dentroDeHorario(campanaId) && !cancelled) {
                         await delay(300 * 1000);
                     }
                     if (cancelled) break;
-                    try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u2705 *${campana.nombre}*: Dentro de horario. Reanudando envios...`,
-                        });
-                    } catch (e) {}
+                    await notificarUsuario(botSock, userId, `\u2705 *${campana.nombre}*: Dentro de horario. Reanudando envios...`);
                 }
 
                 gruposLinks = db.getGruposCampana(campanaId);
                 if (!gruposLinks.length) {
-                    try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u26A0 *${campana.nombre}*: No quedan grupos validos. Campana detenida.` +
-                                (gruposEliminados.length ? `\n\u{1F5D1} Se eliminaron ${gruposEliminados.length} grupo(s).` : ""),
-                        });
-                    } catch (e) {}
+                    await notificarUsuario(botSock, userId, `\u26A0 *${campana.nombre}*: No quedan grupos validos. Campana detenida.` + (gruposEliminados.length ? `\n\u{1F5D1} Se eliminaron ${gruposEliminados.length} grupo(s).` : ""));
                     break;
                 }
 
@@ -610,11 +618,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                     const enviosHoy = db.getEnviosDiarios(userId, currentSock.nombre);
                     if (enviosHoy >= LIMITE_ENVIOS_DIARIOS) {
                         console.log(`   [Limite] Cuenta '${currentSock.nombre}' alcanzo limite diario (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS})`);
-                        try {
-                            await botSock.sendMessage(userId, {
-                                text: `\u26A0 *${currentSock.nombre}*: Limite diario alcanzado (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS}). Saltando cuenta.`,
-                            });
-                        } catch (e) {}
+                        await notificarUsuario(botSock, userId, `\u26A0 *${currentSock.nombre}*: Limite diario alcanzado (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS}). Saltando cuenta.`);
                         continue;
                     }
 
@@ -683,38 +687,22 @@ function iniciarCampana(campanaId, userId, botSock) {
                             if (result.reason === "ban_detected") {
                                 console.log(`   \u{1F6A8} BAN DETECTADO en cuenta '${currentSock.nombre}'`);
                                 db.marcarCuentaBaneada(userId, currentSock.nombre);
-                                try {
-                                    await botSock.sendMessage(userId, {
-                                        text: `\u{1F6A8} *BAN DETECTADO*\n\nLa cuenta *${currentSock.nombre}* ha sido baneada/desconectada por WhatsApp.\n\nSe ha marcado como baneada y no se usara mas.\n\nSigue con las demas cuentas si hay.`,
-                                    });
-                                } catch (e) {}
+                                await notificarUsuario(botSock, userId, `\u{1F6A8} *BAN DETECTADO*\n\nLa cuenta *${currentSock.nombre}* ha sido baneada/desconectada por WhatsApp.\n\nSe ha marcado como baneada y no se usara mas.\n\nSigue con las demas cuentas si hay.`);
                                 break;
                             }
 
                             if (result.reason === "disconnected") {
                                 console.log(`   [Reconexion] Intentando reconectar '${currentSock.nombre}'...`);
-                                try {
-                                    await botSock.sendMessage(userId, {
-                                        text: `\u{1F504} Cuenta '${currentSock.nombre}' desconectada. Intentando reconectar...`,
-                                    });
-                                } catch (e) {}
+                                await notificarUsuario(botSock, userId, `\u{1F504} Cuenta '${currentSock.nombre}' desconectada. Intentando reconectar...`);
                                 const newSock = await reconectarCuenta(userId, currentSock.nombre);
                                 if (newSock) {
                                     currentSock.sock = newSock;
                                     socks[si].sock = newSock;
-                                    try {
-                                        await botSock.sendMessage(userId, {
-                                            text: `\u2705 Cuenta '${currentSock.nombre}' reconectada. Continuando...`,
-                                        });
-                                    } catch (e) {}
+                                    await notificarUsuario(botSock, userId, `\u2705 Cuenta '${currentSock.nombre}' reconectada. Continuando...`);
                                     consecutiveErrors = 0;
                                     continue;
                                 } else {
-                                    try {
-                                        await botSock.sendMessage(userId, {
-                                            text: `\u274C No se pudo reconectar '${currentSock.nombre}'. Saltando cuenta.`,
-                                        });
-                                    } catch (e) {}
+                                    await notificarUsuario(botSock, userId, `\u274C No se pudo reconectar '${currentSock.nombre}'. Saltando cuenta.`);
                                     break;
                                 }
                             }
@@ -744,11 +732,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                         // Too many consecutive errors: pause and try to reconnect
                         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
                             console.log(`   [ErrorRecovery] ${consecutiveErrors} errores consecutivos, pausando 60s...`);
-                            try {
-                                await botSock.sendMessage(userId, {
-                                    text: `\u26A0 *${campana.nombre}*: ${consecutiveErrors} errores seguidos. Pausando 60s para recuperarse...`,
-                                });
-                            } catch (e) {}
+                            await notificarUsuario(botSock, userId, `\u26A0 *${campana.nombre}*: ${consecutiveErrors} errores seguidos. Pausando 60s para recuperarse...`);
                             await delay(60000);
                             const newSock = await reconectarCuenta(userId, currentSock.nombre);
                             if (newSock) {
@@ -810,11 +794,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                         ? `\u23F0 Esperando 10 min...`
                         : `\u23F0 Esperando ${conf.espera_ciclo || 600}s...`;
 
-                    try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c.enviados} env | \u274C ${c.errores} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`,
-                        });
-                    } catch (e) {}
+                    await notificarUsuario(botSock, userId, `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c.enviados} env | \u274C ${c.errores} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`);
 
                     if (numCuentas === 1) {
                         await delay(600 * 1000);

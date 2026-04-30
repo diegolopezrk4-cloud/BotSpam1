@@ -867,6 +867,18 @@ function setCampanaActiva(campanaId, activa) {
     }
 }
 
+function getAllCampanasActivas() {
+    return db.prepare("SELECT * FROM campanas WHERE activa = 1").all();
+}
+
+function resetZombieCampanas() {
+    const zombies = getAllCampanasActivas();
+    if (zombies.length) {
+        db.prepare("UPDATE campanas SET activa = 0 WHERE activa = 1").run();
+    }
+    return zombies;
+}
+
 function actualizarCampanaMensaje(campanaId, mensaje, imagenPath) {
     if (imagenPath) {
         db.prepare("UPDATE campanas SET mensaje = ?, imagen_path = ? WHERE id = ?").run(mensaje, imagenPath, campanaId);
@@ -2003,7 +2015,8 @@ module.exports = {
     getSesiones, agregarSesion, eliminarSesion,
     getGrupos, agregarGrupo, eliminarGrupo, eliminarGrupoPorLink, eliminarTodosGrupos, actualizarGrupoLink,
     getCampanas, crearCampana, getCampanaById, actualizarStatsCampana,
-    setCampanaActiva, actualizarCampanaMensaje, eliminarCampana, clonarCampana, resetearStatsCampana,
+    setCampanaActiva, getAllCampanasActivas, resetZombieCampanas,
+    actualizarCampanaMensaje, eliminarCampana, clonarCampana, resetearStatsCampana,
     getSesionesCampana, agregarSesionCampana, getGruposCampana, agregarGrupoCampana, eliminarGrupoCampana,
     getCampanaConfig, setCampanaConfig,
     getMaxGrupos, setMaxGrupos,

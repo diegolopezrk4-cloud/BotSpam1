@@ -417,20 +417,30 @@ poll();
                 const campId = body.id || body.campana_id;
                 if (!body.u || !campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
                 const camp = db.getCampanaById(campId);
-                if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "campana no encontrada" })); }
-                motor.iniciarCampana(campId, body.u, botSock);
+                if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "Campana no encontrada" })); }
+                // Validar que la campana tenga sesiones y grupos asignados
+                const sesiones = db.getSesionesCampana(campId);
+                const grupos = db.getGruposCampana(campId);
+                if (!sesiones.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Campana sin cuentas asignadas. Edita la campana y asigna al menos una cuenta." })); }
+                if (!grupos.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Campana sin grupos asignados. Edita la campana y asigna al menos un grupo." })); }
+                if (!botSock || botStatus !== "conectado") {
+                    // Si botSock no esta conectado, intentar iniciar igual pero avisar
+                    console.log("[Campana] Iniciando sin botSock (notificaciones WSP deshabilitadas)");
+                }
+                const started = motor.iniciarCampana(campId, body.u, botSock);
+                if (started === false) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: "La campana ya esta en ejecucion." })); }
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campana: camp.nombre }));
             }
 
-            // POST /api/detener — Detener campaña { id|campana_id }
+            // POST /api/detener — Detener campaña { u, id|campana_id }
             if (url.pathname === "/api/detener" && req.method === "POST") {
                 const body = await readBody();
                 const campId = body.id || body.campana_id;
                 if (!campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
-                motor.detenerCampana(campId);
+                const wasRunning = motor.detenerCampana(campId);
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true }));
+                return res.end(JSON.stringify({ ok: true, was_running: wasRunning }));
             }
 
             // GET /api/historial?u=USER_ID — Historial de envíos
@@ -2462,6 +2472,36 @@ async function startBot() {
                 }
             } catch (e) {
                 console.log(`   (No se pudo resolver admin JID: ${e.message})`);
+            }
+
+            // Detectar campanas zombie (activas en DB pero sin tarea en memoria tras reinicio)
+            try {
+                const zombies = db.resetZombieCampanas();
+                if (zombies.length) {
+                    console.log(`\u{1F6A8} ${zombies.length} campana(s) zombie detectada(s) tras reinicio. Reseteadas.`);
+                    const porUsuario = {};
+                    for (const z of zombies) {
+                        if (!porUsuario[z.user_id]) porUsuario[z.user_id] = [];
+                        porUsuario[z.user_id].push(z.nombre);
+                    }
+                    for (const [uid, nombres] of Object.entries(porUsuario)) {
+                        try {
+                            const jidResults = await botSock.onWhatsApp(uid + "@s.whatsapp.net");
+                            if (jidResults && jidResults.length > 0) {
+                                const userJid = jidResults[0].jid;
+                                const lista = nombres.map(n => `  \u2022 ${n}`).join("\n");
+                                await botSock.sendMessage(userJid, {
+                                    text: `\u26A0\uFE0F *AVISO DE ACTUALIZACION*\n\nEl bot se reinicio por una actualizacion.\n\nLas siguientes campanas fueron detenidas automaticamente:\n${lista}\n\n\u{1F449} Ve al panel > Campanas y presiona *Iniciar* para reanudarlas.`,
+                                });
+                                console.log(`   Notificado usuario ${uid}: ${nombres.length} campana(s) detenida(s)`);
+                            }
+                        } catch (notifErr) {
+                            console.log(`   No se pudo notificar a ${uid}: ${notifErr.message}`);
+                        }
+                    }
+                }
+            } catch (zombieErr) {
+                console.error(`Error detectando campanas zombie: ${zombieErr.message}`);
             }
         }
 
