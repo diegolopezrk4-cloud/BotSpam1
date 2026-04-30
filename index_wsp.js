@@ -695,6 +695,33 @@ poll();
                 }
             }
 
+            // POST /api/chat/enviar — Enviar mensaje a un chat especifico (JID)
+            if (url.pathname === "/api/chat/enviar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.jid || !body.mensaje) {
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: "falta u, jid o mensaje" }));
+                }
+                try {
+                    let sock;
+                    if (body.cuenta) {
+                        sock = await motor.getOrConnectClient(body.u, body.cuenta);
+                    } else if (botSock) {
+                        sock = botSock;
+                    }
+                    if (!sock || !sock.user) {
+                        res.writeHead(503);
+                        return res.end(JSON.stringify({ ok: false, error: "Cuenta no conectada" }));
+                    }
+                    const result = await sock.sendMessage(body.jid, { text: body.mensaje });
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, msgId: result?.key?.id }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
             // POST /api/enviar_personal — Enviar mensaje a chats personales
             if (url.pathname === "/api/enviar_personal" && req.method === "POST") {
                 const body = await readBody();

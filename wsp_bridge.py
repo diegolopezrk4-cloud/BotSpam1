@@ -120,8 +120,17 @@ async def wsp_desactivar(wsp_id):
     return await _post("/api/desactivar", {"wsp_id": str(wsp_id)})
 
 # --- ENVIO PERSONAL ---
-async def wsp_chats_personales(user_id):
-    return await _get("/api/chats_personales", {"u": str(user_id)})
+async def wsp_chats_personales(user_id, cuenta=None):
+    params = {"u": str(user_id)}
+    if cuenta:
+        params["cuenta"] = cuenta
+    return await _get("/api/chats_personales", params)
+
+async def wsp_chat_enviar(user_id, jid, mensaje, cuenta=None):
+    data = {"u": str(user_id), "jid": jid, "mensaje": mensaje}
+    if cuenta:
+        data["cuenta"] = cuenta
+    return await _post("/api/chat/enviar", data)
 
 async def wsp_enviar_personal(user_id, mensaje):
     return await _post("/api/enviar_personal", {"u": str(user_id), "mensaje": mensaje})
