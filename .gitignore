@@ -1,0 +1,12 @@
+node_modules/
+*.db
+*.log
+*.session
+client_sessions/
+sessions/
+media/
+logs/
+admin_group.txt
+admin_jids.txt
+__pycache__/
+*.pyc
