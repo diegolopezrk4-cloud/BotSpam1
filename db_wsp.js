@@ -1127,6 +1127,11 @@ function setCampanaConfig(campanaId, min, max, esperaCuenta, esperaCiclo) {
 
 // --- LIMITES ---
 function getMaxGrupos(userId) {
+    // Admin and users with active membership have no limit
+    try {
+        const memb = checkMembresia(userId);
+        if (memb && (memb.es_admin || memb.activa)) return Infinity;
+    } catch (e) {}
     const row = db.prepare("SELECT max_grupos FROM limites_usuario WHERE user_id = ?").get(userId);
     return row ? row.max_grupos : config.MAX_GRUPOS_POR_USUARIO;
 }

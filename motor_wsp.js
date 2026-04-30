@@ -15,7 +15,15 @@ const reporteInterval = {};  // { userId: intervalId }
 const grupoUltimaActividad = {};
 
 // Limite de envios diarios por cuenta (proteccion anti-ban)
-const LIMITE_ENVIOS_DIARIOS = 500;
+const LIMITE_ENVIOS_DIARIOS_DEFAULT = 500;
+
+function getLimiteEnviosDiarios(userId) {
+    try {
+        const membresia = db.checkMembresia(userId);
+        if (membresia && (membresia.es_admin || membresia.activa)) return Infinity;
+    } catch (e) {}
+    return LIMITE_ENVIOS_DIARIOS_DEFAULT;
+}
 
 // Whole-word matching to avoid partial matches (e.g. 'no' in 'noches')
 function matchWholeWord(text, word) {
@@ -537,6 +545,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             let gruposLinks = db.getGruposCampana(campanaId);
             const conf = db.getCampanaConfig(campanaId);
             const horario = db.getCampanaHorario(campanaId);
+            const LIMITE_ENVIOS_DIARIOS = getLimiteEnviosDiarios(userId);
 
             console.log(`[Campana ${campana.nombre}] Sesiones: ${sesionesNombres.length}, Grupos: ${gruposLinks.length}`);
             db.agregarLog(userId, 'campana', `${campana.nombre}: ${sesionesNombres.length} cuenta(s), ${gruposLinks.length} grupo(s)`);
@@ -596,7 +605,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                     horarioMsg = `\n\u{1F553} Horario: ${horario.hora_inicio}:00 - ${horario.hora_fin}:00`;
                 }
                 await notificarUsuario(botSock, userId,
-                    `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`
+                    `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS === Infinity ? 'Ilimitado' : LIMITE_ENVIOS_DIARIOS + ' envios/cuenta'}`
                 );
             }
 
@@ -1656,7 +1665,8 @@ module.exports = {
     clientSessions,
     pendingLinks,
     reporteInterval,
-    LIMITE_ENVIOS_DIARIOS,
+    LIMITE_ENVIOS_DIARIOS: LIMITE_ENVIOS_DIARIOS_DEFAULT,
+    getLimiteEnviosDiarios,
     getSessionDir,
     setBotSocket,
     BOT_NOMBRE: _botNombre,

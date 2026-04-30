@@ -1867,7 +1867,8 @@ poll();
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const maxG = db.getMaxGrupos(userId);
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, limites: { max_grupos: maxG, max_envios_dia: 999999 } }));
+                const limDia = motor.getLimiteEnviosDiarios ? motor.getLimiteEnviosDiarios(userId) : 500;
+                return res.end(JSON.stringify({ ok: true, limites: { max_grupos: maxG === Infinity ? 'Ilimitado' : maxG, max_envios_dia: limDia === Infinity ? 'Ilimitado' : limDia } }));
             }
 
             // ─── ENVIOS CHART ───
