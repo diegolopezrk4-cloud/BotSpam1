@@ -1,5 +1,5 @@
-const CACHE_NAME = 'jd-bot-v2';
-const STATIC_ASSETS = ['/', '/manifest.json'];
+const CACHE_NAME = 'jd-bot-v3';
+const STATIC_ASSETS = ['/manifest.json'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -18,10 +18,19 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Never cache API requests
   if (event.request.url.includes('/api/')) {
     event.respondWith(fetch(event.request));
     return;
   }
+  // Never cache the main page (panel.html) - always fetch fresh
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match('/'))
+    );
+    return;
+  }
+  // Network-first for other assets with cache fallback
   event.respondWith(
     fetch(event.request)
       .then(response => {

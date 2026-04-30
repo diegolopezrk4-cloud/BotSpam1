@@ -7,10 +7,12 @@ logger = logging.getLogger(__name__)
 
 WSP_API_URL = "http://localhost:3000"
 
+INTERNAL_HEADERS = {"x-internal-service": "telegram-bot"}
+
 async def _get(path, params=None, timeout=15):
     try:
         async with aiohttp.ClientSession() as s:
-            async with s.get(f"{WSP_API_URL}{path}", params=params, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+            async with s.get(f"{WSP_API_URL}{path}", params=params, headers=INTERNAL_HEADERS, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
                 return await r.json()
     except asyncio.TimeoutError:
         logger.error(f"WSP API GET {path} timeout ({timeout}s)")
@@ -25,7 +27,7 @@ async def _get(path, params=None, timeout=15):
 async def _post(path, data=None, timeout=15):
     try:
         async with aiohttp.ClientSession() as s:
-            async with s.post(f"{WSP_API_URL}{path}", json=data, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+            async with s.post(f"{WSP_API_URL}{path}", json=data, headers=INTERNAL_HEADERS, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
                 return await r.json()
     except asyncio.TimeoutError:
         logger.error(f"WSP API POST {path} timeout ({timeout}s)")
@@ -60,6 +62,16 @@ async def wsp_sesiones(user_id):
 
 async def wsp_vincular(user_id, nombre):
     return await _post("/api/vincular", {"u": str(user_id), "nombre": nombre})
+
+async def wsp_desvincular(user_id, nombre):
+    return await _post("/api/desvincular", {"u": str(user_id), "nombre": nombre})
+
+# --- MEMBRESIA SYNC ---
+async def wsp_admin_desactivar(telegram_id):
+    return await _post("/api/admin/desactivar", {"admin_id": str(8001675901), "telegram_id": str(telegram_id)})
+
+async def wsp_admin_ban(telegram_id):
+    return await _post("/api/admin/ban", {"admin_id": str(8001675901), "telegram_id": str(telegram_id)})
 
 # --- CAMPANAS ---
 async def wsp_campanas(user_id):

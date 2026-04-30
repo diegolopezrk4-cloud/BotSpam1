@@ -35,9 +35,16 @@ function getSessionDir(userId, nombre) {
     return path.join(config.SESSIONS_DIR, safe);
 }
 
+// Lock to prevent simultaneous reconnection attempts per account
+const reconnectLocks = {};
+
 async function connectClientAccount(userId, nombre, telefono) {
     const sessionDir = getSessionDir(userId, nombre);
     const key = `${userId}_${nombre}`;
+    // Prevent parallel reconnection attempts for the same account
+    if (reconnectLocks[key]) {
+        throw new Error("Ya se esta reconectando esta cuenta. Espera un momento.");
+    }
     fs.mkdirSync(sessionDir, { recursive: true });
 
     async function createSocket() {
@@ -343,15 +350,17 @@ function registrarEnvioCampana(campanaId, grupoJid) {
 }
 
 // Check if group had activity from others since our last campaign send
-function grupoTieneActividadNueva(campanaId, grupoJid) {
+// campanaStartTime: timestamp when current campaign run started (to skip stale DB records)
+function grupoTieneActividadNueva(campanaId, grupoJid, campanaStartTime) {
     const row = db.getUltimoEnvioCampana(campanaId, grupoJid);
     if (!row) return true; // never sent = treat as new
     const envioTime = new Date(row.ultimo_envio + "Z").getTime();
+    // If the DB record is from a PREVIOUS run (before this campaign started), allow send
+    if (campanaStartTime && envioTime < campanaStartTime) return true;
     const ultimaActividad = grupoUltimaActividad[grupoJid];
-    // If we sent recently (last 30 min) from THIS campaign, skip even without activity data
     const minutesSinceSend = (Date.now() - envioTime) / 60000;
     if (minutesSinceSend < 30) return false;
-    if (ultimaActividad === undefined) return true; // no data (e.g. after restart) — allow send
+    if (ultimaActividad === undefined) return true;
     return ultimaActividad > envioTime;
 }
 
@@ -515,6 +524,7 @@ function iniciarCampana(campanaId, userId, botSock) {
     if (tareasActivas[campanaId]) return false;
 
     let cancelled = false;
+    const campanaStartTime = Date.now();
     const task = {
         running: true,
         cancel: () => { cancelled = true; },
@@ -665,7 +675,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                         }
 
                         // Skip group if no new activity since our last send (avoid duplicate spam)
-                        if (!grupoTieneActividadNueva(campanaId, groupJid)) {
+                        if (!grupoTieneActividadNueva(campanaId, groupJid, campanaStartTime)) {
                             console.log(`   [Anti-dup] Grupo ${grupoLink}: sin actividad nueva, saltando`);
                             continue;
                         }
@@ -810,11 +820,14 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                     await notificarUsuario(botSock, userId, `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c.enviados} env | \u274C ${c.errores} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`);
 
+                    db.setCampanaEstadoDetalle(campanaId, 'en_reposo');
+
                     if (numCuentas === 1) {
                         await delay(600 * 1000);
                     } else {
                         await delay((conf.espera_ciclo || 600) * 1000);
                     }
+                    if (!cancelled) db.setCampanaEstadoDetalle(campanaId, 'activa');
                     delayMultiplier = Math.max(1.0, delayMultiplier - 0.5);
                 }
             }

@@ -31,11 +31,11 @@ import web_panel
 # ─────────────────────────────────────────
 #   CONFIGURACIÓN CENTRAL
 # ─────────────────────────────────────────
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8779002740:AAEGu8ML62y0uFAqpbpSwStm7FJBn3d-KMo")
-ADMIN_ID  = int(os.environ.get("ADMIN_ID", "8001675901"))
-API_ID    = int(os.environ.get("API_ID", "35451933"))
-API_HASH  = os.environ.get("API_HASH", "2070761744260118720b34e6bf20f2eb")
-YAPE_NUM  = os.environ.get("YAPE_NUM", "9776680776")
+BOT_TOKEN = "8779002740:AAEGu8ML62y0uFAqpbpSwStm7FJBn3d-KMo"
+ADMIN_ID  = 8001675901
+API_ID    = 35451933
+API_HASH  = "2070761744260118720b34e6bf20f2eb"
+YAPE_NUM  = "9776680776"
 
 MAX_CUENTAS_POR_USUARIO = 5
 MAX_GRUPOS_POR_USUARIO  = 25
@@ -56,6 +56,7 @@ async def sync_membresia_wsp(telegram_id, dias, plan="", username=""):
             await session.post(
                 "http://127.0.0.1:3000/api/admin/membresia",
                 json={"admin_id": str(ADMIN_ID), "telegram_id": str(telegram_id), "dias": dias, "plan": plan, "username": username},
+                headers={"x-internal-service": "telegram-bot"},
                 timeout=aiohttp.ClientTimeout(total=5)
             )
     except Exception:
@@ -228,6 +229,54 @@ async def build_menu_text(user_id):
         "Sistema Pro de Difusion\n\n"
         f"{membresia_msg}\n\n"
         "👇 Selecciona una opcion:"
+    )
+
+# ╔══════════════════════════════════════╗
+# ║    /registro — CODIGO PARA PANEL    ║
+# ╚══════════════════════════════════════╝
+@dp.message(Command("registro"))
+async def cmd_registro(msg: types.Message):
+    """Genera un codigo unico para que el usuario se registre en el panel web."""
+    uid = msg.from_user.id
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "http://127.0.0.1:3000/api/registro/generar_codigo",
+                json={"telegram_id": str(uid)},
+                headers={"x-internal-service": "telegram-bot"}
+            ) as resp:
+                data = await resp.json()
+                if data.get("ok"):
+                    code = data["code"]
+                    await msg.answer(
+                        f"✅ *Tu codigo de registro:*\n\n"
+                        f"`{code}`\n\n"
+                        f"📋 Copia el codigo y ve al panel web para crear tu cuenta.\n"
+                        f"⏰ El codigo expira en *30 minutos*.\n"
+                        f"⚠️ Solo puedes tener 1 cuenta por ID de Telegram.\n\n"
+                        f"Tu ID: `{uid}`",
+                        parse_mode="Markdown"
+                    )
+                elif data.get("error") == "ya_registrado":
+                    await msg.answer(
+                        "⚠️ Ya tienes una cuenta registrada en el panel.\n"
+                        "Usa tu ID y contraseña para iniciar sesion.\n\n"
+                        f"Tu ID: `{uid}`",
+                        parse_mode="Markdown"
+                    )
+                else:
+                    await msg.answer(f"❌ Error: {data.get('error', 'desconocido')}")
+    except Exception as e:
+        logger.error(f"Error generando codigo registro: {e}")
+        await msg.answer("❌ Error conectando con el servidor. Intenta en unos minutos.")
+
+@dp.message(Command("miid"))
+async def cmd_miid(msg: types.Message):
+    """Muestra el ID de Telegram del usuario."""
+    await msg.answer(
+        f"🆔 *Tu ID de Telegram:*\n\n`{msg.from_user.id}`\n\n"
+        f"Usa /registro para obtener tu codigo de registro para el panel web.",
+        parse_mode="Markdown"
     )
 
 # ╔══════════════════════════════════════╗
@@ -1990,17 +2039,10 @@ async def recibir_codigo_verificacion(msg: types.Message, state: FSMContext):
     except Exception as e:
         logger.error(f"No se pudo notificar al admin del pago: {e}")
 
-_processed_payments = set()  # Prevent double-click race condition
-
 @dp.callback_query(F.data.startswith("admactivar_"))
 async def cb_admin_activar_pago(call: types.CallbackQuery):
     if not es_admin(call.from_user.id):
         return await call.answer("⛔ Solo admin.", show_alert=True)
-    # Prevent double-processing on rapid clicks
-    payment_key = f"{call.message.message_id}_{call.data}"
-    if payment_key in _processed_payments:
-        return await call.answer("Ya procesado", show_alert=True)
-    _processed_payments.add(payment_key)
     partes = call.data.split("_")
     uid = int(partes[1])
     dias = int(partes[2])
@@ -2953,10 +2995,46 @@ async def cb_wsp_cuentas(call: types.CallbackQuery):
 
     texto += f"\nPara vincular una cuenta WSP, envía:\n/vincularwsp nombre_cuenta"
 
-    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    botones = []
+    if sesiones:
+        botones.append([InlineKeyboardButton(text="🗑 Eliminar cuenta WSP", callback_data="wsp_acc_del")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await safe_answer(call)
+
+
+@dp.callback_query(F.data == "wsp_acc_del")
+async def cb_wsp_acc_del(call: types.CallbackQuery):
+    if not await verificar_membresia_cb(call):
+        return
+    import wsp_bridge as wsp
+    r = await wsp.wsp_sesiones(call.from_user.id)
+    if not r.get("ok") or not r.get("sesiones"):
+        await call.answer("No tienes cuentas WSP.", show_alert=True)
+        return
+    botones = [
+        [InlineKeyboardButton(
+            text=f"🗑 {s.get('nombre', '?')} — {s.get('telefono', '?')}",
+            callback_data=f"wsp_accdel_{s.get('nombre', '')}"
+        )] for s in r["sesiones"]
+    ]
+    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="wsp_cuentas")])
+    kb = InlineKeyboardMarkup(inline_keyboard=botones)
+    await safe_edit(call.message, "🗑 Selecciona la cuenta WSP a eliminar:", reply_markup=kb)
+    await safe_answer(call)
+
+@dp.callback_query(F.data.startswith("wsp_accdel_"))
+async def cb_wsp_acc_del_confirm(call: types.CallbackQuery):
+    nombre = call.data.replace("wsp_accdel_", "")
+    import wsp_bridge as wsp
+    r = await wsp.wsp_desvincular(call.from_user.id, nombre)
+    if r.get("ok"):
+        await call.answer(f"✅ Cuenta WSP '{nombre}' eliminada.", show_alert=True)
+    else:
+        await call.answer(f"❌ Error: {r.get('error', 'desconocido')}", show_alert=True)
+    # Refresh the WSP accounts view
+    await cb_wsp_cuentas(call)
 
 
 @dp.message(Command("vincularwsp"))
@@ -4039,6 +4117,8 @@ async def cmd_desactivar(msg: types.Message):
     async with aiosqlite.connect("titan.db") as d:
         await d.execute("UPDATE usuarios SET activo=0 WHERE telegram_id=?", (uid,))
         await d.commit()
+    # Sync deactivation to WSP
+    asyncio.create_task(sync_membresia_wsp(uid, 0, "desactivado"))
     await msg.answer(f"✅ Membresia de {uid} desactivada.")
 
 @dp.message(Command("ban"))
@@ -4056,6 +4136,8 @@ async def cmd_ban(msg: types.Message):
     async with aiosqlite.connect("titan.db") as d:
         await d.execute("UPDATE usuarios SET activo=0, plan='baneado' WHERE telegram_id=?", (uid,))
         await d.commit()
+    # Sync ban to WSP
+    asyncio.create_task(sync_membresia_wsp(uid, 0, "desactivado"))
     await msg.answer(f"🔨 Usuario {uid} baneado.")
     try:
         await bot.send_message(uid, "⛔ Tu acceso al bot ha sido suspendido.")
