@@ -289,6 +289,8 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 12. **Pausa/Reanudar en promo Todo en Uno**: Boton "Pausar" y barra de reanudacion en la seccion de promo. Usa la misma infraestructura de progreso que envio a miembros.
 13. **Promo usa config de envio del usuario**: El envio de promo a miembros ahora respeta `lote_tamano` y `lote_pausa_seg` de la config del usuario en vez de enviar sin lotes.
 14. **Fix scanning loop**: `linkAccount` ahora limpia sockets viejos (`.end()`) antes de reintentar, evitando multiples QR activos simultaneamente.
+15. **enviarAPersonales ahora soporta lotes**: La funcion `enviarAPersonales` ahora lee `getUserEnvioConfig()` para batch/delay. Si el usuario tiene configurado "10 mensajes y 5 min pausa", se aplica tambien a envios personales. Guarda progreso durante pausas de lote.
+16. **Fix promoResumeBar CSS duplicado**: El div tenia `display:none` dos veces en el style, la segunda pisaba `align-items:center`. Corregido.
 
 ## Notas Importantes para la Siguiente IA
 1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.

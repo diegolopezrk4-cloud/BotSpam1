@@ -1030,8 +1030,13 @@ async function listarChatsPersonales(botSock) {
     return chats;
 }
 
-async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta) {
+async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, batchSize, delayMinutes) {
     if (envioPersonalActivo[userId]) return false;
+    if (!batchSize) {
+        const envioConfig = db.getUserEnvioConfig(userId);
+        batchSize = envioConfig.lote_tamano || 0;
+        delayMinutes = batchSize ? Math.ceil((envioConfig.lote_pausa_seg || 300) / 60) : 0;
+    }
 
     let cancelled = false;
     const task = {
@@ -1074,9 +1079,10 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta) {
             const DELAY_MIN_P = 3000;
             const DELAY_MAX_P = 8000;
 
+            const batchInfo = batchSize ? `\n\u{1F4E6} Lotes de ${batchSize} mensajes, pausa ${delayMinutes} min entre lotes` : '';
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio\n\u23F3 Tiempo estimado: ~${Math.round(total * 5.5 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`,
+                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round(total * 5.5 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`,
                 });
             } catch (e) {}
 
@@ -1113,7 +1119,20 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta) {
                     } catch (e) {}
                 }
 
-                // Esperar 10 segundos entre cada envio
+                // Batch pause: if batch_size configured, pause every N messages
+                if (batchSize && enviados > 0 && enviados % batchSize === 0 && !cancelled) {
+                    try {
+                        await botSock.sendMessage(userId, {
+                            text: `\u23F8 Pausa de lote: ${enviados}/${total} enviados. Esperando ${delayMinutes} min...`,
+                        });
+                    } catch (e) {}
+                    // Save progress in case of cancel during pause
+                    db.guardarProgresoEnvio(userId, 'personal_' + userId, enviados, total, mensaje, chats.map(c => c.jid), 'Chats personales');
+                    await delay((delayMinutes || 5) * 60 * 1000);
+                    if (cancelled) break;
+                }
+
+                // Esperar entre cada envio
                 if (!cancelled) {
                     const cooldownP = DELAY_MIN_P + Math.floor(Math.random() * (DELAY_MAX_P - DELAY_MIN_P));
                     await delay(cooldownP);
