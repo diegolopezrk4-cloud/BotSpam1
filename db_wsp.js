@@ -573,6 +573,18 @@ function init() {
             fecha TEXT DEFAULT (datetime('now'))
         );
     `);
+    // --- REGISTRATION CODES (verificacion para crear cuenta) ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS registration_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id TEXT NOT NULL,
+            code TEXT NOT NULL UNIQUE,
+            used INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_regcodes_tgid ON registration_codes(telegram_id);
+        CREATE INDEX IF NOT EXISTS idx_regcodes_code ON registration_codes(code);
+    `);
     // --- GRUPO ACTIVIDAD (persistencia anti-duplicado) ---
     db.exec(`
         CREATE TABLE IF NOT EXISTS grupo_actividad (
@@ -2534,6 +2546,47 @@ function getAnalyticsClientesActivos(dias = 7) {
     `).all(dias);
 }
 
+// ─── REGISTRATION CODES (verificacion para crear cuenta) ───
+function generarCodigoRegistro(telegramId) {
+    // Check if user already has an account
+    const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+    if (existing) return { ok: false, error: "ya_registrado" };
+    // Invalidate any previous unused codes for this user
+    db.prepare("DELETE FROM registration_codes WHERE telegram_id = ? AND used = 0").run(String(telegramId));
+    // Generate unique 6-char alphanumeric code
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code;
+    for (let i = 0; i < 50; i++) {
+        code = 'REG-';
+        for (let j = 0; j < 6; j++) code += chars[Math.floor(Math.random() * chars.length)];
+        const dup = db.prepare("SELECT 1 FROM registration_codes WHERE code = ?").get(code);
+        if (!dup) break;
+    }
+    db.prepare("INSERT INTO registration_codes (telegram_id, code) VALUES (?, ?)").run(String(telegramId), code);
+    return { ok: true, code };
+}
+
+function verificarCodigoRegistro(code) {
+    const row = db.prepare("SELECT * FROM registration_codes WHERE code = ? AND used = 0").get(String(code).toUpperCase());
+    if (!row) return { ok: false, error: "codigo_invalido" };
+    // Code expires after 30 minutes
+    const created = new Date(row.created_at + 'Z').getTime();
+    const now = Date.now();
+    if (now - created > 30 * 60 * 1000) {
+        db.prepare("DELETE FROM registration_codes WHERE id = ?").run(row.id);
+        return { ok: false, error: "codigo_expirado" };
+    }
+    return { ok: true, telegram_id: row.telegram_id };
+}
+
+function marcarCodigoRegistroUsado(code) {
+    db.prepare("UPDATE registration_codes SET used = 1 WHERE code = ?").run(String(code).toUpperCase());
+}
+
+function limpiarCodigosRegistroExpirados() {
+    db.prepare("DELETE FROM registration_codes WHERE created_at < datetime('now', '-30 minutes')").run();
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -2639,4 +2692,6 @@ module.exports = {
     registrarBackup, getBackupLog, limpiarBackupsViejos,
     // Analytics
     getAnalyticsEnviosPorDia, getAnalyticsHorasActivas, getAnalyticsTasaPorCuenta, getAnalyticsClientesActivos,
+    // Registration codes (verificacion)
+    generarCodigoRegistro, verificarCodigoRegistro, marcarCodigoRegistroUsado, limpiarCodigosRegistroExpirados,
 };

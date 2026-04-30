@@ -313,7 +313,8 @@ poll();
             "/api/status", "/api/panel_login", "/api/panel_registro",
             "/api/panel_recuperar_solicitar", "/api/panel_recuperar_reset",
             "/api/canjear_codigo", "/api/check_membresia",
-            "/api/pagos/webhook", "/api/metodos_pago", "/api/metodos_pago/qr", "/api/push/vapid_key", "/api/health"
+            "/api/pagos/webhook", "/api/metodos_pago", "/api/metodos_pago/qr", "/api/push/vapid_key", "/api/health",
+            "/api/registro/generar_codigo"
         ];
         const isPublicEndpoint = PUBLIC_ENDPOINTS.includes(url.pathname) || url.pathname === "/api/status";
 
@@ -772,19 +773,36 @@ poll();
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
             }
+            // ─── GENERAR CODIGO REGISTRO (llamado por TG bot internamente) ───
+            if (url.pathname === "/api/registro/generar_codigo" && req.method === "POST") {
+                const body = await readBody();
+                // Only allow internal calls (from TG bot on localhost) or with internal header
+                const isInternal = getClientIp() === "127.0.0.1" || getClientIp() === "::1" || req.headers["x-internal-service"] === "telegram-bot";
+                if (!isInternal) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "solo uso interno" })); }
+                if (!body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                const r = db.generarCodigoRegistro(String(body.telegram_id));
+                res.writeHead(200);
+                return res.end(JSON.stringify(r));
+            }
+
             if (url.pathname === "/api/panel_registro" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
-                // Validate telegram_id is numeric only (no phone numbers)
-                const cleanId = String(body.telegram_id).replace(/[^0-9]/g, '');
-                if (!/^\d{5,15}$/.test(cleanId)) {
+                if (!body.codigo_registro) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta_codigo" })); }
+                if (!body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta password" })); }
+                // Verify registration code and extract telegram_id from it
+                const codeCheck = db.verificarCodigoRegistro(body.codigo_registro);
+                if (!codeCheck.ok) {
                     res.writeHead(400);
-                    return res.end(JSON.stringify({ ok: false, error: "El ID debe ser numerico (solo digitos). Usa /miid en el bot de Telegram." }));
+                    const msgs = { codigo_invalido: "Codigo invalido o ya usado", codigo_expirado: "Codigo expirado (30 min). Genera uno nuevo con /registro en el bot." };
+                    return res.end(JSON.stringify({ ok: false, error: msgs[codeCheck.error] || codeCheck.error }));
                 }
-                body.telegram_id = cleanId;
+                // Use the telegram_id from the verified code (not from user input)
+                body.telegram_id = codeCheck.telegram_id;
                 const r = db.panelRegistro(body.telegram_id, body.password, body.username || '');
                 // Sync 1-day demo to TG database
                 if (r.ok) {
+                    // Mark code as used
+                    db.marcarCodigoRegistroUsado(body.codigo_registro);
                     try {
                         const http = require("http");
                         const syncData = JSON.stringify({ telegram_id: body.telegram_id, dias: 1, plan: "demo", username: body.username || "" });
@@ -3619,6 +3637,7 @@ async function startBot() {
             db.limpiarRecoveryCodes();
             db.limpiarSessionsExpiradas();
             db.limpiarLoginAttempts();
+            db.limpiarCodigosRegistroExpirados();
         } catch (e) { console.error("Cleanup error:", e.message); }
     }, 30 * 60 * 1000);
 

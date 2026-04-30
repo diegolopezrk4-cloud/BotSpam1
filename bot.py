@@ -232,6 +232,54 @@ async def build_menu_text(user_id):
     )
 
 # ╔══════════════════════════════════════╗
+# ║    /registro — CODIGO PARA PANEL    ║
+# ╚══════════════════════════════════════╝
+@dp.message(Command("registro"))
+async def cmd_registro(msg: types.Message):
+    """Genera un codigo unico para que el usuario se registre en el panel web."""
+    uid = msg.from_user.id
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "http://127.0.0.1:3000/api/registro/generar_codigo",
+                json={"telegram_id": str(uid)},
+                headers={"x-internal-service": "telegram-bot"}
+            ) as resp:
+                data = await resp.json()
+                if data.get("ok"):
+                    code = data["code"]
+                    await msg.answer(
+                        f"✅ *Tu codigo de registro:*\n\n"
+                        f"`{code}`\n\n"
+                        f"📋 Copia el codigo y ve al panel web para crear tu cuenta.\n"
+                        f"⏰ El codigo expira en *30 minutos*.\n"
+                        f"⚠️ Solo puedes tener 1 cuenta por ID de Telegram.\n\n"
+                        f"Tu ID: `{uid}`",
+                        parse_mode="Markdown"
+                    )
+                elif data.get("error") == "ya_registrado":
+                    await msg.answer(
+                        "⚠️ Ya tienes una cuenta registrada en el panel.\n"
+                        "Usa tu ID y contraseña para iniciar sesion.\n\n"
+                        f"Tu ID: `{uid}`",
+                        parse_mode="Markdown"
+                    )
+                else:
+                    await msg.answer(f"❌ Error: {data.get('error', 'desconocido')}")
+    except Exception as e:
+        logger.error(f"Error generando codigo registro: {e}")
+        await msg.answer("❌ Error conectando con el servidor. Intenta en unos minutos.")
+
+@dp.message(Command("miid"))
+async def cmd_miid(msg: types.Message):
+    """Muestra el ID de Telegram del usuario."""
+    await msg.answer(
+        f"🆔 *Tu ID de Telegram:*\n\n`{msg.from_user.id}`\n\n"
+        f"Usa /registro para obtener tu codigo de registro para el panel web.",
+        parse_mode="Markdown"
+    )
+
+# ╔══════════════════════════════════════╗
 # ║    /start  &  MENU PRINCIPAL        ║
 # ╚══════════════════════════════════════╝
 @dp.message(Command("start"))

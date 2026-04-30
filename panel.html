@@ -319,15 +319,17 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <h1>Crear Cuenta</h1>
     <p class="subtitle">Registrate para acceder al panel — Demo 1 dia gratis</p>
     <div class="tg-id-help" id="tgIdHelp">
-      <h4>📌 Como obtener tu ID de Telegram</h4>
+      <h4>📌 Como registrarte</h4>
       <ol>
         <li>Abre Telegram y busca el bot: <a href="https://t.me/BotSpamJM_bot" target="_blank">@BotSpamJM_bot</a></li>
-        <li>Inicia el bot con /start y usa el comando /miid para obtener tu <b>ID numerico</b></li>
-        <li>Copia ese numero y pegalo aqui abajo</li>
+        <li>Envia el comando <b>/registro</b> al bot</li>
+        <li>El bot te dara un <b>codigo unico</b> (ej: REG-A3K9X2)</li>
+        <li>Pega ese codigo aqui abajo y crea tu contrasena</li>
       </ol>
-      <p style="margin-top:10px;font-size:12px;color:var(--text2)">Tambien puedes contactar al creador para ayuda: <a href="https://t.me/JhonnyVip05" target="_blank">@JhonnyVip05</a></p>
+      <p style="margin-top:10px;font-size:12px;color:var(--text2)">El codigo expira en 30 minutos. Solo puedes tener 1 cuenta por ID de Telegram.</p>
+      <p style="margin-top:5px;font-size:12px;color:var(--text2)">Contacto: <a href="https://t.me/JhonnyVip05" target="_blank">@JhonnyVip05</a></p>
     </div>
-    <input type="text" id="regId" placeholder="Ej: 8001675901 (usa /miid en el bot)" autocomplete="off" inputmode="numeric" pattern="[0-9]*">
+    <input type="text" id="regCode" placeholder="Codigo de registro (ej: REG-A3K9X2)" autocomplete="off" style="text-transform:uppercase">
     <input type="text" id="regUsername" placeholder="Nombre de usuario" autocomplete="off">
     <input type="password" id="regPass" placeholder="Crear contrasena">
     <input type="password" id="regPass2" placeholder="Confirmar contrasena">
@@ -1880,24 +1882,21 @@ async function doLogin(){
 }
 
 async function doRegister(){
-  const id=$('regId').value.trim().replace(/[^0-9]/g,''),username=$('regUsername').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
+  const codigo=$('regCode').value.trim().toUpperCase(),username=$('regUsername').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
   hideMsg('regError');hideMsg('regSuccess');
-  if(!id||!username||!pass){showErr('regError','Completa todos los campos');return}
-  if(!/^\d{5,15}$/.test(id)){showErr('regError','El ID debe ser numerico (solo digitos, sin + ni espacios). Usa /miid en el bot para obtenerlo.');return}
-  if(id.startsWith('51')||id.startsWith('1')||id.startsWith('34')){
-    if(id.length>=9&&id.length<=12){showErr('regError','Eso parece un numero de telefono, no un Telegram ID. Usa el comando /miid en el bot de Telegram para obtener tu ID.');return}
-  }
+  if(!codigo||!username||!pass){showErr('regError','Completa todos los campos');return}
+  if(!/^REG-[A-Z0-9]{6}$/.test(codigo)){showErr('regError','Codigo invalido. Debe ser formato REG-XXXXXX. Usa /registro en el bot de Telegram.');return}
   if(pass.length<4){showErr('regError','La contrasena debe tener minimo 4 caracteres');return}
   if(pass!==pass2){showErr('regError','Las contrasenas no coinciden');return}
-  $('btnRegister').disabled=true;$('btnRegister').textContent='Registrando...';
-  const r=await api('/api/panel_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id,password:pass,username})});
+  $('btnRegister').disabled=true;$('btnRegister').textContent='Verificando codigo...';
+  const r=await api('/api/panel_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codigo_registro:codigo,password:pass,username})});
   $('btnRegister').disabled=false;$('btnRegister').textContent='Registrarse';
   if(!r.ok){
-    const msgs={'ya_registrado':'Ya tienes cuenta. Inicia sesion.'};
+    const msgs={'ya_registrado':'Ya tienes cuenta con este ID. Inicia sesion.','falta_codigo':'Necesitas un codigo. Usa /registro en el bot de Telegram.'};
     showErr('regError',msgs[r.error]||r.error||'Error');return;
   }
   showMsg('regSuccess','Registro exitoso! Demo de 1 dia activado. Inicia sesion.');
-  setTimeout(()=>{showLogin();$('loginId').value=id},2000);
+  setTimeout(()=>{showLogin()},2000);
 }
 
 function doLogout(){
