@@ -34,9 +34,9 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 ## Archivos Principales
 | Archivo | Descripcion | Lineas aprox |
 |---|---|---|
-| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~4580 |
-| `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~4620 |
-| `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2070 |
+| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~5000 |
+| `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~5100 |
+| `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2375 |
 | `motor_wsp.js` | Motor de envio WhatsApp | ~74000 |
 | `panel_server.js` | Servidor web que sirve panel.html y proxea APIs | ~100 |
 | `bot.py` | Bot de Telegram (comandos + API) | ~178000 |
@@ -200,6 +200,8 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 | 34 | Admin Panel | sec-admin | admin-only | Gestion de usuarios |
 | 35 | **Sellers** | sec-sellers | admin-only | **NUEVO**: Crear/editar/eliminar sellers |
 | 36 | Logs Global | sec-adminlogs | admin-only | Logs de todos los usuarios |
+| 37 | **Pagar Membresia** | sec-pagos | Ambas | **NUEVO**: Pagar con Binance Pay o comprobante manual |
+| 38 | **Gestion de Pagos** | sec-adminpagos | admin-only | **NUEVO**: Ver/aprobar comprobantes, stats, config metodos de pago |
 
 ## Endpoints API Completos
 ### Sellers (NUEVOS)
@@ -256,6 +258,9 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 - **`sellers`** — Revendedores (telegram_id, nombre, max_invites, periodo, plan_dias, plan_tipo, activo)
 - **`seller_invites`** — Invitaciones de sellers (seller_id, invitado_telegram_id, plan_dias, plan_tipo, fecha)
 - **`seller_codes`** — Codigos de activacion (seller_id, codigo, plan_dias, plan_tipo, usado, usado_por, fecha_creado, fecha_usado)
+- **`pagos`** — Pagos con Binance Pay (user_id, merchant_trade_no, prepay_id, plan_key, plan_dias, monto_usdt, estado, checkout_url, fecha_creado, fecha_pagado)
+- **`comprobantes`** — Comprobantes de pago manual (user_id, plan_key, metodo_pago, monto, imagen_path, estado, revisado_por, fecha_creado, fecha_revisado)
+- **`metodos_pago`** — Metodos de pago configurables por admin (tipo, nombre, valor, instrucciones, activo, orden)
 
 ## Flujo del Sistema de Sellers
 1. **Admin** crea un seller en Admin > Sellers (Telegram ID, nombre, limite, periodo, plan)
@@ -335,8 +340,8 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 ## Mejoras Futuras (Ideas para Implementar)
 
 ### Prioridad Alta
-1. **Sistema de pagos automatico (Binance Pay)** — Crear ordenes de pago → webhook confirma → activa membresia automatica. Requiere API Key de Binance.
-2. **Sistema de pagos manual (Yape)** — Cliente sube comprobante → admin/seller aprueba → se activa. Seccion nueva "Pagos Pendientes" para admin.
+1. ~~**Sistema de pagos automatico (Binance Pay)**~~ — **IMPLEMENTADO** (ver seccion "Sistema de Pagos" abajo)
+2. ~~**Sistema de pagos manual (Yape/comprobantes)**~~ — **IMPLEMENTADO** (ver seccion "Sistema de Pagos" abajo)
 3. **Notificaciones push reales** — Usar Web Push API con VAPID keys para notificar envios completados, campanas terminadas, membresia por expirar.
 4. **Panel de analytics avanzado** — Graficos de envios/dia, tasa de entrega por cuenta, horas mas activas, clientes mas activos. Chart.js ya importado.
 
@@ -422,5 +427,92 @@ Confirmo que entiendo la arquitectura:
 
 ## Comando de Actualizacion
 ```bash
-cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777527661-security-roles-fixes && npm install && bash start.sh
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777531999-all-improvements-sync && npm install && bash start.sh
 ```
+
+---
+
+## Sistema de Pagos (PR #27 — Nuevo)
+
+### Arquitectura de Pagos
+Dos sistemas de pago integrados que comparten la misma UI y auto-activan membresia:
+
+#### 1. Binance Pay (Crypto automatico)
+- **Flujo**: Cliente selecciona plan → se crea orden en Binance Pay API → se abre checkout → Binance envia webhook cuando paga → se activa membresia automaticamente → se sincroniza a TG
+- **Config**: `config_wsp.js` > `BINANCE_PAY` > `API_KEY` + `API_SECRET` (obtener en merchant.binance.com)
+- **Precios USDT**: Cada plan tiene `precio_usdt` en `config_wsp.js` > `PLANES`
+- **Firma**: HMAC-SHA512 segun spec de Binance Pay API v2
+
+#### 2. Pago Manual (Yape, Plin, transferencia)
+- **Flujo**: Cliente ve metodos de pago con numeros/cuentas → hace el pago → sube foto del comprobante desde el panel → admin ve notificacion → aprueba o rechaza → si aprueba, se activa membresia automaticamente → se sincroniza a TG
+- **Imagenes**: Se guardan en carpeta `comprobantes/` con formato `{userId}_{timestamp}.{ext}`
+- **Numero para comprobantes**: +51976680776 (configurable desde panel admin)
+
+### Panel del Cliente ("Pagar Membresia")
+- Cards con planes disponibles (diario/semanal/mensual) con precios en Soles y USDT
+- Boton "Pagar con Crypto" (si Binance configurado) → abre checkout de Binance en nueva pestaña, polling cada 5s para detectar pago
+- Boton "Pago Manual" → modal con seleccion de metodo, monto, subida de imagen de comprobante, nota
+- Numeros/cuentas con click para copiar al portapapeles
+- Historial de pagos del usuario con estado (pendiente/aprobado/rechazado)
+
+### Panel Admin ("Gestion de Pagos")
+- **Stats**: Pagos crypto totales (USDT), comprobantes aprobados, pendientes, aprobados hoy
+- **Tab Pendientes**: Tabla con comprobantes esperando revision, botones aprobar/rechazar, ver imagen
+- **Tab Todos**: Historial completo de comprobantes
+- **Tab Crypto**: Historial de pagos Binance Pay con estado
+- **Tab Metodos de Pago**: CRUD completo — crear, editar, eliminar, activar/desactivar metodos de pago
+  - Tipos: Yape, Plin, Transferencia, Binance P2P, Otro
+  - Cada metodo tiene: nombre, valor (numero/wallet), instrucciones, activo/inactivo
+  - Se crea Yape por defecto al iniciar
+
+### Endpoints de Pagos
+| Endpoint | Metodo | Descripcion |
+|---|---|---|
+| `/api/pagos/planes` | GET | Lista planes con precios USDT + info si Binance esta habilitado |
+| `/api/pagos/crear` | POST | Crea orden de pago en Binance Pay `{plan, u}` |
+| `/api/pagos/webhook` | POST | Webhook de Binance Pay (publico, sin auth) — recibe notificacion de pago |
+| `/api/pagos/estado` | GET | Estado de un pago `?order=MERCHANT_TRADE_NO` |
+| `/api/pagos/historial` | GET | Historial de pagos del usuario `?u=USER_ID` |
+| `/api/pagos/consultar` | POST | Consulta estado en Binance API + sync local `{merchant_trade_no}` |
+| `/api/admin/pagos` | GET | Admin: todos los pagos crypto + stats `?u=ADMIN_ID` |
+| `/api/metodos_pago` | GET | Lista metodos de pago activos (publico) |
+| `/api/comprobante/subir` | POST | Cliente sube comprobante `{plan, metodo_pago, monto, imagen_base64, nota, u}` |
+| `/api/comprobante/historial` | GET | Historial de comprobantes del usuario `?u=USER_ID` |
+| `/api/comprobante/imagen` | GET | Servir imagen del comprobante `?id=ID&admin=ADMIN_ID` |
+| `/api/admin/comprobantes` | GET | Admin: todos los comprobantes + stats `?u=ADMIN_ID&filter=pendientes` |
+| `/api/admin/comprobante/aprobar` | POST | Admin aprueba comprobante (auto-activa membresia) `{admin_id, id}` |
+| `/api/admin/comprobante/rechazar` | POST | Admin rechaza comprobante `{admin_id, id, nota}` |
+| `/api/admin/metodos_pago` | GET | Admin: lista todos los metodos `?u=ADMIN_ID` |
+| `/api/admin/metodos_pago/crear` | POST | Crear metodo `{admin_id, tipo, nombre, valor, instrucciones}` |
+| `/api/admin/metodos_pago/editar` | POST | Editar metodo `{admin_id, id, nombre, valor, instrucciones, activo}` |
+| `/api/admin/metodos_pago/eliminar` | POST | Eliminar metodo `{admin_id, id}` |
+
+### Configuracion de Binance Pay
+1. Registrarse como merchant en [merchant.binance.com](https://merchant.binance.com)
+2. Crear API Key en Developer → API Keys
+3. Editar `config_wsp.js`:
+```javascript
+BINANCE_PAY: {
+    API_KEY: "tu-api-key-aqui",
+    API_SECRET: "tu-secret-aqui",
+    ...
+}
+```
+4. Configurar webhook URL en Binance Merchant Admin: `https://tu-dominio.com/api/pagos/webhook`
+5. Reiniciar el bot
+
+### Sync de Pagos a Telegram
+Cuando un pago es confirmado (automatico por Binance webhook o manual por admin), se sincroniza la activacion de membresia al bot de Telegram via `POST /api/tg/sync_membresia` en puerto 3002.
+
+---
+
+## Mejoras de PR #27 (Sync + Seguridad + Pagos)
+
+### Sync TG <-> WSP
+47. **Bot TG no podia eliminar cuentas WSP**: Faltaba boton y bridge function. Fix: agregado wsp_desvincular en wsp_bridge.py + handlers en bot.py
+48. **/desactivar y /ban en TG no sincronizaban a WSP**: Comandos admin solo desactivaban en TG. Fix: agregado sync a WSP via wsp_admin_desactivar/wsp_admin_ban
+49. **Llamadas del TG bot al WSP API fallaban 401**: El middleware de auth bloqueaba requests internas del bot TG. Fix: excepcion para requests localhost + header x-internal-service ("telegram-bot")
+50. **POST endpoints no verificaban privilegios**: Solo GET validaba que el usuario pidiera sus propios datos. Fix: verifyPostUser() en POST endpoints
+
+### Seguridad Adicional
+51. **XSS en admin panel, sellers, codigos**: Datos de usuario insertados en innerHTML sin esc(). Fix: esc() aplicado sistematicamente en todas las generaciones de HTML con datos de usuario

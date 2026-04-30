@@ -572,6 +572,58 @@ function init() {
             grupo_jid TEXT PRIMARY KEY,
             ultima_actividad TEXT DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS pagos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            merchant_trade_no TEXT UNIQUE NOT NULL,
+            prepay_id TEXT DEFAULT NULL,
+            plan_key TEXT NOT NULL,
+            plan_dias INTEGER NOT NULL,
+            monto_usdt REAL NOT NULL,
+            currency TEXT DEFAULT 'USDT',
+            estado TEXT DEFAULT 'pending',
+            binance_transaction_id TEXT DEFAULT NULL,
+            checkout_url TEXT DEFAULT NULL,
+            qrcode_url TEXT DEFAULT NULL,
+            universal_url TEXT DEFAULT NULL,
+            deep_link TEXT DEFAULT NULL,
+            pass_through_info TEXT DEFAULT NULL,
+            fecha_creado TEXT DEFAULT (datetime('now')),
+            fecha_pagado TEXT DEFAULT NULL,
+            fecha_expirado TEXT DEFAULT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_pagos_user ON pagos(user_id);
+        CREATE INDEX IF NOT EXISTS idx_pagos_merchant ON pagos(merchant_trade_no);
+        CREATE INDEX IF NOT EXISTS idx_pagos_estado ON pagos(estado);
+
+        CREATE TABLE IF NOT EXISTS comprobantes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            plan_key TEXT NOT NULL,
+            plan_dias INTEGER NOT NULL,
+            metodo_pago TEXT NOT NULL DEFAULT 'yape',
+            monto TEXT DEFAULT '',
+            imagen_path TEXT DEFAULT NULL,
+            nota_cliente TEXT DEFAULT '',
+            estado TEXT DEFAULT 'pendiente',
+            admin_nota TEXT DEFAULT '',
+            revisado_por TEXT DEFAULT NULL,
+            fecha_creado TEXT DEFAULT (datetime('now')),
+            fecha_revisado TEXT DEFAULT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_comprobantes_user ON comprobantes(user_id);
+        CREATE INDEX IF NOT EXISTS idx_comprobantes_estado ON comprobantes(estado);
+
+        CREATE TABLE IF NOT EXISTS metodos_pago (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT NOT NULL,
+            nombre TEXT NOT NULL,
+            valor TEXT NOT NULL,
+            instrucciones TEXT DEFAULT '',
+            activo INTEGER DEFAULT 1,
+            orden INTEGER DEFAULT 0
+        );
     `);
     console.log("\u2705 Base de datos WSP inicializada");
 }
@@ -2091,6 +2143,143 @@ function eliminarSellerCode(codeId, sellerId) {
     db.prepare("DELETE FROM seller_codes WHERE id = ? AND seller_id = ? AND usado = 0").run(codeId, sellerId);
 }
 
+// ─────────────────────────────────────────
+//   PAGOS (Binance Pay)
+// ─────────────────────────────────────────
+
+function crearPago(userId, merchantTradeNo, planKey, planDias, montoUsdt) {
+    db.prepare(`INSERT INTO pagos (user_id, merchant_trade_no, plan_key, plan_dias, monto_usdt) VALUES (?, ?, ?, ?, ?)`).run(
+        String(userId), merchantTradeNo, planKey, planDias, montoUsdt
+    );
+    return db.prepare("SELECT * FROM pagos WHERE merchant_trade_no = ?").get(merchantTradeNo);
+}
+
+function getPago(merchantTradeNo) {
+    return db.prepare("SELECT * FROM pagos WHERE merchant_trade_no = ?").get(merchantTradeNo);
+}
+
+function getPagoPorPrepayId(prepayId) {
+    return db.prepare("SELECT * FROM pagos WHERE prepay_id = ?").get(prepayId);
+}
+
+function actualizarPagoPrepay(merchantTradeNo, prepayId, checkoutUrl, qrcodeUrl, universalUrl, deepLink) {
+    db.prepare(`UPDATE pagos SET prepay_id = ?, checkout_url = ?, qrcode_url = ?, universal_url = ?, deep_link = ? WHERE merchant_trade_no = ?`).run(
+        prepayId, checkoutUrl || null, qrcodeUrl || null, universalUrl || null, deepLink || null, merchantTradeNo
+    );
+}
+
+function marcarPagoPagado(merchantTradeNo, transactionId) {
+    db.prepare(`UPDATE pagos SET estado = 'paid', binance_transaction_id = ?, fecha_pagado = datetime('now') WHERE merchant_trade_no = ?`).run(
+        transactionId || null, merchantTradeNo
+    );
+    return db.prepare("SELECT * FROM pagos WHERE merchant_trade_no = ?").get(merchantTradeNo);
+}
+
+function marcarPagoExpirado(merchantTradeNo) {
+    db.prepare(`UPDATE pagos SET estado = 'expired', fecha_expirado = datetime('now') WHERE merchant_trade_no = ? AND estado = 'pending'`).run(merchantTradeNo);
+}
+
+function marcarPagoCancelado(merchantTradeNo) {
+    db.prepare(`UPDATE pagos SET estado = 'cancelled' WHERE merchant_trade_no = ? AND estado = 'pending'`).run(merchantTradeNo);
+}
+
+function getPagosUsuario(userId) {
+    return db.prepare("SELECT * FROM pagos WHERE user_id = ? ORDER BY fecha_creado DESC LIMIT 50").all(String(userId));
+}
+
+function getPagosPendientes(userId) {
+    return db.prepare("SELECT * FROM pagos WHERE user_id = ? AND estado = 'pending' ORDER BY fecha_creado DESC").all(String(userId));
+}
+
+function getTodosPagosAdmin(limit = 100) {
+    return db.prepare("SELECT * FROM pagos ORDER BY fecha_creado DESC LIMIT ?").all(limit);
+}
+
+function getPagosStats() {
+    const total = db.prepare("SELECT COUNT(*) as count, SUM(monto_usdt) as total_usdt FROM pagos WHERE estado = 'paid'").get();
+    const hoy = db.prepare("SELECT COUNT(*) as count, SUM(monto_usdt) as total_usdt FROM pagos WHERE estado = 'paid' AND fecha_pagado >= date('now')").get();
+    const pendientes = db.prepare("SELECT COUNT(*) as count FROM pagos WHERE estado = 'pending'").get();
+    return { total_pagos: total.count || 0, total_usdt: total.total_usdt || 0, hoy_pagos: hoy.count || 0, hoy_usdt: hoy.total_usdt || 0, pendientes: pendientes.count || 0 };
+}
+
+// ─────────────────────────────────────────
+//   COMPROBANTES (Pago manual)
+// ─────────────────────────────────────────
+
+function crearComprobante(userId, planKey, planDias, metodoPago, monto, imagenPath, notaCliente) {
+    db.prepare(`INSERT INTO comprobantes (user_id, plan_key, plan_dias, metodo_pago, monto, imagen_path, nota_cliente) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+        String(userId), planKey, planDias, metodoPago, monto || '', imagenPath || null, notaCliente || ''
+    );
+    return db.prepare("SELECT * FROM comprobantes WHERE user_id = ? ORDER BY id DESC LIMIT 1").get(String(userId));
+}
+
+function getComprobante(id) {
+    return db.prepare("SELECT * FROM comprobantes WHERE id = ?").get(id);
+}
+
+function getComprobantesUsuario(userId) {
+    return db.prepare("SELECT * FROM comprobantes WHERE user_id = ? ORDER BY fecha_creado DESC LIMIT 50").all(String(userId));
+}
+
+function getComprobantesPendientes() {
+    return db.prepare("SELECT * FROM comprobantes WHERE estado = 'pendiente' ORDER BY fecha_creado ASC").all();
+}
+
+function getTodosComprobantes(limit = 100) {
+    return db.prepare("SELECT * FROM comprobantes ORDER BY fecha_creado DESC LIMIT ?").all(limit);
+}
+
+function aprobarComprobante(id, adminId) {
+    db.prepare(`UPDATE comprobantes SET estado = 'aprobado', revisado_por = ?, fecha_revisado = datetime('now') WHERE id = ? AND estado = 'pendiente'`).run(String(adminId), id);
+    return db.prepare("SELECT * FROM comprobantes WHERE id = ?").get(id);
+}
+
+function rechazarComprobante(id, adminId, adminNota) {
+    db.prepare(`UPDATE comprobantes SET estado = 'rechazado', revisado_por = ?, admin_nota = ?, fecha_revisado = datetime('now') WHERE id = ? AND estado = 'pendiente'`).run(String(adminId), adminNota || '', id);
+    return db.prepare("SELECT * FROM comprobantes WHERE id = ?").get(id);
+}
+
+function getComprobantesStats() {
+    const total = db.prepare("SELECT COUNT(*) as count FROM comprobantes WHERE estado = 'aprobado'").get();
+    const pendientes = db.prepare("SELECT COUNT(*) as count FROM comprobantes WHERE estado = 'pendiente'").get();
+    const hoy = db.prepare("SELECT COUNT(*) as count FROM comprobantes WHERE estado = 'aprobado' AND fecha_revisado >= date('now')").get();
+    return { total_aprobados: total.count || 0, pendientes: pendientes.count || 0, hoy_aprobados: hoy.count || 0 };
+}
+
+// ─────────────────────────────────────────
+//   METODOS DE PAGO (Admin configurable)
+// ─────────────────────────────────────────
+
+function getMetodosPago() {
+    return db.prepare("SELECT * FROM metodos_pago ORDER BY orden ASC, id ASC").all();
+}
+
+function getMetodosPagoActivos() {
+    return db.prepare("SELECT * FROM metodos_pago WHERE activo = 1 ORDER BY orden ASC, id ASC").all();
+}
+
+function crearMetodoPago(tipo, nombre, valor, instrucciones) {
+    db.prepare("INSERT INTO metodos_pago (tipo, nombre, valor, instrucciones) VALUES (?, ?, ?, ?)").run(tipo, nombre, valor, instrucciones || '');
+    return db.prepare("SELECT * FROM metodos_pago ORDER BY id DESC LIMIT 1").get();
+}
+
+function editarMetodoPago(id, nombre, valor, instrucciones, activo) {
+    db.prepare("UPDATE metodos_pago SET nombre = ?, valor = ?, instrucciones = ?, activo = ? WHERE id = ?").run(nombre, valor, instrucciones || '', activo ? 1 : 0, id);
+}
+
+function eliminarMetodoPago(id) {
+    db.prepare("DELETE FROM metodos_pago WHERE id = ?").run(id);
+}
+
+function initDefaultMetodosPago() {
+    const count = db.prepare("SELECT COUNT(*) as c FROM metodos_pago").get();
+    if (count.c === 0) {
+        db.prepare("INSERT INTO metodos_pago (tipo, nombre, valor, instrucciones, orden) VALUES (?, ?, ?, ?, ?)").run(
+            'yape', 'Yape', config.YAPE_NUM || '976680776', 'Enviar al numero y subir captura del comprobante', 1
+        );
+    }
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -2174,4 +2363,13 @@ module.exports = {
     getSellerInvitesCount, getSellerInvites, registrarSellerInvite, isSellerUser,
     // Seller codes
     generarSellerCode, getSellerCodes, getSellerCodesPendientes, canjearSellerCode, eliminarSellerCode,
+    // Pagos (Binance Pay)
+    crearPago, getPago, getPagoPorPrepayId, actualizarPagoPrepay,
+    marcarPagoPagado, marcarPagoExpirado, marcarPagoCancelado,
+    getPagosUsuario, getPagosPendientes, getTodosPagosAdmin, getPagosStats,
+    // Comprobantes (pago manual)
+    crearComprobante, getComprobante, getComprobantesUsuario, getComprobantesPendientes,
+    getTodosComprobantes, aprobarComprobante, rechazarComprobante, getComprobantesStats,
+    // Metodos de pago (admin configurable)
+    getMetodosPago, getMetodosPagoActivos, crearMetodoPago, editarMetodoPago, eliminarMetodoPago, initDefaultMetodosPago,
 };

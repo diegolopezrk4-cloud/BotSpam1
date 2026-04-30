@@ -443,6 +443,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas y DMs</span></a>
       <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
       <a href="#" data-section="canjear"><span class="icon">🎫</span><span>Canjear Codigo</span></a>
+      <a href="#" data-section="pagos"><span class="icon">💳</span><span>Pagar Membresia</span></a>
       <div class="nav-group seller-only" style="display:none">Seller</div>
       <a href="#" data-section="sellerpanel" class="seller-only" style="display:none"><span class="icon">🏪</span><span>Panel Seller</span></a>
       <div class="nav-group admin-only" style="display:none">Admin</div>
@@ -450,6 +451,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <a href="#" data-section="sellers" class="admin-only" style="display:none"><span class="icon">🏪</span><span>Sellers</span></a>
       <a href="#" data-section="adminlogs" class="admin-only" style="display:none"><span class="icon">📋</span><span>Logs Global</span></a>
       <a href="#" data-section="auditoria" class="admin-only" style="display:none"><span class="icon">🔍</span><span>Auditoria</span></a>
+      <a href="#" data-section="adminpagos" class="admin-only" style="display:none"><span class="icon">💰</span><span>Pagos</span></a>
     </nav>
     <div class="bottom-actions">
       <button onclick="showCambiarPass()">🔑 <span>Cambiar Contrasena</span></button>
@@ -1306,6 +1308,19 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       </div>
     </div>
 
+    <!-- PAGOS (Binance Pay) -->
+    <div class="section" id="sec-pagos">
+      <h2>💳 Pagar Membresia</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Paga tu membresia con criptomonedas via Binance Pay (USDT).</p>
+      <div id="pagosContent"><div class="loading-dots"><span></span><span></span><span></span></div></div>
+    </div>
+
+    <!-- ADMIN: PAGOS -->
+    <div class="section" id="sec-adminpagos">
+      <h2>💰 Gestion de Pagos</h2>
+      <div id="adminPagosContent"><div class="loading-dots"><span></span><span></span><span></span></div></div>
+    </div>
+
     <!-- CUENTAS TELEGRAM -->
     <div class="section" id="sec-cuentastg">
       <h2>✈️ Cuentas Telegram</h2>
@@ -1927,7 +1942,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoMsgSelect');checkPromoEnvioProgreso()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,auditoria:loadAuditoria,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){}};
+    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoMsgSelect');checkPromoEnvioProgreso()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,auditoria:loadAuditoria,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){},pagos:loadPagos,adminpagos:loadAdminPagos};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -3944,6 +3959,293 @@ async function canjearCodigo(){
   }
 }
 
+// --- PAGOS (Binance Pay + Manual) ---
+let _pagosPlanes=null;
+async function loadPagos(){
+  const el=$('pagosContent');
+  el.innerHTML='<div class="loading-dots"><span></span><span></span><span></span></div>';
+  const [planesR,metodosR,histR]=await Promise.all([
+    api('/api/pagos/planes'),
+    api('/api/metodos_pago'),
+    api('/api/comprobante/historial?u='+userId)
+  ]);
+  const planes=planesR.ok?planesR.planes:{};
+  _pagosPlanes=planes;
+  const metodos=metodosR.ok?metodosR.metodos:[];
+  const comprobantes=histR.ok?histR.comprobantes:[];
+  const binanceEnabled=planesR.binance_enabled;
+  let h='';
+  // Plans cards
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:15px;margin-bottom:25px">';
+  for(const[key,p]of Object.entries(planes)){
+    h+=`<div style="background:var(--card);border:2px solid var(--accent);border-radius:12px;padding:20px;text-align:center">
+      <div style="font-size:32px;margin-bottom:8px">${esc(p.emoji||'')}</div>
+      <div style="font-size:18px;font-weight:bold;text-transform:capitalize">${esc(key)}</div>
+      <div style="color:var(--text2);margin:5px 0">${p.dias} dias</div>
+      <div style="font-size:20px;font-weight:bold;color:var(--primary)">${esc(p.precio)}</div>
+      ${p.precio_usdt?`<div style="font-size:14px;color:var(--text2)">${p.precio_usdt} USDT</div>`:''}
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+        ${binanceEnabled?`<button class="btn btn-success btn-sm" onclick="pagarBinance('${esc(key)}')">💳 Pagar con Crypto</button>`:''}
+        ${metodos.length?`<button class="btn btn-primary btn-sm" onclick="pagarManual('${esc(key)}')">📱 Pago Manual</button>`:''}
+      </div>
+    </div>`;
+  }
+  h+='</div>';
+  // Payment methods info
+  if(metodos.length){
+    h+='<div style="background:var(--card);border-radius:10px;padding:15px;margin-bottom:20px;border:1px solid var(--accent)">';
+    h+='<h3 style="margin-bottom:10px">📱 Metodos de Pago Manual</h3>';
+    metodos.forEach(m=>{
+      h+=`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--accent)">
+        <span style="font-size:20px">${m.tipo==='yape'?'📲':m.tipo==='binance'?'🪙':'💳'}</span>
+        <div><b>${esc(m.nombre)}</b>: <code style="background:var(--bg);padding:2px 8px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText('${esc(m.valor)}');toast('Copiado!','success')">${esc(m.valor)}</code>
+        ${m.instrucciones?`<div style="font-size:12px;color:var(--text2)">${esc(m.instrucciones)}</div>`:''}</div>
+      </div>`;
+    });
+    h+='</div>';
+  }
+  // Comprobante history
+  if(comprobantes.length){
+    h+='<div class="table-wrap"><div class="table-header"><h3>📋 Historial de Pagos</h3></div><table><thead><tr><th>#</th><th>Plan</th><th>Metodo</th><th>Estado</th><th>Fecha</th></tr></thead><tbody>';
+    comprobantes.forEach((c,i)=>{
+      const badge=c.estado==='aprobado'?'badge-success':c.estado==='rechazado'?'badge-danger':'badge-warning';
+      h+=`<tr><td>${i+1}</td><td>${esc(c.plan_key)}</td><td>${esc(c.metodo_pago)}</td><td><span class="badge ${badge}">${esc(c.estado)}</span></td><td style="font-size:11px">${c.fecha_creado||'-'}</td></tr>`;
+    });
+    h+='</tbody></table></div>';
+  }
+  el.innerHTML=h;
+}
+
+async function pagarBinance(planKey){
+  const r=await api('/api/pagos/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({plan:planKey,u:userId})});
+  if(r.ok&&r.checkout_url){
+    window.open(r.checkout_url,'_blank');
+    toast('Redirigiendo a Binance Pay...','success');
+    // Poll status
+    pollPagoStatus(r.merchant_trade_no);
+  }else{
+    toast(r.error||'Error al crear orden','error');
+  }
+}
+
+function pollPagoStatus(merchantTradeNo){
+  let checks=0;
+  const interval=setInterval(async()=>{
+    checks++;
+    if(checks>60){clearInterval(interval);return}
+    const r=await api('/api/pagos/estado?order='+merchantTradeNo);
+    if(r.ok&&r.pago){
+      if(r.pago.estado==='paid'){
+        clearInterval(interval);
+        toast('Pago confirmado! Membresia activada.','success');
+        loadPagos();
+      }else if(r.pago.estado==='expired'||r.pago.estado==='cancelled'){
+        clearInterval(interval);
+        toast('La orden ha expirado o fue cancelada.','error');
+      }
+    }
+  },5000);
+}
+
+async function pagarManual(planKey){
+  const metodosR=await api('/api/metodos_pago');
+  const metodos=metodosR.ok?metodosR.metodos:[];
+  if(!metodos.length){toast('No hay metodos de pago configurados','error');return}
+  const plan=_pagosPlanes?_pagosPlanes[planKey]:null;
+  let mOpts='';
+  metodos.forEach(m=>{mOpts+=`<option value="${esc(m.nombre)}">${esc(m.nombre)} — ${esc(m.valor)}</option>`});
+  showModal(`<h3>📱 Pago Manual — Plan ${esc(planKey)}</h3>
+    <p style="margin-bottom:10px">Precio: <b>${plan?esc(plan.precio):'N/A'}</b></p>
+    <div class="form-group"><label>Metodo de pago</label><select id="pagoMetodoSel">${mOpts}</select></div>
+    <div class="form-group"><label>Monto pagado</label><input type="text" id="pagoMonto" value="${plan?esc(plan.precio):''}" placeholder="Monto"></div>
+    <div class="form-group"><label>Comprobante (imagen)</label><input type="file" id="pagoImagen" accept="image/*"></div>
+    <div class="form-group"><label>Nota (opcional)</label><input type="text" id="pagoNota" placeholder="Ej: Pague desde otro numero"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-success" onclick="enviarComprobante('${esc(planKey)}')">📤 Enviar Comprobante</button>
+    </div>`);
+}
+
+async function enviarComprobante(planKey){
+  const metodo=$('pagoMetodoSel').value;
+  const monto=$('pagoMonto').value;
+  const nota=$('pagoNota').value;
+  const fileInput=$('pagoImagen');
+  const file=fileInput&&fileInput.files[0];
+  if(!file){toast('Sube una imagen del comprobante','error');return}
+  const reader=new FileReader();
+  reader.onload=async function(){
+    const base64=reader.result.split(',')[1];
+    const r=await api('/api/comprobante/subir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({plan:planKey,metodo_pago:metodo,monto:monto,nota:nota,imagen_base64:base64,u:userId})});
+    if(r.ok){
+      closeModal();
+      toast('Comprobante enviado! Sera revisado pronto.','success');
+      loadPagos();
+    }else{
+      toast(r.error||'Error al enviar','error');
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+// --- ADMIN PAGOS ---
+async function loadAdminPagos(){
+  const el=$('adminPagosContent');
+  el.innerHTML='<div class="loading-dots"><span></span><span></span><span></span></div>';
+  const [pagosR,compR,metodosR]=await Promise.all([
+    api('/api/admin/pagos?u='+userId),
+    api('/api/admin/comprobantes?u='+userId),
+    api('/api/admin/metodos_pago?u='+userId)
+  ]);
+  let h='';
+  // Stats
+  const pStats=pagosR.ok?pagosR.stats:{};
+  const cStats=compR.ok?compR.stats:{};
+  h+=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px">
+    <div style="background:var(--card);padding:15px;border-radius:10px;text-align:center;border:1px solid var(--accent)">
+      <div style="font-size:24px;font-weight:bold;color:var(--success)">${pStats.total_pagos||0}</div><div style="font-size:12px;color:var(--text2)">Pagos Crypto</div>
+      <div style="font-size:14px;color:var(--primary)">${(pStats.total_usdt||0).toFixed(2)} USDT</div>
+    </div>
+    <div style="background:var(--card);padding:15px;border-radius:10px;text-align:center;border:1px solid var(--accent)">
+      <div style="font-size:24px;font-weight:bold;color:var(--success)">${cStats.total_aprobados||0}</div><div style="font-size:12px;color:var(--text2)">Comprobantes Aprobados</div>
+    </div>
+    <div style="background:var(--card);padding:15px;border-radius:10px;text-align:center;border:1px solid var(--warning)">
+      <div style="font-size:24px;font-weight:bold;color:var(--warning)">${cStats.pendientes||0}</div><div style="font-size:12px;color:var(--text2)">Pendientes</div>
+    </div>
+    <div style="background:var(--card);padding:15px;border-radius:10px;text-align:center;border:1px solid var(--accent)">
+      <div style="font-size:24px;font-weight:bold">${cStats.hoy_aprobados||0}</div><div style="font-size:12px;color:var(--text2)">Aprobados Hoy</div>
+    </div>
+  </div>`;
+  // Tabs
+  h+=`<div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap">
+    <button class="btn btn-primary btn-sm" onclick="adminPagosTab('pendientes')">📋 Pendientes (${cStats.pendientes||0})</button>
+    <button class="btn btn-outline btn-sm" onclick="adminPagosTab('todos')">📊 Todos los Comprobantes</button>
+    <button class="btn btn-outline btn-sm" onclick="adminPagosTab('crypto')">💳 Pagos Crypto</button>
+    <button class="btn btn-outline btn-sm" onclick="adminPagosTab('metodos')">⚙️ Metodos de Pago</button>
+  </div>`;
+  h+='<div id="adminPagosTabContent"></div>';
+  el.innerHTML=h;
+  adminPagosTab('pendientes');
+}
+
+async function adminPagosTab(tab){
+  const el=$('adminPagosTabContent');
+  if(!el)return;
+  el.innerHTML='<div class="loading-dots"><span></span><span></span><span></span></div>';
+  if(tab==='pendientes'||tab==='todos'){
+    const filter=tab==='pendientes'?'pendientes':'all';
+    const r=await api('/api/admin/comprobantes?u='+userId+'&filter='+filter);
+    const comps=r.ok?r.comprobantes:[];
+    if(!comps.length){el.innerHTML='<div class="empty-state"><p>No hay comprobantes '+filter+'</p></div>';return}
+    let h='<div class="table-wrap"><table><thead><tr><th>ID</th><th>Usuario</th><th>Plan</th><th>Metodo</th><th>Monto</th><th>Estado</th><th>Fecha</th><th>Imagen</th><th>Acciones</th></tr></thead><tbody>';
+    comps.forEach(c=>{
+      const badge=c.estado==='aprobado'?'badge-success':c.estado==='rechazado'?'badge-danger':'badge-warning';
+      h+=`<tr>
+        <td>${c.id}</td>
+        <td style="font-size:11px">${esc(c.user_id)}</td>
+        <td>${esc(c.plan_key)}</td>
+        <td>${esc(c.metodo_pago)}</td>
+        <td>${esc(c.monto||'-')}</td>
+        <td><span class="badge ${badge}">${esc(c.estado)}</span></td>
+        <td style="font-size:11px">${c.fecha_creado||'-'}</td>
+        <td>${c.imagen_path?`<a href="#" onclick="verComprobante(${c.id});return false" style="color:var(--primary)">📷 Ver</a>`:'-'}</td>
+        <td>${c.estado==='pendiente'?`<button class="btn btn-success btn-sm" onclick="aprobarComp(${c.id})">✅</button> <button class="btn btn-danger btn-sm" onclick="rechazarComp(${c.id})">❌</button>`:''}</td>
+      </tr>`;
+    });
+    h+='</tbody></table></div>';
+    el.innerHTML=h;
+  }else if(tab==='crypto'){
+    const r=await api('/api/admin/pagos?u='+userId);
+    const pagos=r.ok?r.pagos:[];
+    if(!pagos.length){el.innerHTML='<div class="empty-state"><p>No hay pagos crypto</p></div>';return}
+    let h='<div class="table-wrap"><table><thead><tr><th>Order</th><th>Usuario</th><th>Plan</th><th>USDT</th><th>Estado</th><th>Fecha</th></tr></thead><tbody>';
+    pagos.forEach(p=>{
+      const badge=p.estado==='paid'?'badge-success':p.estado==='pending'?'badge-warning':'badge-danger';
+      h+=`<tr><td style="font-size:10px">${esc(p.merchant_trade_no)}</td><td style="font-size:11px">${esc(p.user_id)}</td><td>${esc(p.plan_key)}</td><td>${p.monto_usdt}</td><td><span class="badge ${badge}">${esc(p.estado)}</span></td><td style="font-size:11px">${p.fecha_creado||'-'}</td></tr>`;
+    });
+    h+='</tbody></table></div>';
+    el.innerHTML=h;
+  }else if(tab==='metodos'){
+    const r=await api('/api/admin/metodos_pago?u='+userId);
+    const metodos=r.ok?r.metodos:[];
+    let h='<div style="margin-bottom:15px"><button class="btn btn-success btn-sm" onclick="crearMetodoPago()">+ Agregar Metodo de Pago</button></div>';
+    if(!metodos.length){h+='<div class="empty-state"><p>No hay metodos de pago. Agrega uno.</p></div>'}
+    else{
+      h+='<div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Nombre</th><th>Valor</th><th>Instrucciones</th><th>Activo</th><th>Acciones</th></tr></thead><tbody>';
+      metodos.forEach(m=>{
+        h+=`<tr>
+          <td>${esc(m.tipo)}</td>
+          <td><b>${esc(m.nombre)}</b></td>
+          <td><code>${esc(m.valor)}</code></td>
+          <td style="font-size:12px">${esc(m.instrucciones||'-')}</td>
+          <td><span class="badge ${m.activo?'badge-success':'badge-danger'}">${m.activo?'Si':'No'}</span></td>
+          <td>
+            <button class="btn btn-primary btn-sm" onclick="editarMetodo(${m.id},${JSON.stringify(esc(m.nombre))},${JSON.stringify(esc(m.valor))},${JSON.stringify(esc(m.instrucciones||''))},${m.activo})">✏️</button>
+            <button class="btn btn-danger btn-sm" onclick="eliminarMetodo(${m.id})">🗑</button>
+          </td>
+        </tr>`;
+      });
+      h+='</tbody></table></div>';
+    }
+    el.innerHTML=h;
+  }
+}
+
+function verComprobante(id){
+  showModal(`<h3>📷 Comprobante #${id}</h3><div style="text-align:center"><img src="/api/comprobante/imagen?id=${id}&admin=${userId}" style="max-width:100%;max-height:70vh;border-radius:8px" onerror="this.src='';this.alt='Error al cargar imagen'"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
+}
+
+async function aprobarComp(id){
+  if(!confirm('Aprobar comprobante #'+id+'? Se activara la membresia automaticamente.'))return;
+  const r=await api('/api/admin/comprobante/aprobar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id:id})});
+  toast(r.ok?'Comprobante aprobado y membresia activada!':'Error: '+(r.error||'desconocido'),r.ok?'success':'error');
+  if(r.ok)adminPagosTab('pendientes');
+}
+
+async function rechazarComp(id){
+  const nota=prompt('Motivo del rechazo (opcional):');
+  if(nota===null)return;
+  const r=await api('/api/admin/comprobante/rechazar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id:id,nota:nota})});
+  toast(r.ok?'Comprobante rechazado':'Error','success');
+  if(r.ok)adminPagosTab('pendientes');
+}
+
+function crearMetodoPago(){
+  showModal(`<h3>+ Nuevo Metodo de Pago</h3>
+    <div class="form-group"><label>Tipo</label><select id="mpTipo"><option value="yape">Yape</option><option value="plin">Plin</option><option value="transferencia">Transferencia</option><option value="binance">Binance P2P</option><option value="otro">Otro</option></select></div>
+    <div class="form-group"><label>Nombre</label><input type="text" id="mpNombre" placeholder="Ej: Yape Personal"></div>
+    <div class="form-group"><label>Valor (numero/wallet/cuenta)</label><input type="text" id="mpValor" placeholder="Ej: +51976680776"></div>
+    <div class="form-group"><label>Instrucciones</label><input type="text" id="mpInstrucciones" placeholder="Ej: Enviar al numero y subir captura"></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="guardarMetodo()">Guardar</button></div>`);
+}
+
+async function guardarMetodo(){
+  const tipo=$('mpTipo').value,nombre=$('mpNombre').value,valor=$('mpValor').value,instr=$('mpInstrucciones').value;
+  if(!nombre||!valor){toast('Falta nombre o valor','error');return}
+  const r=await api('/api/admin/metodos_pago/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,tipo:tipo,nombre:nombre,valor:valor,instrucciones:instr})});
+  if(r.ok){closeModal();toast('Metodo creado','success');adminPagosTab('metodos')}else{toast(r.error||'Error','error')}
+}
+
+function editarMetodo(id,nombre,valor,instr,activo){
+  showModal(`<h3>Editar Metodo #${id}</h3>
+    <div class="form-group"><label>Nombre</label><input type="text" id="emNombre" value="${nombre}"></div>
+    <div class="form-group"><label>Valor</label><input type="text" id="emValor" value="${valor}"></div>
+    <div class="form-group"><label>Instrucciones</label><input type="text" id="emInstr" value="${instr}"></div>
+    <div class="form-group"><label><input type="checkbox" id="emActivo" ${activo?'checked':''}> Activo</label></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="guardarEditMetodo(${id})">Guardar</button></div>`);
+}
+
+async function guardarEditMetodo(id){
+  const r=await api('/api/admin/metodos_pago/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id:id,nombre:$('emNombre').value,valor:$('emValor').value,instrucciones:$('emInstr').value,activo:$('emActivo').checked})});
+  if(r.ok){closeModal();toast('Metodo actualizado','success');adminPagosTab('metodos')}else{toast(r.error||'Error','error')}
+}
+
+async function eliminarMetodo(id){
+  if(!confirm('Eliminar metodo de pago #'+id+'?'))return;
+  const r=await api('/api/admin/metodos_pago/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id:id})});
+  if(r.ok){toast('Eliminado','success');adminPagosTab('metodos')}else{toast(r.error||'Error','error')}
+}
+
 // --- THEME TOGGLE ---
 function toggleTheme(){
   const cur=document.documentElement.getAttribute('data-theme');
@@ -3961,7 +4263,7 @@ function toggleTheme(){
 // --- MULTI-LANGUAGE ---
 let currentLang='es';
 const LANG={
-  es:{dashboard:'Dashboard',cuentas:'Cuentas WSP',grupos:'Grupos',mensajes:'Mensajes',envios:'Envio Unico',enviopersonal:'Envio Personal',campanas:'Campanas',config:'Config Envio',stats:'Estadisticas',admin:'Admin Panel',plantillas:'Plantillas',historial:'Historial',actividad:'Actividad',logout:'Cerrar Sesion',login:'Iniciar Sesion',register:'Registrarse',send:'Enviar',cancel:'Cancelar',delete:'Eliminar',save:'Guardar',create:'Crear',loading:'Cargando...',nodata:'Sin datos',seguridad:'2FA y Sesiones',backup:'Backup / Restaurar',enviomiembros:'Envio a Miembros',enviointeractivo:'Envio Interactivo',programados:'Programados',listanegra:'Lista Negra',autoresp:'Auto-Responder',logs:'Logs del Bot',retry:'Cola de Reintentos',tggrupos:'Grupos TG',tgmensajes:'Mensajes TG',tgcampanas:'Campanas TG',tgprogramados:'Programados TG',tghistorial:'Historial TG',tgdetectar:'Detectar Grupos TG',tgstats:'Stats TG',tgautoresp:'Auto-Responder TG',tgconfig:'Config Envio TG',tglistanegra:'Lista Negra TG',cuentastg:'Cuentas TG',sellers:'Sellers',sellerpanel:'Panel Seller',canjear:'Canjear Codigo'},
+  es:{dashboard:'Dashboard',cuentas:'Cuentas WSP',grupos:'Grupos',mensajes:'Mensajes',envios:'Envio Unico',enviopersonal:'Envio Personal',campanas:'Campanas',config:'Config Envio',stats:'Estadisticas',admin:'Admin Panel',plantillas:'Plantillas',historial:'Historial',actividad:'Actividad',logout:'Cerrar Sesion',login:'Iniciar Sesion',register:'Registrarse',send:'Enviar',cancel:'Cancelar',delete:'Eliminar',save:'Guardar',create:'Crear',loading:'Cargando...',nodata:'Sin datos',seguridad:'2FA y Sesiones',backup:'Backup / Restaurar',enviomiembros:'Envio a Miembros',enviointeractivo:'Envio Interactivo',programados:'Programados',listanegra:'Lista Negra',autoresp:'Auto-Responder',logs:'Logs del Bot',retry:'Cola de Reintentos',tggrupos:'Grupos TG',tgmensajes:'Mensajes TG',tgcampanas:'Campanas TG',tgprogramados:'Programados TG',tghistorial:'Historial TG',tgdetectar:'Detectar Grupos TG',tgstats:'Stats TG',tgautoresp:'Auto-Responder TG',tgconfig:'Config Envio TG',tglistanegra:'Lista Negra TG',cuentastg:'Cuentas TG',sellers:'Sellers',sellerpanel:'Panel Seller',canjear:'Canjear Codigo',pagos:'Pagar Membresia',adminpagos:'Gestion de Pagos'},
   en:{dashboard:'Dashboard',cuentas:'WSP Accounts',grupos:'Groups',mensajes:'Messages',envios:'Single Send',enviopersonal:'Personal Send',campanas:'Campaigns',config:'Send Config',stats:'Statistics',admin:'Admin Panel',plantillas:'Templates',historial:'History',actividad:'Activity',logout:'Logout',login:'Login',register:'Register',send:'Send',cancel:'Cancel',delete:'Delete',save:'Save',create:'Create',loading:'Loading...',nodata:'No data',seguridad:'2FA & Sessions',backup:'Backup / Restore',enviomiembros:'Member Send',enviointeractivo:'Interactive Send',programados:'Scheduled',listanegra:'Blacklist',autoresp:'Auto-Responder',logs:'Bot Logs',retry:'Retry Queue',tggrupos:'TG Groups',tgmensajes:'TG Messages',tgcampanas:'TG Campaigns',tgprogramados:'TG Scheduled',tghistorial:'TG History',tgdetectar:'Detect TG Groups',tgstats:'TG Stats',tgautoresp:'TG Auto-Responder',tgconfig:'TG Send Config',tglistanegra:'TG Blacklist',cuentastg:'TG Accounts',sellers:'Sellers',sellerpanel:'Seller Panel',canjear:'Redeem Code'},
   pt:{dashboard:'Painel',cuentas:'Contas WSP',grupos:'Grupos',mensajes:'Mensagens',envios:'Envio Unico',enviopersonal:'Envio Pessoal',campanas:'Campanhas',config:'Config Envio',stats:'Estatisticas',admin:'Admin',plantillas:'Modelos',historial:'Historico',actividad:'Atividade',logout:'Sair',login:'Entrar',register:'Registrar',send:'Enviar',cancel:'Cancelar',delete:'Excluir',save:'Salvar',create:'Criar',loading:'Carregando...',nodata:'Sem dados',seguridad:'2FA e Sessoes',backup:'Backup / Restaurar',sellers:'Revendedores',sellerpanel:'Painel Revendedor',canjear:'Resgatar Codigo'}
 };

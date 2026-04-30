@@ -263,7 +263,8 @@ poll();
         const PUBLIC_ENDPOINTS = [
             "/api/status", "/api/panel_login", "/api/panel_registro",
             "/api/panel_recuperar_solicitar", "/api/panel_recuperar_reset",
-            "/api/canjear_codigo", "/api/check_membresia"
+            "/api/canjear_codigo", "/api/check_membresia",
+            "/api/pagos/webhook", "/api/metodos_pago"
         ];
         const isPublicEndpoint = PUBLIC_ENDPOINTS.includes(url.pathname) || url.pathname === "/api/status";
 
@@ -845,7 +846,9 @@ poll();
                         "/api/2fa/setup", "/api/2fa/enable", "/api/2fa/disable", "/api/2fa/status",
                         "/api/dashboard", "/api/dashboard_extended", "/api/reporte_diario",
                         "/api/tasa_entrega", "/api/panel_logout", "/api/notificaciones",
-                        "/api/actividad", "/api/limites"
+                        "/api/actividad", "/api/limites",
+                        "/api/pagos/planes", "/api/pagos/crear", "/api/pagos/estado", "/api/pagos/historial",
+                        "/api/comprobante/subir", "/api/comprobante/historial", "/api/comprobante/imagen"
                     ];
                     const needsMembresia = !NO_MEMBRESIA_ENDPOINTS.includes(url.pathname);
                     if (needsMembresia) {
@@ -2432,6 +2435,460 @@ poll();
                 return res.end(JSON.stringify({ ok: true, logs }));
             }
 
+            // ═══════════════════════════════════════════
+            //   PAGOS — Binance Pay
+            // ═══════════════════════════════════════════
+
+            // Helper: Binance Pay API request signing
+            function binancePaySign(timestamp, nonce, bodyStr) {
+                const crypto = require("crypto");
+                const payload = `${timestamp}\n${nonce}\n${bodyStr}\n`;
+                return crypto.createHmac("sha512", config.BINANCE_PAY.API_SECRET).update(payload).digest("hex").toUpperCase();
+            }
+
+            function generateNonce(len = 32) {
+                const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+                let result = "";
+                for (let i = 0; i < len; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+                return result;
+            }
+
+            async function binancePayRequest(endpoint, body) {
+                const https = require("https");
+                const bp = config.BINANCE_PAY;
+                if (!bp.API_KEY || !bp.API_SECRET) {
+                    return { ok: false, error: "Binance Pay no configurado. Falta API_KEY y API_SECRET en config_wsp.js" };
+                }
+                const timestamp = Date.now();
+                const nonce = generateNonce();
+                const bodyStr = JSON.stringify(body);
+                const signature = binancePaySign(timestamp, nonce, bodyStr);
+                return new Promise((resolve) => {
+                    const url = new URL(`${bp.BASE_URL}${endpoint}`);
+                    const options = {
+                        hostname: url.hostname,
+                        port: 443,
+                        path: url.pathname,
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "BinancePay-Timestamp": timestamp,
+                            "BinancePay-Nonce": nonce,
+                            "BinancePay-Certificate-SN": bp.API_KEY,
+                            "BinancePay-Signature": signature,
+                            "Content-Length": Buffer.byteLength(bodyStr),
+                        },
+                    };
+                    const req2 = https.request(options, (resp) => {
+                        let data = "";
+                        resp.on("data", (c) => (data += c));
+                        resp.on("end", () => {
+                            try { resolve(JSON.parse(data)); } catch (_) { resolve({ status: "FAIL", code: "PARSE_ERROR", errorMessage: data }); }
+                        });
+                    });
+                    req2.on("error", (e) => resolve({ status: "FAIL", code: "NETWORK_ERROR", errorMessage: e.message }));
+                    req2.write(bodyStr);
+                    req2.end();
+                });
+            }
+
+            // GET /api/pagos/planes — Lista planes disponibles con precios USDT
+            if (url.pathname === "/api/pagos/planes" && req.method === "GET") {
+                const planes = {};
+                for (const [key, plan] of Object.entries(config.PLANES)) {
+                    planes[key] = { dias: plan.dias, precio: plan.precio, precio_usdt: plan.precio_usdt, emoji: plan.emoji };
+                }
+                const binanceConfigured = !!(config.BINANCE_PAY.API_KEY && config.BINANCE_PAY.API_SECRET);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, planes, binance_enabled: binanceConfigured, currency: config.BINANCE_PAY.CURRENCY }));
+            }
+
+            // POST /api/pagos/crear — Crear orden de pago en Binance Pay
+            if (url.pathname === "/api/pagos/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta plan" })); }
+                const plan = config.PLANES[body.plan];
+                if (!plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan invalido" })); }
+                if (!plan.precio_usdt) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan sin precio USDT" })); }
+                const bp = config.BINANCE_PAY;
+                if (!bp.API_KEY || !bp.API_SECRET) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Binance Pay no configurado" })); }
+
+                const merchantTradeNo = `JD${Date.now()}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+                const userId = req._authUser || body.u;
+
+                // Create local record
+                const pago = db.crearPago(userId, merchantTradeNo, body.plan, plan.dias, plan.precio_usdt);
+
+                // Create Binance Pay order
+                const orderReq = {
+                    env: { terminalType: "WEB" },
+                    merchantTradeNo: merchantTradeNo,
+                    orderAmount: plan.precio_usdt.toFixed(2),
+                    currency: bp.CURRENCY,
+                    goods: {
+                        goodsType: "02",
+                        goodsCategory: "Z000",
+                        referenceGoodsId: body.plan,
+                        goodsName: `${bp.MERCHANT_NAME} — Plan ${body.plan} (${plan.dias} dias)`,
+                    },
+                    passThroughInfo: JSON.stringify({ user_id: userId, plan: body.plan, merchant_trade_no: merchantTradeNo }),
+                    orderExpireTime: bp.ORDER_EXPIRY_MINUTES * 60 * 1000,
+                    returnUrl: body.return_url || "",
+                    cancelUrl: body.cancel_url || "",
+                };
+
+                const result = await binancePayRequest("/binancepay/openapi/v2/order", orderReq);
+
+                if (result.status === "SUCCESS" && result.data) {
+                    db.actualizarPagoPrepay(
+                        merchantTradeNo,
+                        result.data.prepayId,
+                        result.data.checkoutUrl,
+                        result.data.qrcodeLink,
+                        result.data.universalUrl,
+                        result.data.deeplink
+                    );
+                    db.registrarAuditoria(userId, 'pago_creado', `Plan: ${body.plan}, Monto: ${plan.precio_usdt} USDT, Order: ${merchantTradeNo}`, getClientIp());
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({
+                        ok: true,
+                        merchant_trade_no: merchantTradeNo,
+                        prepay_id: result.data.prepayId,
+                        checkout_url: result.data.checkoutUrl,
+                        qrcode_url: result.data.qrcodeLink,
+                        universal_url: result.data.universalUrl,
+                        deep_link: result.data.deeplink,
+                        expiry_time: result.data.expireTime,
+                        plan: body.plan,
+                        monto_usdt: plan.precio_usdt,
+                    }));
+                } else {
+                    // Binance API error — mark local record
+                    db.marcarPagoCancelado(merchantTradeNo);
+                    console.error("[BinancePay] Create order error:", JSON.stringify(result));
+                    res.writeHead(502);
+                    return res.end(JSON.stringify({ ok: false, error: result.errorMessage || "Error al crear orden en Binance Pay", code: result.code }));
+                }
+            }
+
+            // POST /api/pagos/webhook — Binance Pay webhook notification (public, no auth)
+            if (url.pathname === "/api/pagos/webhook" && req.method === "POST") {
+                const body = await readBody();
+                console.log("[BinancePay Webhook]", JSON.stringify(body));
+
+                // Verify it's a payment notification
+                if (body.bizType !== "PAY" || !body.bizStatus) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ returnCode: "SUCCESS", returnMessage: null }));
+                }
+
+                if (body.bizStatus === "PAY_SUCCESS") {
+                    let data;
+                    try { data = typeof body.data === "string" ? JSON.parse(body.data) : body.data; } catch (_) { data = {}; }
+
+                    const merchantTradeNo = data.merchantTradeNo;
+                    if (!merchantTradeNo) {
+                        res.writeHead(200);
+                        return res.end(JSON.stringify({ returnCode: "SUCCESS", returnMessage: null }));
+                    }
+
+                    const pago = db.getPago(merchantTradeNo);
+                    if (!pago || pago.estado !== "pending") {
+                        res.writeHead(200);
+                        return res.end(JSON.stringify({ returnCode: "SUCCESS", returnMessage: null }));
+                    }
+
+                    // Mark as paid
+                    const pagoActualizado = db.marcarPagoPagado(merchantTradeNo, data.transactionId || "");
+
+                    // Auto-activate membership
+                    if (pagoActualizado) {
+                        db.activarMembresia(pagoActualizado.user_id, pagoActualizado.plan_dias);
+                        db.registrarAuditoria(pagoActualizado.user_id, 'pago_confirmado', `Plan: ${pagoActualizado.plan_key}, Monto: ${pagoActualizado.monto_usdt} USDT, TxID: ${data.transactionId || 'N/A'}`, "binance_webhook");
+
+                        // Sync membership activation to TG
+                        try {
+                            const syncData = JSON.stringify({ telegram_id: pagoActualizado.user_id, dias: pagoActualizado.plan_dias, plan: pagoActualizado.plan_key });
+                            const syncReq = require("http").request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                            syncReq.on("error", () => {});
+                            syncReq.write(syncData);
+                            syncReq.end();
+                        } catch (_) {}
+                    }
+                } else if (body.bizStatus === "PAY_CLOSED") {
+                    let data;
+                    try { data = typeof body.data === "string" ? JSON.parse(body.data) : body.data; } catch (_) { data = {}; }
+                    if (data.merchantTradeNo) {
+                        db.marcarPagoExpirado(data.merchantTradeNo);
+                    }
+                }
+
+                // Always return SUCCESS to Binance
+                res.writeHead(200);
+                return res.end(JSON.stringify({ returnCode: "SUCCESS", returnMessage: null }));
+            }
+
+            // GET /api/pagos/estado — Check payment status
+            if (url.pathname === "/api/pagos/estado" && req.method === "GET") {
+                const merchantTradeNo = url.searchParams.get("order");
+                if (!merchantTradeNo) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta order" })); }
+                const pago = db.getPago(merchantTradeNo);
+                if (!pago) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "Orden no encontrada" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, pago: { estado: pago.estado, plan_key: pago.plan_key, plan_dias: pago.plan_dias, monto_usdt: pago.monto_usdt, checkout_url: pago.checkout_url, fecha_creado: pago.fecha_creado, fecha_pagado: pago.fecha_pagado } }));
+            }
+
+            // GET /api/pagos/historial — User payment history
+            if (url.pathname === "/api/pagos/historial" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const pagos = db.getPagosUsuario(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, pagos }));
+            }
+
+            // GET /api/admin/pagos — Admin: all payments + stats
+            if (url.pathname === "/api/admin/pagos" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const limit = parseInt(url.searchParams.get("limit")) || 100;
+                const pagos = db.getTodosPagosAdmin(limit);
+                const stats = db.getPagosStats();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, pagos, stats }));
+            }
+
+            // POST /api/pagos/consultar — Query order status from Binance
+            if (url.pathname === "/api/pagos/consultar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.merchant_trade_no) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta merchant_trade_no" })); }
+                const result = await binancePayRequest("/binancepay/openapi/v2/order/query", { merchantTradeNo: body.merchant_trade_no });
+                if (result.status === "SUCCESS" && result.data) {
+                    // Update local status if Binance says PAID
+                    if (result.data.status === "PAID") {
+                        const pago = db.getPago(body.merchant_trade_no);
+                        if (pago && pago.estado === "pending") {
+                            const pagoActualizado = db.marcarPagoPagado(body.merchant_trade_no, result.data.transactionId || "");
+                            if (pagoActualizado) {
+                                db.activarMembresia(pagoActualizado.user_id, pagoActualizado.plan_dias);
+                                try {
+                                    const syncData = JSON.stringify({ telegram_id: pagoActualizado.user_id, dias: pagoActualizado.plan_dias, plan: pagoActualizado.plan_key });
+                                    const syncReq = require("http").request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                                    syncReq.on("error", () => {});
+                                    syncReq.write(syncData);
+                                    syncReq.end();
+                                } catch (_) {}
+                            }
+                        }
+                    } else if (result.data.status === "EXPIRED" || result.data.status === "CANCELED") {
+                        db.marcarPagoExpirado(body.merchant_trade_no);
+                    }
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, binance_status: result.data.status, local_pago: db.getPago(body.merchant_trade_no) }));
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: false, error: result.errorMessage || "Error consultando Binance" }));
+            }
+
+            // ═══════════════════════════════════════════
+            //   COMPROBANTES — Pago Manual
+            // ═══════════════════════════════════════════
+
+            // GET /api/metodos_pago — Lista metodos de pago activos (para clientes)
+            if (url.pathname === "/api/metodos_pago" && req.method === "GET") {
+                const metodos = db.getMetodosPagoActivos();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, metodos }));
+            }
+
+            // POST /api/comprobante/subir — Cliente sube comprobante de pago
+            if (url.pathname === "/api/comprobante/subir" && req.method === "POST") {
+                // Parse multipart form data manually
+                const contentType = req.headers["content-type"] || "";
+                if (!contentType.includes("multipart/form-data")) {
+                    // JSON fallback (for base64 image)
+                    const body = await readBody();
+                    if (!body.plan || !body.metodo_pago) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta plan o metodo_pago" })); }
+                    const plan = config.PLANES[body.plan];
+                    if (!plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan invalido" })); }
+                    const userId = req._authUser || body.u;
+                    let imagenPath = null;
+                    if (body.imagen_base64) {
+                        const fname = `comprobantes/${userId}_${Date.now()}.jpg`;
+                        const buf = Buffer.from(body.imagen_base64, "base64");
+                        fs.writeFileSync(fname, buf);
+                        imagenPath = fname;
+                    }
+                    const comp = db.crearComprobante(userId, body.plan, plan.dias, body.metodo_pago, body.monto || plan.precio, imagenPath, body.nota || '');
+                    db.registrarAuditoria(userId, 'comprobante_subido', `Plan: ${body.plan}, Metodo: ${body.metodo_pago}`, getClientIp());
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, comprobante: comp }));
+                }
+                // Multipart parsing
+                const boundary = contentType.split("boundary=")[1];
+                if (!boundary) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Bad multipart boundary" })); }
+                const rawBody = await new Promise((resolve) => {
+                    const chunks = [];
+                    let size = 0;
+                    req.on("data", (c) => { size += c.length; if (size > 10 * 1024 * 1024) { req.destroy(); resolve(null); } chunks.push(c); });
+                    req.on("end", () => resolve(Buffer.concat(chunks)));
+                });
+                if (!rawBody) { res.writeHead(413); return res.end(JSON.stringify({ ok: false, error: "Archivo muy grande (max 10MB)" })); }
+                const parts = rawBody.toString("binary").split("--" + boundary);
+                const fields = {};
+                let fileBuffer = null, fileExt = "jpg";
+                for (const part of parts) {
+                    if (part.includes("Content-Disposition")) {
+                        const nameMatch = part.match(/name="([^"]+)"/);
+                        const filenameMatch = part.match(/filename="([^"]+)"/);
+                        if (nameMatch) {
+                            const val = part.split("\r\n\r\n").slice(1).join("\r\n\r\n").replace(/\r\n$/, "");
+                            if (filenameMatch) {
+                                fileBuffer = Buffer.from(val, "binary");
+                                const ext = filenameMatch[1].split(".").pop().toLowerCase();
+                                if (["jpg","jpeg","png","webp","gif"].includes(ext)) fileExt = ext;
+                            } else {
+                                fields[nameMatch[1]] = val;
+                            }
+                        }
+                    }
+                }
+                if (!fields.plan || !fields.metodo_pago) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta plan o metodo_pago" })); }
+                const plan = config.PLANES[fields.plan];
+                if (!plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan invalido" })); }
+                const userId = req._authUser || fields.u;
+                let imagenPath = null;
+                if (fileBuffer && fileBuffer.length > 0) {
+                    imagenPath = `comprobantes/${userId}_${Date.now()}.${fileExt}`;
+                    fs.writeFileSync(imagenPath, fileBuffer);
+                }
+                const comp = db.crearComprobante(userId, fields.plan, plan.dias, fields.metodo_pago, fields.monto || plan.precio, imagenPath, fields.nota || '');
+                db.registrarAuditoria(userId, 'comprobante_subido', `Plan: ${fields.plan}, Metodo: ${fields.metodo_pago}`, getClientIp());
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, comprobante: comp }));
+            }
+
+            // GET /api/comprobante/historial — Historial de comprobantes del usuario
+            if (url.pathname === "/api/comprobante/historial" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const comprobantes = db.getComprobantesUsuario(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, comprobantes }));
+            }
+
+            // GET /api/comprobante/imagen — Servir imagen del comprobante
+            if (url.pathname === "/api/comprobante/imagen" && req.method === "GET") {
+                const id = parseInt(url.searchParams.get("id"));
+                if (!id) { res.writeHead(400); return res.end("Falta id"); }
+                const comp = db.getComprobante(id);
+                if (!comp || !comp.imagen_path) { res.writeHead(404); return res.end("No encontrado"); }
+                // Admin or owner can view
+                const isAdmin = checkAdmin(url.searchParams.get("admin") || req._authUser);
+                if (!isAdmin && String(comp.user_id) !== String(req._authUser)) { res.writeHead(403); return res.end("No autorizado"); }
+                try {
+                    const imgData = fs.readFileSync(comp.imagen_path);
+                    const ext = comp.imagen_path.split(".").pop().toLowerCase();
+                    const mimeTypes = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+                    res.writeHead(200, { "Content-Type": mimeTypes[ext] || "image/jpeg" });
+                    return res.end(imgData);
+                } catch (_) { res.writeHead(404); return res.end("Imagen no encontrada"); }
+            }
+
+            // GET /api/admin/comprobantes — Admin: todos los comprobantes
+            if (url.pathname === "/api/admin/comprobantes" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const filter = url.searchParams.get("filter") || "all";
+                const limit = parseInt(url.searchParams.get("limit")) || 100;
+                let comprobantes;
+                if (filter === "pendientes") comprobantes = db.getComprobantesPendientes();
+                else comprobantes = db.getTodosComprobantes(limit);
+                const stats = db.getComprobantesStats();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, comprobantes, stats }));
+            }
+
+            // POST /api/admin/comprobante/aprobar — Admin aprueba comprobante
+            if (url.pathname === "/api/admin/comprobante/aprobar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                const comp = db.aprobarComprobante(parseInt(body.id), body.admin_id);
+                if (comp && comp.estado === "aprobado") {
+                    // Auto-activate membership
+                    db.activarMembresia(comp.user_id, comp.plan_dias);
+                    db.registrarAuditoria(body.admin_id, 'comprobante_aprobado', `Comprobante #${comp.id}, User: ${comp.user_id}, Plan: ${comp.plan_key}`, getClientIp());
+                    // Sync to TG
+                    try {
+                        const syncData = JSON.stringify({ telegram_id: comp.user_id, dias: comp.plan_dias, plan: comp.plan_key });
+                        const syncReq = require("http").request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                        syncReq.on("error", () => {});
+                        syncReq.write(syncData);
+                        syncReq.end();
+                    } catch (_) {}
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, msg: "Comprobante aprobado y membresia activada" }));
+                }
+                res.writeHead(400);
+                return res.end(JSON.stringify({ ok: false, error: "No se pudo aprobar" }));
+            }
+
+            // POST /api/admin/comprobante/rechazar — Admin rechaza comprobante
+            if (url.pathname === "/api/admin/comprobante/rechazar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                db.rechazarComprobante(parseInt(body.id), body.admin_id, body.nota || "");
+                db.registrarAuditoria(body.admin_id, 'comprobante_rechazado', `Comprobante #${body.id}`, getClientIp());
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ═══════════════════════════════════════════
+            //   METODOS DE PAGO — Admin CRUD
+            // ═══════════════════════════════════════════
+
+            // GET /api/admin/metodos_pago — Admin: lista todos los metodos
+            if (url.pathname === "/api/admin/metodos_pago" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const metodos = db.getMetodosPago();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, metodos }));
+            }
+
+            // POST /api/admin/metodos_pago/crear — Admin crea metodo de pago
+            if (url.pathname === "/api/admin/metodos_pago/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.tipo || !body.nombre || !body.valor) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta tipo, nombre o valor" })); }
+                const m = db.crearMetodoPago(body.tipo, body.nombre, body.valor, body.instrucciones || "");
+                db.registrarAuditoria(body.admin_id, 'metodo_pago_creado', `Tipo: ${body.tipo}, Nombre: ${body.nombre}`, getClientIp());
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, metodo: m }));
+            }
+
+            // POST /api/admin/metodos_pago/editar — Admin edita metodo
+            if (url.pathname === "/api/admin/metodos_pago/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                db.editarMetodoPago(parseInt(body.id), body.nombre, body.valor, body.instrucciones || "", body.activo !== false);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/admin/metodos_pago/eliminar — Admin elimina metodo
+            if (url.pathname === "/api/admin/metodos_pago/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                db.eliminarMetodoPago(parseInt(body.id));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
@@ -2506,10 +2963,12 @@ server.listen(QR_PORT, "0.0.0.0", () => {
 // --- INICIO DEL BOT ---
 async function startBot() {
     db.init();
+    db.initDefaultMetodosPago();
     db.setAdminJids(adminJids);
     fs.mkdirSync("sessions", { recursive: true });
     fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
     fs.mkdirSync("media", { recursive: true });
+    fs.mkdirSync("comprobantes", { recursive: true });
 
     // Periodic cleanup: every 30 minutes
     setInterval(() => {

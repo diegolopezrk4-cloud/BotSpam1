@@ -12,11 +12,26 @@ module.exports = {
     // Numero de Yape para pagos
     YAPE_NUM: "9776680776",
 
-    // Planes
+    // Planes (precios en Soles y USDT)
     PLANES: {
-        diario:  { dias: 1,  precio: "S/ 2.00",  emoji: "\u{1F949}" },
-        semanal: { dias: 7,  precio: "S/ 10.00", emoji: "\u{1F948}" },
-        mensual: { dias: 30, precio: "S/ 25.00", emoji: "\u{1F947}" },
+        diario:  { dias: 1,  precio: "S/ 2.00",  precio_usdt: 0.55,  emoji: "\u{1F949}" },
+        semanal: { dias: 7,  precio: "S/ 10.00", precio_usdt: 2.70,  emoji: "\u{1F948}" },
+        mensual: { dias: 30, precio: "S/ 25.00", precio_usdt: 6.75,  emoji: "\u{1F947}" },
+    },
+
+    // Binance Pay (Merchant API)
+    // Obtener keys en: https://merchant.binance.com → Developer → API Keys
+    BINANCE_PAY: {
+        API_KEY: "",
+        API_SECRET: "",
+        // URL base de la API de Binance Pay
+        BASE_URL: "https://bpay.binanceapi.com",
+        // Nombre del merchant que se muestra al pagar
+        MERCHANT_NAME: "J&D Bot",
+        // Moneda de pago
+        CURRENCY: "USDT",
+        // Tiempo de expiración de la orden en minutos
+        ORDER_EXPIRY_MINUTES: 30,
     },
 
     // Limites
