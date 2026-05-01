@@ -2947,18 +2947,27 @@ async function importarTxtAR(){
 
 // --- AUTO-UNIRSE A GRUPOS ---
 function showAutoJoin(){
+  // Build account options from wspDetectCuenta if available
+  let cuentaOpts='<option value="">-- Seleccionar cuenta --</option>';
+  const srcSel=$('wspDetectCuenta');
+  if(srcSel){for(const o of srcSel.options){if(o.value)cuentaOpts+=`<option value="${esc(o.value)}">${esc(o.textContent)}</option>`}}
   showModal(`<h3>🔗 Auto-unirse a Grupos</h3>
+    <div class="form-group"><label>Cuenta</label><select id="ajCuenta" style="padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%">${cuentaOpts}</select></div>
     <p style="color:var(--text2);font-size:13px;margin-bottom:12px">Pega los links de invitacion de WhatsApp (uno por linea):</p>
     <div class="form-group"><textarea id="ajLinks" rows="6" placeholder="https://chat.whatsapp.com/ABC123\nhttps://chat.whatsapp.com/XYZ789"></textarea></div>
     <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="ejecutarAutoJoin()">🔗 Unirse</button></div>`);
+  // Pre-select current account if one is already selected
+  if(srcSel&&srcSel.value){const aj=$('ajCuenta');if(aj)aj.value=srcSel.value}
 }
 async function ejecutarAutoJoin(){
+  const cuenta=$('ajCuenta')?$('ajCuenta').value:'';
+  if(!cuenta){toast('Selecciona una cuenta primero','error');return}
   const raw=$('ajLinks').value.trim();
   if(!raw){toast('Pega al menos un link','error');return}
   const links=raw.split('\n').map(l=>l.trim()).filter(l=>l.startsWith('https://chat.whatsapp.com/'));
   if(!links.length){toast('No se encontraron links validos','error');return}
   closeModal();toast('Uniendose a '+links.length+' grupo(s)...','success');
-  const r=await api('/api/autojoin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,links})});
+  const r=await api('/api/autojoin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,links,cuenta})});
   if(r.ok){
     const s=r.stats||[];const ok=s.filter(x=>x.ok).length;const err=s.filter(x=>!x.ok).length;
     toast('Unido a '+ok+' grupo(s), '+err+' error(es)',ok>0?'success':'error');

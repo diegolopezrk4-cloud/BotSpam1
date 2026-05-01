@@ -1747,12 +1747,13 @@ poll();
                     res.writeHead(400);
                     return res.end(JSON.stringify({ ok: false, error: "falta u o links" }));
                 }
-                let sock;
-                if (body.cuenta) {
-                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (e) {}
+                if (!body.cuenta) {
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: "Selecciona una cuenta WSP primero" }));
                 }
-                if (!sock) sock = botSock;
-                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                let sock;
+                try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (e) {}
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "No se pudo conectar la cuenta '" + body.cuenta + "'. Verifica que este vinculada." })); }
                 const stats = [];
                 for (const link of body.links) {
                     try {

@@ -1244,6 +1244,14 @@ CI: lint-and-check OK | docker-build OK
 - **Fix**: LEFT JOIN con `panel_users` para obtener campo `verificado`. Filtro `.filter(u => u.verificado === 1 || u.es_admin === 1)` para solo mostrar usuarios verificados y admins.
 - **Archivo**: `db_wsp.js`
 
+### BUG-FIX: Auto-unirse a grupos fallaba (sin selector de cuenta)
+- **Donde**: `panel.html` — `showAutoJoin()` / `ejecutarAutoJoin()` + `index_wsp.js` — endpoint `/api/autojoin`
+- **Sintoma**: Al usar "Auto-unirse" para unirse a grupos por link, fallaba porque no se enviaba la cuenta del usuario. El backend caia en fallback a `botSock` (null o cuenta incorrecta).
+- **Causa**: El modal de auto-unirse NO tenia selector de cuenta — enviaba solo `{u, links}` sin `cuenta`. El backend usaba `botSock` como fallback, que es la conexion del admin, no del usuario.
+- **Fix Frontend**: Agregado dropdown de cuenta en el modal (toma las opciones de `wspDetectCuenta`). Pre-selecciona la cuenta activa. Valida que se seleccione una cuenta antes de enviar.
+- **Fix Backend**: Eliminado fallback a `botSock`. Ahora requiere `body.cuenta` obligatorio, con error descriptivo si falta o falla la conexion.
+- **Archivos**: `panel.html` (showAutoJoin, ejecutarAutoJoin), `index_wsp.js` (endpoint /api/autojoin)
+
 ### Ya implementado en sync-servidor (verificado)
 - **TAREA 2**: Auto-restart de campanas en errores inesperados (catch block lineas 838-864)
 - **TAREA 3**: Botones "Iniciar Todas" / "Parar Todas" en campanas (linea 693 + funciones 2783-2784)
@@ -1254,6 +1262,8 @@ CI: lint-and-check OK | docker-build OK
 |---|---|
 | `motor_wsp.js` | try/catch en 2 sendMessage de iniciarCampana (lineas 522, 543) |
 | `db_wsp.js` | getTodosUsuariosAdmin con LEFT JOIN panel_users + filtro verificado |
+| `panel.html` | showAutoJoin con selector de cuenta + validacion |
+| `index_wsp.js` | /api/autojoin requiere cuenta obligatoria, sin fallback a botSock |
 
 ### Verificacion de Sintaxis v12.5
 ```
