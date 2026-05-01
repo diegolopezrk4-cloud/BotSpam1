@@ -34,7 +34,7 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 ## Archivos Principales
 | Archivo | Descripcion | Lineas aprox |
 |---|---|---|
-| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~5592 |
+| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~5818 |
 | `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~6072 |
 | `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2744 |
 | `motor_wsp.js` | Motor de envio WhatsApp | ~1699 |
@@ -46,7 +46,7 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 | `sw.js` | Service Worker para PWA | ~62 |
 | `start.sh` | Script de inicio de todos los servicios | ~52 |
 | `wsp_bridge.py` | Bridge WSP<->TG (funciones de comunicacion) | ~226 |
-| `web_panel.py` | Panel web de Telegram | ~1062 |
+| `web_panel.py` | Panel web de Telegram | ~1133 |
 
 ## Mejoras Implementadas
 
@@ -169,6 +169,8 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 | 1 | Dashboard | sec-dashboard | Ambas | Vista general, graficos |
 | 2 | Cuentas WSP | sec-cuentas | WSP | Vincular cuentas WhatsApp |
 | 3 | Cuentas TG | sec-cuentastg | TG | Vincular cuentas Telegram |
+| 3b | **Ver Chats WSP** | sec-chatswsp | WSP | **NUEVO**: Inbox WSP integrado — ver chats y responder desde el panel |
+| 3c | **Ver Chats TG** | sec-chatstg | TG | **NUEVO**: Inbox TG integrado — ver chats y responder desde el panel |
 | 4 | Grupos WSP | sec-grupos | WSP | Gestion de grupos |
 | 5 | Grupos TG | sec-tggrupos | TG | Gestion de grupos TG |
 | 6 | Mensajes y Plantillas | sec-mensajes | WSP | Mensajes reutilizables |
@@ -210,6 +212,19 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 | 42 | **Admin Tickets** | sec-admintickets | admin-only | Bandeja de tickets + historial conversacion |
 | 43 | **Admin Backups** | sec-adminbackups | admin-only | Respaldo automatico diario + manual |
 | 44 | **Auditoria** | sec-auditoria | admin-only | Registro de auditoria de acciones |
+
+### Bugs corregidos en este update
+- **Historial Binance Pay** no se mostraba en seccion Pagos (endpoint `/api/pagos/historial` existia pero no se llamaba)
+- **Plantillas de promocion** no tenian boton "Editar" (endpoint `/api/promo/plantillas/editar` existia pero no tenia UI)
+- **`/api/dashboard_extended`** (con underscore) en NO_MEMBRESIA_ENDPOINTS — corregido a `/api/dashboard/extended` (con slash)
+
+### Endpoints nuevos (Ver Chats)
+| Endpoint | Metodo | Descripcion | Servidor |
+|---|---|---|---|
+| `/api/chats_personales` | GET | Listar chats WSP personales `?u=ID&cuenta=X` | index_wsp.js (3000) |
+| `/api/chat/enviar` | POST | Enviar mensaje WSP `{u, jid, mensaje, cuenta}` | index_wsp.js (3000) |
+| `/api/tg/chats` | GET | Listar chats TG personales `?u=ID&cuenta=X` | web_panel.py (3002) |
+| `/api/tg/chat/enviar` | POST | Enviar mensaje TG `{u, chat_id, mensaje, cuenta}` | web_panel.py (3002) |
 
 ## Endpoints API Completos
 ### Sellers (NUEVOS)
