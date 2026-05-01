@@ -564,6 +564,198 @@ function init() {
         }
         console.log("   Columna 'verificado' agregada a panel_users (existentes = 0, admin = 1)");
     }
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip TEXT NOT NULL,
+            telegram_id TEXT DEFAULT '',
+            success INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+    `);
+    // === NUEVAS TABLAS (pagos, tickets, analytics, webhooks, etc.) ===
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            accion TEXT NOT NULL,
+            detalle TEXT DEFAULT '',
+            ip TEXT DEFAULT '',
+            fecha TEXT DEFAULT (datetime('now'))
+        );
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS grupo_actividad (
+            grupo_jid TEXT PRIMARY KEY,
+            ultima_actividad TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS pagos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            merchant_trade_no TEXT UNIQUE NOT NULL,
+            prepay_id TEXT DEFAULT NULL,
+            plan_key TEXT NOT NULL,
+            plan_dias INTEGER NOT NULL,
+            monto_usdt REAL NOT NULL,
+            currency TEXT DEFAULT 'USDT',
+            estado TEXT DEFAULT 'pending',
+            binance_transaction_id TEXT DEFAULT NULL,
+            checkout_url TEXT DEFAULT NULL,
+            qrcode_url TEXT DEFAULT NULL,
+            universal_url TEXT DEFAULT NULL,
+            deep_link TEXT DEFAULT NULL,
+            pass_through_info TEXT DEFAULT NULL,
+            fecha_creado TEXT DEFAULT (datetime('now')),
+            fecha_pagado TEXT DEFAULT NULL,
+            fecha_expirado TEXT DEFAULT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_pagos_user ON pagos(user_id);
+        CREATE INDEX IF NOT EXISTS idx_pagos_merchant ON pagos(merchant_trade_no);
+        CREATE INDEX IF NOT EXISTS idx_pagos_estado ON pagos(estado);
+        CREATE TABLE IF NOT EXISTS comprobantes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            plan_key TEXT NOT NULL,
+            plan_dias INTEGER NOT NULL,
+            metodo_pago TEXT NOT NULL DEFAULT 'yape',
+            monto TEXT DEFAULT '',
+            imagen_path TEXT DEFAULT NULL,
+            nota_cliente TEXT DEFAULT '',
+            estado TEXT DEFAULT 'pendiente',
+            admin_nota TEXT DEFAULT '',
+            revisado_por TEXT DEFAULT NULL,
+            fecha_creado TEXT DEFAULT (datetime('now')),
+            fecha_revisado TEXT DEFAULT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_comprobantes_user ON comprobantes(user_id);
+        CREATE INDEX IF NOT EXISTS idx_comprobantes_estado ON comprobantes(estado);
+        CREATE TABLE IF NOT EXISTS metodos_pago (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT NOT NULL,
+            nombre TEXT NOT NULL,
+            valor TEXT NOT NULL,
+            instrucciones TEXT DEFAULT '',
+            activo INTEGER DEFAULT 1,
+            orden INTEGER DEFAULT 0
+        );
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            endpoint TEXT NOT NULL UNIQUE,
+            keys_p256dh TEXT NOT NULL,
+            keys_auth TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            asunto TEXT NOT NULL,
+            estado TEXT DEFAULT 'abierto',
+            prioridad TEXT DEFAULT 'normal',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id);
+        CREATE INDEX IF NOT EXISTS idx_tickets_estado ON tickets(estado);
+        CREATE TABLE IF NOT EXISTS ticket_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER NOT NULL,
+            sender_id TEXT NOT NULL,
+            es_admin INTEGER DEFAULT 0,
+            mensaje TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(ticket_id) REFERENCES tickets(id)
+        );
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS account_health (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            cuenta TEXT NOT NULL,
+            envios_ok INTEGER DEFAULT 0,
+            envios_fail INTEGER DEFAULT 0,
+            ultimo_error TEXT DEFAULT '',
+            pausada INTEGER DEFAULT 0,
+            pausa_hasta TEXT DEFAULT NULL,
+            updated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(user_id, cuenta)
+        );
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS vacation_mode (
+            user_id TEXT PRIMARY KEY,
+            activo INTEGER DEFAULT 0,
+            activado_at TEXT DEFAULT NULL,
+            campanas_pausadas TEXT DEFAULT '[]'
+        );
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS scheduled_recurrent (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            nombre TEXT DEFAULT '',
+            tipo TEXT DEFAULT 'envio_grupo',
+            config_json TEXT DEFAULT '{}',
+            cron_expr TEXT NOT NULL,
+            dias_semana TEXT DEFAULT '1,2,3,4,5',
+            hora TEXT DEFAULT '09:00',
+            activo INTEGER DEFAULT 1,
+            ultimo_run TEXT DEFAULT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS ab_tests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            nombre TEXT NOT NULL,
+            mensaje_a TEXT NOT NULL,
+            mensaje_b TEXT NOT NULL,
+            imagen_a TEXT DEFAULT NULL,
+            imagen_b TEXT DEFAULT NULL,
+            enviados_a INTEGER DEFAULT 0,
+            enviados_b INTEGER DEFAULT 0,
+            respuestas_a INTEGER DEFAULT 0,
+            respuestas_b INTEGER DEFAULT 0,
+            estado TEXT DEFAULT 'activo',
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS grupo_actividad_stats (
+            user_id TEXT NOT NULL,
+            grupo_link TEXT NOT NULL,
+            ultimo_envio_ok TEXT DEFAULT NULL,
+            envios_ok INTEGER DEFAULT 0,
+            envios_fail INTEGER DEFAULT 0,
+            updated_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY(user_id, grupo_link)
+        );
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS auto_backups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            size_bytes INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS user_webhooks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            eventos TEXT DEFAULT 'envio_completado,campana_terminada',
+            activo INTEGER DEFAULT 1,
+            secret TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+    `);
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -1370,11 +1562,18 @@ function eliminarUsuarioPanel(telegramId) {
     // No permitir eliminar admin
     const esAdmin = config.ADMIN_TELEGRAM_IDS && config.ADMIN_TELEGRAM_IDS.includes(tid);
     if (esAdmin) return { ok: false, error: "No se puede eliminar al admin" };
-    const user = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(tid);
-    if (!user) return { ok: false, error: "Usuario no encontrado" };
+    const panelUser = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(tid);
+    const usuario = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(tid);
+    if (!panelUser && !usuario) return { ok: false, error: "Usuario no encontrado" };
     db.prepare("DELETE FROM panel_users WHERE telegram_id = ?").run(tid);
+    db.prepare("DELETE FROM usuarios WHERE wsp_id = ?").run(tid);
     db.prepare("DELETE FROM registration_codes WHERE telegram_id = ?").run(tid);
     db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(tid);
+    try { db.prepare("DELETE FROM active_sessions WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM user_2fa WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM user_envio_config WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM sellers WHERE telegram_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM seller_codes WHERE seller_id IN (SELECT id FROM sellers WHERE telegram_id = ?)").run(tid); } catch(_){}
     return { ok: true };
 }
 
@@ -1955,6 +2154,19 @@ function touchSession(token) {
     db.prepare("UPDATE active_sessions SET last_active = datetime('now') WHERE token = ?").run(token);
 }
 
+function validateSession(token) {
+    if (!token) return null;
+    const session = db.prepare("SELECT * FROM active_sessions WHERE token = ?").get(token);
+    if (!session) return null;
+    const lastActive = new Date(session.last_active + "Z");
+    if (Date.now() - lastActive.getTime() > 7 * 86400000) {
+        db.prepare("DELETE FROM active_sessions WHERE id = ?").run(session.id);
+        return null;
+    }
+    db.prepare("UPDATE active_sessions SET last_active = datetime('now') WHERE id = ?").run(session.id);
+    return session;
+}
+
 // --- EXPORT/IMPORT CONFIG ---
 function exportFullConfig(userId) {
     const grupos = db.prepare("SELECT * FROM grupos WHERE user_id = ?").all(userId);
@@ -2098,6 +2310,354 @@ function eliminarSellerCode(codeId, sellerId) {
     db.prepare("DELETE FROM seller_codes WHERE id = ? AND seller_id = ? AND usado = 0").run(codeId, sellerId);
 }
 
+// --- CLEANUP ---
+function limpiarRecoveryCodes() {
+    db.prepare("DELETE FROM recovery_codes WHERE created_at < datetime('now', '-1 hour')").run();
+}
+
+function limpiarSessionsExpiradas() {
+    db.prepare("DELETE FROM active_sessions WHERE last_active < datetime('now', '-7 days')").run();
+}
+
+// --- GRUPO ACTIVIDAD PERSISTENCIA ---
+function registrarActividadGrupoDB(grupoJid) {
+    db.prepare("INSERT OR REPLACE INTO grupo_actividad (grupo_jid, ultima_actividad) VALUES (?, datetime('now'))").run(grupoJid);
+}
+
+function getUltimaActividadGrupo(grupoJid) {
+    const row = db.prepare("SELECT ultima_actividad FROM grupo_actividad WHERE grupo_jid = ?").get(grupoJid);
+    return row ? new Date(row.ultima_actividad + "Z").getTime() : undefined;
+}
+
+// --- LOGIN ATTEMPTS (rate limiting) ---
+function getLoginAttempts(ip) {
+    const since = new Date(Date.now() - 15 * 60000).toISOString().replace('T', ' ').slice(0, 19);
+    const row = db.prepare("SELECT COUNT(*) as total FROM login_attempts WHERE ip = ? AND created_at >= ?").get(ip, since);
+    return row ? row.total : 0;
+}
+
+function registrarLoginAttempt(ip, telegramId, success) {
+    db.prepare("INSERT INTO login_attempts (ip, telegram_id, success) VALUES (?, ?, ?)").run(ip, telegramId || '', success ? 1 : 0);
+}
+
+function limpiarLoginAttempts() {
+    const cutoff = new Date(Date.now() - 60 * 60000).toISOString().replace('T', ' ').slice(0, 19);
+    db.prepare("DELETE FROM login_attempts WHERE created_at < ?").run(cutoff);
+}
+
+// ─────────────────────────────────────────
+//   PAGOS (Binance Pay)
+// ─────────────────────────────────────────
+
+function crearPago(userId, merchantTradeNo, planKey, planDias, montoUsdt) {
+    db.prepare(`INSERT INTO pagos (user_id, merchant_trade_no, plan_key, plan_dias, monto_usdt) VALUES (?, ?, ?, ?, ?)`).run(
+        String(userId), merchantTradeNo, planKey, planDias, montoUsdt
+    );
+    return db.prepare("SELECT * FROM pagos WHERE merchant_trade_no = ?").get(merchantTradeNo);
+}
+
+function getPago(merchantTradeNo) {
+    return db.prepare("SELECT * FROM pagos WHERE merchant_trade_no = ?").get(merchantTradeNo);
+}
+
+function actualizarPagoPrepay(merchantTradeNo, prepayId, checkoutUrl, qrcodeUrl, universalUrl, deepLink) {
+    db.prepare(`UPDATE pagos SET prepay_id = ?, checkout_url = ?, qrcode_url = ?, universal_url = ?, deep_link = ? WHERE merchant_trade_no = ?`).run(
+        prepayId, checkoutUrl || null, qrcodeUrl || null, universalUrl || null, deepLink || null, merchantTradeNo
+    );
+}
+
+function marcarPagoPagado(merchantTradeNo, transactionId) {
+    db.prepare(`UPDATE pagos SET estado = 'paid', binance_transaction_id = ?, fecha_pagado = datetime('now') WHERE merchant_trade_no = ?`).run(
+        transactionId || null, merchantTradeNo
+    );
+}
+
+function marcarPagoExpirado(merchantTradeNo) {
+    db.prepare(`UPDATE pagos SET estado = 'expired', fecha_expirado = datetime('now') WHERE merchant_trade_no = ?`).run(merchantTradeNo);
+}
+
+function marcarPagoCancelado(merchantTradeNo) {
+    db.prepare(`UPDATE pagos SET estado = 'cancelled' WHERE merchant_trade_no = ?`).run(merchantTradeNo);
+}
+
+function getPagosUsuario(userId) {
+    return db.prepare("SELECT * FROM pagos WHERE user_id = ? ORDER BY fecha_creado DESC").all(String(userId));
+}
+
+function getTodosPagosAdmin(limit = 100) {
+    return db.prepare("SELECT * FROM pagos ORDER BY fecha_creado DESC LIMIT ?").all(limit);
+}
+
+function getPagosStats() {
+    const total = db.prepare("SELECT COUNT(*) as total, SUM(monto_usdt) as total_usdt FROM pagos WHERE estado = 'paid'").get();
+    const hoy = db.prepare("SELECT COUNT(*) as total FROM pagos WHERE estado = 'paid' AND date(fecha_pagado) = date('now')").get();
+    return {
+        total_pagos: total?.total || 0,
+        total_usdt: total?.total_usdt || 0,
+        pagos_hoy: hoy?.total || 0
+    };
+}
+
+// --- COMPROBANTES ---
+function crearComprobante(userId, planKey, planDias, metodoPago, monto, imagenPath, notaCliente) {
+    db.prepare(`INSERT INTO comprobantes (user_id, plan_key, plan_dias, metodo_pago, monto, imagen_path, nota_cliente)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`).run(String(userId), planKey, planDias, metodoPago, monto || '', imagenPath || null, notaCliente || '');
+    return db.prepare("SELECT * FROM comprobantes WHERE user_id = ? ORDER BY id DESC LIMIT 1").get(String(userId));
+}
+
+function getComprobante(id) {
+    return db.prepare("SELECT * FROM comprobantes WHERE id = ?").get(id);
+}
+
+function getComprobantesUsuario(userId) {
+    return db.prepare("SELECT * FROM comprobantes WHERE user_id = ? ORDER BY fecha_creado DESC").all(String(userId));
+}
+
+function getComprobantesPendientes() {
+    return db.prepare("SELECT * FROM comprobantes WHERE estado = 'pendiente' ORDER BY fecha_creado ASC").all();
+}
+
+function getTodosComprobantes(limit = 100) {
+    return db.prepare("SELECT * FROM comprobantes ORDER BY fecha_creado DESC LIMIT ?").all(limit);
+}
+
+function aprobarComprobante(id, adminId) {
+    db.prepare(`UPDATE comprobantes SET estado = 'aprobado', revisado_por = ?, fecha_revisado = datetime('now') WHERE id = ?`).run(adminId, id);
+    return db.prepare("SELECT * FROM comprobantes WHERE id = ?").get(id);
+}
+
+function rechazarComprobante(id, adminId, adminNota) {
+    db.prepare(`UPDATE comprobantes SET estado = 'rechazado', revisado_por = ?, admin_nota = ?, fecha_revisado = datetime('now') WHERE id = ?`).run(adminId, adminNota || '', id);
+}
+
+function getComprobantesStats() {
+    const total = db.prepare("SELECT COUNT(*) as total FROM comprobantes WHERE estado = 'aprobado'").get();
+    const pendientes = db.prepare("SELECT COUNT(*) as total FROM comprobantes WHERE estado = 'pendiente'").get();
+    const hoy = db.prepare("SELECT COUNT(*) as total FROM comprobantes WHERE estado = 'aprobado' AND date(fecha_revisado) = date('now')").get();
+    return {
+        total_aprobados: total?.total || 0,
+        pendientes: pendientes?.total || 0,
+        hoy_aprobados: hoy?.total || 0
+    };
+}
+
+// --- METODOS DE PAGO ---
+function getMetodosPago() {
+    return db.prepare("SELECT * FROM metodos_pago ORDER BY orden ASC, id ASC").all();
+}
+
+function getMetodosPagoActivos() {
+    return db.prepare("SELECT * FROM metodos_pago WHERE activo = 1 ORDER BY orden ASC, id ASC").all();
+}
+
+function crearMetodoPago(tipo, nombre, valor, instrucciones) {
+    db.prepare("INSERT INTO metodos_pago (tipo, nombre, valor, instrucciones) VALUES (?, ?, ?, ?)").run(tipo, nombre, valor, instrucciones || '');
+}
+
+function editarMetodoPago(id, nombre, valor, instrucciones, activo) {
+    db.prepare("UPDATE metodos_pago SET nombre = ?, valor = ?, instrucciones = ?, activo = ? WHERE id = ?").run(nombre, valor, instrucciones || '', activo ? 1 : 0, id);
+}
+
+function eliminarMetodoPago(id) {
+    db.prepare("DELETE FROM metodos_pago WHERE id = ?").run(id);
+}
+
+function initDefaultMetodosPago() {
+    const count = db.prepare("SELECT COUNT(*) as c FROM metodos_pago").get();
+    if (count.c === 0) {
+        db.prepare("INSERT INTO metodos_pago (tipo, nombre, valor, instrucciones, orden) VALUES (?, ?, ?, ?, ?)").run(
+            'yape', 'Yape', config.YAPE_NUM || '976680776', 'Enviar al numero y subir captura del comprobante', 1
+        );
+    }
+}
+
+// --- PUSH SUBSCRIPTIONS ---
+function savePushSubscription(userId, endpoint, p256dh, auth) {
+    db.prepare("INSERT OR REPLACE INTO push_subscriptions (user_id, endpoint, keys_p256dh, keys_auth) VALUES (?, ?, ?, ?)").run(String(userId), endpoint, p256dh, auth);
+}
+
+function deletePushSubscription(endpoint) {
+    db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint);
+}
+
+// --- TICKETS/SOPORTE ---
+function crearTicket(userId, asunto, mensaje) {
+    const info = db.prepare("INSERT INTO tickets (user_id, asunto) VALUES (?, ?)").run(String(userId), asunto);
+    db.prepare("INSERT INTO ticket_messages (ticket_id, sender_id, es_admin, mensaje) VALUES (?, ?, 0, ?)").run(info.lastInsertRowid, String(userId), mensaje);
+    return { id: info.lastInsertRowid };
+}
+
+function getTicketsUsuario(userId) {
+    return db.prepare("SELECT * FROM tickets WHERE user_id = ? ORDER BY updated_at DESC").all(String(userId));
+}
+
+function getTicketsTodos(estado) {
+    if (estado && estado !== 'todos') return db.prepare("SELECT * FROM tickets WHERE estado = ? ORDER BY updated_at DESC").all(estado);
+    return db.prepare("SELECT * FROM tickets ORDER BY updated_at DESC").all();
+}
+
+function getTicketMessages(ticketId) {
+    return db.prepare("SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at ASC").all(ticketId);
+}
+
+function responderTicket(ticketId, senderId, esAdmin, mensaje) {
+    db.prepare("INSERT INTO ticket_messages (ticket_id, sender_id, es_admin, mensaje) VALUES (?, ?, ?, ?)").run(ticketId, String(senderId), esAdmin ? 1 : 0, mensaje);
+    db.prepare("UPDATE tickets SET updated_at = datetime('now') WHERE id = ?").run(ticketId);
+}
+
+function cerrarTicket(ticketId) {
+    db.prepare("UPDATE tickets SET estado = 'cerrado', updated_at = datetime('now') WHERE id = ?").run(ticketId);
+}
+
+// --- ACCOUNT HEALTH ---
+function getAccountsHealth(userId) {
+    return db.prepare("SELECT * FROM account_health WHERE user_id = ?").all(String(userId));
+}
+
+function unpauseAccount(userId, cuenta) {
+    db.prepare("UPDATE account_health SET pausada = 0, pausa_hasta = NULL WHERE user_id = ? AND cuenta = ?").run(String(userId), cuenta);
+}
+
+function getBestAccount(userId) {
+    const cuentas = db.prepare(`SELECT * FROM account_health WHERE user_id = ? AND (pausada = 0 OR pausa_hasta < datetime('now')) ORDER BY envios_fail ASC, envios_ok DESC LIMIT 1`).get(String(userId));
+    return cuentas || null;
+}
+
+// --- AUDITORIA ---
+function registrarAuditoria(userId, accion, detalle, ip) {
+    db.prepare("INSERT INTO audit_log (user_id, accion, detalle, ip) VALUES (?, ?, ?, ?)").run(String(userId), accion, detalle || '', ip || '');
+}
+
+function getAuditLog(limit) {
+    return db.prepare("SELECT * FROM audit_log ORDER BY fecha DESC LIMIT ?").all(limit || 100);
+}
+
+function getAuditLogByUser(userId, limit) {
+    return db.prepare("SELECT * FROM audit_log WHERE user_id = ? ORDER BY fecha DESC LIMIT ?").all(String(userId), limit || 100);
+}
+
+// --- MODO VACACIONES ---
+function getVacationMode(userId) {
+    return db.prepare("SELECT * FROM vacation_mode WHERE user_id = ?").get(String(userId));
+}
+
+function setVacationMode(userId, activo, campanasPausadas) {
+    db.prepare("INSERT OR REPLACE INTO vacation_mode (user_id, activo, activado_at, campanas_pausadas) VALUES (?, ?, datetime('now'), ?)").run(
+        String(userId), activo ? 1 : 0, JSON.stringify(campanasPausadas || [])
+    );
+}
+
+// --- PROGRAMACION RECURRENTE ---
+function getScheduledRecurrent(userId) {
+    return db.prepare("SELECT * FROM scheduled_recurrent WHERE user_id = ? ORDER BY created_at DESC").all(String(userId));
+}
+
+function crearScheduledRecurrent(userId, nombre, tipo, configJson, cronExpr, diasSemana, hora) {
+    db.prepare("INSERT INTO scheduled_recurrent (user_id, nombre, tipo, config_json, cron_expr, dias_semana, hora) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+        String(userId), nombre, tipo || 'envio_grupo', configJson || '{}', cronExpr, diasSemana || '1,2,3,4,5', hora || '09:00'
+    );
+}
+
+function toggleScheduledRecurrent(id) {
+    db.prepare("UPDATE scheduled_recurrent SET activo = CASE WHEN activo = 1 THEN 0 ELSE 1 END WHERE id = ?").run(id);
+}
+
+function deleteScheduledRecurrent(id) {
+    db.prepare("DELETE FROM scheduled_recurrent WHERE id = ?").run(id);
+}
+
+function updateScheduledRecurrentRun(id) {
+    db.prepare("UPDATE scheduled_recurrent SET ultimo_run = datetime('now') WHERE id = ?").run(id);
+}
+
+function getActiveRecurrentJobs() {
+    return db.prepare("SELECT * FROM scheduled_recurrent WHERE activo = 1").all();
+}
+
+// --- A/B TESTING ---
+function crearABTest(userId, nombre, mensajeA, mensajeB, imagenA, imagenB) {
+    db.prepare("INSERT INTO ab_tests (user_id, nombre, mensaje_a, mensaje_b, imagen_a, imagen_b) VALUES (?, ?, ?, ?, ?, ?)").run(String(userId), nombre, mensajeA, mensajeB, imagenA || null, imagenB || null);
+}
+
+function getABTests(userId) {
+    return db.prepare("SELECT * FROM ab_tests WHERE user_id = ? ORDER BY created_at DESC").all(String(userId));
+}
+
+function deleteABTest(id) {
+    db.prepare("DELETE FROM ab_tests WHERE id = ?").run(id);
+}
+
+// --- GRUPOS MUERTOS ---
+function getGruposMuertos(userId, diasInactivo) {
+    const fecha = new Date();
+    fecha.setDate(fecha.getDate() - (diasInactivo || 30));
+    const fechaStr = fecha.toISOString().slice(0, 10);
+    return db.prepare(`SELECT g.*, gs.ultimo_envio_ok, gs.envios_ok, gs.envios_fail
+        FROM grupos g LEFT JOIN grupo_actividad_stats gs ON g.link = gs.grupo_link AND g.user_id = gs.user_id
+        WHERE g.user_id = ? AND (gs.ultimo_envio_ok IS NULL OR gs.ultimo_envio_ok < ?)
+        ORDER BY gs.ultimo_envio_ok ASC`).all(String(userId), fechaStr);
+}
+
+function eliminarGruposMuertos(userId, diasInactivo) {
+    const muertos = getGruposMuertos(userId, diasInactivo);
+    const links = muertos.map(g => g.link);
+    if (links.length) {
+        const placeholders = links.map(() => '?').join(',');
+        db.prepare(`DELETE FROM grupos WHERE user_id = ? AND link IN (${placeholders})`).run(String(userId), ...links);
+    }
+    return { eliminados: links.length };
+}
+
+// --- AUTO BACKUPS ---
+function registrarAutoBackup(filename, sizeBytes) {
+    db.prepare("INSERT INTO auto_backups (filename, size_bytes) VALUES (?, ?)").run(filename, sizeBytes || 0);
+}
+
+function getAutoBackups() {
+    return db.prepare("SELECT * FROM auto_backups ORDER BY created_at DESC LIMIT 30").all();
+}
+
+function deleteOldBackups(keepDays) {
+    return db.prepare("DELETE FROM auto_backups WHERE created_at < datetime('now', '-' || ? || ' days')").run(keepDays);
+}
+
+// --- WEBHOOKS ---
+function getUserWebhooks(userId) {
+    return db.prepare("SELECT * FROM user_webhooks WHERE user_id = ? ORDER BY created_at DESC").all(String(userId));
+}
+
+function crearUserWebhook(userId, url, eventos, secret) {
+    db.prepare("INSERT INTO user_webhooks (user_id, url, eventos, secret) VALUES (?, ?, ?, ?)").run(String(userId), url, eventos || 'envio_completado,campana_terminada', secret || '');
+    return db.prepare("SELECT * FROM user_webhooks WHERE user_id = ? ORDER BY id DESC LIMIT 1").get(String(userId));
+}
+
+function editarUserWebhook(id, url, eventos, activo) {
+    db.prepare("UPDATE user_webhooks SET url = ?, eventos = ?, activo = ? WHERE id = ?").run(url, eventos, activo ? 1 : 0, id);
+}
+
+function eliminarUserWebhook(id) {
+    db.prepare("DELETE FROM user_webhooks WHERE id = ?").run(id);
+}
+
+function getActiveWebhooksForEvent(evento) {
+    return db.prepare("SELECT * FROM user_webhooks WHERE activo = 1 AND eventos LIKE '%' || ? || '%'").all(evento);
+}
+
+// --- SELLER DASHBOARD ---
+function getSellerDashboard(sellerId) {
+    const seller = db.prepare("SELECT * FROM sellers WHERE id = ?").get(sellerId);
+    if (!seller) return null;
+    const totalInvites = db.prepare("SELECT COUNT(*) as total FROM seller_invites WHERE seller_id = ?").get(sellerId);
+    const totalCodes = db.prepare("SELECT COUNT(*) as total FROM seller_codes WHERE seller_id = ?").get(sellerId);
+    const codesUsed = db.prepare("SELECT COUNT(*) as total FROM seller_codes WHERE seller_id = ? AND usado = 1").get(sellerId);
+    return {
+        seller,
+        total_invites: totalInvites?.total || 0,
+        total_codes: totalCodes?.total || 0,
+        codes_used: codesUsed?.total || 0
+    };
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -2163,7 +2723,13 @@ module.exports = {
     // 2FA
     setup2FA, get2FA, enable2FA, disable2FA, verify2FACode,
     // Active sessions
-    createSession, getSessions, deleteSession, deleteAllSessions, touchSession,
+    createSession, getSessions, deleteSession, deleteAllSessions, touchSession, validateSession,
+    // Rate limiting
+    getLoginAttempts, registrarLoginAttempt, limpiarLoginAttempts,
+    // Cleanup
+    limpiarRecoveryCodes, limpiarSessionsExpiradas,
+    // Grupo actividad persistencia
+    registrarActividadGrupoDB, getUltimaActividadGrupo,
     // Export/Import config
     exportFullConfig, importFullConfig,
     // Dashboard extended
@@ -2176,4 +2742,35 @@ module.exports = {
     // Registration codes (verificacion de registro)
     generarCodigoRegistro, validarCodigoRegistro, marcarCodigoRegistroUsado, limpiarCodigosRegistroExpirados,
     verificarCuenta, isUserVerificado, eliminarUsuarioPanel, getAllPanelUsers,
+    // Pagos (Binance Pay)
+    crearPago, getPago, actualizarPagoPrepay,
+    marcarPagoPagado, marcarPagoExpirado, marcarPagoCancelado,
+    getPagosUsuario, getTodosPagosAdmin, getPagosStats,
+    // Comprobantes (pago manual)
+    crearComprobante, getComprobante, getComprobantesUsuario, getComprobantesPendientes,
+    getTodosComprobantes, aprobarComprobante, rechazarComprobante, getComprobantesStats,
+    // Metodos de pago (admin configurable)
+    getMetodosPago, getMetodosPagoActivos, crearMetodoPago, editarMetodoPago, eliminarMetodoPago, initDefaultMetodosPago,
+    // Push notifications
+    savePushSubscription, deletePushSubscription,
+    // Tickets/Soporte
+    crearTicket, getTicketsUsuario, getTicketsTodos, getTicketMessages, responderTicket, cerrarTicket,
+    // Account health
+    getAccountsHealth, unpauseAccount, getBestAccount,
+    // Audit log
+    registrarAuditoria, getAuditLog, getAuditLogByUser,
+    // Seller dashboard
+    getSellerDashboard,
+    // Modo vacaciones
+    getVacationMode, setVacationMode,
+    // Programacion recurrente
+    getScheduledRecurrent, crearScheduledRecurrent, toggleScheduledRecurrent, deleteScheduledRecurrent, updateScheduledRecurrentRun, getActiveRecurrentJobs,
+    // A/B Testing
+    crearABTest, getABTests, deleteABTest,
+    // Auto-limpieza de grupos muertos
+    getGruposMuertos, eliminarGruposMuertos,
+    // Auto backups
+    registrarAutoBackup, getAutoBackups, deleteOldBackups,
+    // Webhooks
+    getUserWebhooks, crearUserWebhook, editarUserWebhook, eliminarUserWebhook, getActiveWebhooksForEvent,
 };

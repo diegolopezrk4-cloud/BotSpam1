@@ -2953,7 +2953,10 @@ async def cb_wsp_cuentas(call: types.CallbackQuery):
 
     texto += f"\nPara vincular una cuenta WSP, envía:\n/vincularwsp nombre_cuenta"
 
-    botones = [[InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")]]
+    botones = []
+    if sesiones:
+        botones.append([InlineKeyboardButton(text="🗑 Eliminar cuenta WSP", callback_data="wsp_acc_del")])
+    botones.append([InlineKeyboardButton(text="🔙 Volver a WSP", callback_data="sec_wsp")])
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await safe_answer(call)
@@ -4039,6 +4042,8 @@ async def cmd_desactivar(msg: types.Message):
     async with aiosqlite.connect("titan.db") as d:
         await d.execute("UPDATE usuarios SET activo=0 WHERE telegram_id=?", (uid,))
         await d.commit()
+    # Sync deactivation to WSP
+    asyncio.create_task(sync_membresia_wsp(uid, 0, "desactivado"))
     await msg.answer(f"✅ Membresia de {uid} desactivada.")
 
 @dp.message(Command("ban"))
@@ -4056,6 +4061,8 @@ async def cmd_ban(msg: types.Message):
     async with aiosqlite.connect("titan.db") as d:
         await d.execute("UPDATE usuarios SET activo=0, plan='baneado' WHERE telegram_id=?", (uid,))
         await d.commit()
+    # Sync ban to WSP
+    asyncio.create_task(sync_membresia_wsp(uid, 0, "desactivado"))
     await msg.answer(f"🔨 Usuario {uid} baneado.")
     try:
         await bot.send_message(uid, "⛔ Tu acceso al bot ha sido suspendido.")

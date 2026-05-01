@@ -35,6 +35,9 @@ function getSessionDir(userId, nombre) {
     return path.join(config.SESSIONS_DIR, safe);
 }
 
+// Lock to prevent simultaneous reconnection attempts per account
+const reconnectLocks = {};
+
 async function connectClientAccount(userId, nombre, telefono) {
     const sessionDir = getSessionDir(userId, nombre);
     const key = `${userId}_${nombre}`;
@@ -406,15 +409,16 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
 
         const deliveryResult = await new Promise((resolve) => {
             let done = false;
+            const cleanup = () => { try { sock.ev.off("messages.update", handler); } catch (e) {} };
             const handler = (updates) => {
                 for (const upd of updates) {
                     if (upd.key?.id === msgId) {
                         const status = upd.update?.status;
                         if (status >= 2) {
-                            if (!done) { done = true; resolve({ delivered: true }); }
+                            if (!done) { done = true; cleanup(); resolve({ delivered: true }); }
                         }
                         if (status === 0) {
-                            if (!done) { done = true; resolve({ delivered: false, reason: "rejected" }); }
+                            if (!done) { done = true; cleanup(); resolve({ delivered: false, reason: "rejected" }); }
                         }
                     }
                 }
