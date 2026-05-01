@@ -969,6 +969,73 @@ async def api_tg_send_recovery(request):
 
 
 # ─────────────────────────────────────────
+#   CHATS TG: /api/tg/chats, /api/tg/chat/enviar
+# ─────────────────────────────────────────
+
+async def api_tg_chats(request):
+    user_id = int(request.query.get("u", 0))
+    cuenta = request.query.get("cuenta", "").strip()
+    if not user_id or not cuenta:
+        return web.json_response({"ok": False, "error": "falta u o cuenta"}, status=400)
+    path = get_session_path(user_id, cuenta)
+    client = TelegramClient(path, API_ID, API_HASH)
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            return web.json_response({"ok": False, "error": "Cuenta no autorizada. Vincula primero."})
+        from telethon.tl.types import User
+        dialogs = await client.get_dialogs(limit=50)
+        chats = []
+        for d in dialogs:
+            if not isinstance(d.entity, User):
+                continue
+            if d.entity.bot:
+                continue
+            name = ""
+            if d.entity.first_name:
+                name = d.entity.first_name
+            if d.entity.last_name:
+                name += " " + d.entity.last_name
+            name = name.strip() or d.entity.username or str(d.entity.id)
+            chats.append({
+                "id": d.entity.id,
+                "nombre": name,
+                "username": d.entity.username or "",
+                "unread": d.unread_count or 0,
+                "last_message": d.message.text[:100] if d.message and d.message.text else ""
+            })
+        return web.json_response({"ok": True, "chats": chats, "total": len(chats)})
+    except Exception as e:
+        logger.error(f"Error listing TG chats: {e}")
+        return web.json_response({"ok": False, "error": str(e)})
+    finally:
+        await client.disconnect()
+
+
+async def api_tg_chat_enviar(request):
+    body = await request.json()
+    user_id = int(body.get("u", 0))
+    chat_id = body.get("chat_id")
+    mensaje = body.get("mensaje", "").strip()
+    cuenta = body.get("cuenta", "").strip()
+    if not user_id or not chat_id or not mensaje or not cuenta:
+        return web.json_response({"ok": False, "error": "falta u, chat_id, mensaje o cuenta"}, status=400)
+    path = get_session_path(user_id, cuenta)
+    client = TelegramClient(path, API_ID, API_HASH)
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            return web.json_response({"ok": False, "error": "Cuenta no autorizada"})
+        await client.send_message(int(chat_id), mensaje)
+        return web.json_response({"ok": True})
+    except Exception as e:
+        logger.error(f"Error sending TG chat: {e}")
+        return web.json_response({"ok": False, "error": str(e)})
+    finally:
+        await client.disconnect()
+
+
+# ─────────────────────────────────────────
 #   SERVIDOR WEB
 # ─────────────────────────────────────────
 
@@ -1049,6 +1116,10 @@ def create_app():
     app.router.add_get("/api/tg/detectar", api_tg_detectar)
     app.router.add_get("/api/tg/detectar_carpetas", api_tg_detectar_carpetas)
     app.router.add_get("/api/tg/detectar_carpeta_grupos", api_tg_detectar_carpeta_grupos)
+
+    # Chats TG
+    app.router.add_get("/api/tg/chats", api_tg_chats)
+    app.router.add_post("/api/tg/chat/enviar", api_tg_chat_enviar)
 
     return app
 
