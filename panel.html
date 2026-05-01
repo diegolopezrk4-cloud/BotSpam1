@@ -2727,20 +2727,21 @@ async function loadCampanas(){
   const c=r.campanas||[];
   if(!c.length){$('campanasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay campanas.</p></div>';return}
   _wspCampanasData={};
-  let h='';
+  let h='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">';
   c.forEach(x=>{
     _wspCampanasData[x.id]=x;
     const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
-    h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
-    const runBtn=x.activa?`<button class="btn btn-danger btn-sm" onclick="detenerCamp(${x.id})">⏹ Detener</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})">🚀 Iniciar</button>`;
-    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div style="display:flex;gap:6px;align-items:center">${estado} ${runBtn} <button class="btn btn-primary btn-sm" onclick="showEditWspCamp(${x.id})">✏ Editar</button> <button class="btn btn-danger btn-sm" onclick="elimCamp(${x.id})">🗑</button></div></div>`;
-    h+=`<p style="font-size:12px;color:var(--text2);margin-bottom:5px">${x.mensaje?esc(x.mensaje.slice(0,100)):'<i style="color:var(--danger)">Sin mensaje</i>'}</p>`;
-    if(x.imagen_path)h+=`<p style="font-size:11px;color:var(--accent);margin-bottom:5px">📷 Foto adjunta</p>`;
-    h+=`<div style="display:flex;gap:15px;font-size:12px;color:var(--text2);flex-wrap:wrap"><span>📤 Enviados: <b style="color:var(--success)">${x.enviados||0}</b></span><span>❌ Errores: <b style="color:var(--danger)">${x.errores||0}</b></span>`;
-    h+=`<span>⏱ Intervalo: ${x.intervalo_min||30}s - ${x.intervalo_max||60}s</span><span>⏸ Pausa entre rondas: ${Math.round((x.espera_ciclo||600)/60)} min</span>`;
-    h+=`<span>🌐 Grupos: ${x.grupos_count||0}</span><span>👤 Cuentas: ${x.sesiones_count||0}</span></div>`;
+    h+=`<div style="background:var(--bg);padding:12px;border-radius:10px;border:1px solid var(--border);display:flex;flex-direction:column;gap:6px">`;
+    h+=`<div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px">${esc(x.nombre||'?')}</h3>${estado}</div>`;
+    h+=`<p style="font-size:11px;color:var(--text2);margin:0;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${x.mensaje?esc(x.mensaje.slice(0,80)):'<i style="color:var(--danger)">Sin mensaje</i>'}</p>`;
+    if(x.imagen_path)h+=`<p style="font-size:10px;color:var(--accent);margin:0">📷 Foto</p>`;
+    h+=`<div style="font-size:11px;color:var(--text2)">📤 ${x.enviados||0} | ❌ ${x.errores||0} | 🌐 ${x.grupos_count||0} | 👤 ${x.sesiones_count||0}</div>`;
+    h+=`<div style="font-size:10px;color:var(--text2)">⏱ ${x.intervalo_min||30}s-${x.intervalo_max||60}s | ⏸ ${Math.round((x.espera_ciclo||600)/60)}min</div>`;
+    const runBtn=x.activa?`<button class="btn btn-danger btn-sm" onclick="detenerCamp(${x.id})" style="font-size:11px">⏹</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})" style="font-size:11px">🚀</button>`;
+    h+=`<div style="display:flex;gap:4px;margin-top:auto">${runBtn}<button class="btn btn-primary btn-sm" onclick="showEditWspCamp(${x.id})" style="font-size:11px">✏</button><button class="btn btn-danger btn-sm" onclick="elimCamp(${x.id})" style="font-size:11px">🗑</button></div>`;
     h+=`</div>`;
   });
+  h+='</div>';
   $('campanasContent').innerHTML=h;
 }
 function showCrearCampana(){showModal(`<h3>➕ Crear Campana WSP</h3><div class="form-group"><label>Nombre</label><input id="cN" placeholder="Nombre"></div><div class="form-group"><label>Mensaje</label><textarea id="cM" rows="4" placeholder="Texto a enviar a los grupos"></textarea></div><div class="form-group"><label>Intervalo entre grupos (seg)</label><input id="cI" type="number" value="20" min="5"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearCamp()">Crear</button></div>`)}
@@ -5005,12 +5006,17 @@ async function adminPagosTab(tab){
   }else if(tab==='metodos'){
     const r=await api('/api/admin/metodos_pago?u='+userId);
     const metodos=r.ok?r.metodos:[];
-    let h='<div class="table-wrap"><div class="table-header"><h3>Metodos de Pago</h3></div>';
+    let h='<div class="table-wrap"><div class="table-header"><h3>Metodos de Pago</h3><button class="btn btn-sm btn-success" onclick="showCrearMetodoPago()">+ Agregar Metodo</button></div>';
     if(metodos.length){
-      h+='<table><thead><tr><th>Nombre</th><th>Tipo</th><th>Valor</th><th>Instrucciones</th></tr></thead><tbody>';
-      metodos.forEach(m=>{h+=`<tr><td>${esc(m.nombre)}</td><td>${esc(m.tipo)}</td><td>${esc(m.valor)}</td><td>${esc(m.instrucciones||'')}</td></tr>`});
+      h+='<table><thead><tr><th>Nombre</th><th>Tipo</th><th>Valor</th><th>Instrucciones</th><th>Activo</th><th>Acciones</th></tr></thead><tbody>';
+      metodos.forEach(m=>{
+        h+=`<tr><td>${esc(m.nombre)}</td><td>${esc(m.tipo)}</td><td>${esc(m.valor)}</td><td style="max-width:200px;font-size:12px">${esc(m.instrucciones||'')}</td>
+        <td><span class="badge ${m.activo?'badge-success':'badge-danger'}">${m.activo?'Si':'No'}</span></td>
+        <td style="display:flex;gap:4px"><button class="btn btn-sm btn-primary" onclick="showEditarMetodoPago(${m.id},'${esc(m.nombre)}','${esc(m.valor)}','${esc(m.instrucciones||'')}',${m.activo})">Editar</button>
+        <button class="btn btn-sm btn-danger" onclick="eliminarMetodoPago(${m.id})">Eliminar</button></td></tr>`;
+      });
       h+='</tbody></table>';
-    }else{h+='<p style="padding:15px;color:var(--text2)">No hay metodos configurados</p>'}
+    }else{h+='<p style="padding:15px;color:var(--text2)">No hay metodos configurados. Agrega uno con el boton de arriba.</p>'}
     h+='</div>';el.innerHTML=h;
   }
 }
@@ -5027,6 +5033,40 @@ async function rechazarComprobante(id){
   const r=await api('/api/admin/comprobante/rechazar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,admin_id:userId})});
   toast(r.ok?'Comprobante rechazado':'Error: '+(r.error||''),r.ok?'success':'error');
   if(r.ok)loadAdminPagos();
+}
+
+// --- METODOS DE PAGO ADMIN CRUD ---
+function showCrearMetodoPago(){
+  showModal(`<h3>+ Agregar Metodo de Pago</h3>
+    <div class="form-group"><label>Tipo</label><select id="mpTipo"><option value="yape">Yape</option><option value="plin">Plin</option><option value="transferencia">Transferencia Bancaria</option><option value="paypal">PayPal</option><option value="otro">Otro</option></select></div>
+    <div class="form-group"><label>Nombre</label><input type="text" id="mpNombre" placeholder="Ej: Yape Personal"></div>
+    <div class="form-group"><label>Valor (numero/cuenta/email)</label><input type="text" id="mpValor" placeholder="Ej: 976680776"></div>
+    <div class="form-group"><label>Instrucciones</label><textarea id="mpInstrucciones" rows="3" placeholder="Instrucciones para el usuario..."></textarea></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="crearMetodoPago()">Crear</button></div>`);
+}
+async function crearMetodoPago(){
+  const r=await api('/api/admin/metodos_pago/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,tipo:$('mpTipo').value,nombre:$('mpNombre').value,valor:$('mpValor').value,instrucciones:$('mpInstrucciones').value})});
+  toast(r.ok?'Metodo creado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok){closeModal();adminPagosTab('metodos')}
+}
+function showEditarMetodoPago(id,nombre,valor,instrucciones,activo){
+  showModal(`<h3>Editar Metodo de Pago #${id}</h3>
+    <div class="form-group"><label>Nombre</label><input type="text" id="mpEditNombre" value="${esc(nombre)}"></div>
+    <div class="form-group"><label>Valor</label><input type="text" id="mpEditValor" value="${esc(valor)}"></div>
+    <div class="form-group"><label>Instrucciones</label><textarea id="mpEditInstrucciones" rows="3">${esc(instrucciones)}</textarea></div>
+    <div class="form-group"><label><input type="checkbox" id="mpEditActivo" ${activo?'checked':''}> Activo</label></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="editarMetodoPagoAdmin(${id})">Guardar</button></div>`);
+}
+async function editarMetodoPagoAdmin(id){
+  const r=await api('/api/admin/metodos_pago/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id,nombre:$('mpEditNombre').value,valor:$('mpEditValor').value,instrucciones:$('mpEditInstrucciones').value,activo:$('mpEditActivo').checked?1:0})});
+  toast(r.ok?'Metodo actualizado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok){closeModal();adminPagosTab('metodos')}
+}
+async function eliminarMetodoPago(id){
+  if(!confirm('Eliminar metodo de pago #'+id+'?'))return;
+  const r=await api('/api/admin/metodos_pago/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id})});
+  toast(r.ok?'Metodo eliminado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)adminPagosTab('metodos');
 }
 
 // --- AUDITORIA ---
