@@ -338,6 +338,41 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 47. **readBody sin limite** — El parser JSON del API no tenia limite de tamaño. Fix: max 10MB.
 48. **Proxy sin X-Forwarded-For** — panel_server.js no pasaba IP del cliente a los backends. Fix: header `x-forwarded-for` en ambos proxies.
 
+#### PR 11 — Verificacion de Cuenta + Limites Removidos + Campanas Mejoradas
+
+**Sistema de Verificacion de Cuenta:**
+49. **Registro con codigo**: Panel ahora requiere codigo de registro (generado por el bot TG con `/registro`). Sin codigo, no se puede registrar.
+50. **Tabla `registration_codes`**: Almacena codigos temporales (30 min TTL) vinculados a un Telegram ID.
+51. **Columna `verificado` en `panel_users`**: Usuarios registrados con codigo = verificados. Sin codigo = no verificados.
+52. **Pantalla de verificacion**: Si un usuario no verificado intenta entrar, ve una pantalla pidiendo el codigo de verificacion.
+53. **Auto-login respeta verificacion**: La carga desde localStorage verifica el flag `panel_verificado`.
+54. **Notificacion admin**: Al verificar, se notifica al admin via WhatsApp Y Telegram.
+55. **Endpoint `/api/tg/notify_admin`**: Nuevo endpoint en web_panel.py para recibir notificaciones del WSP API y reenviar al admin via bot TG.
+56. **Columna `verificado` en tabla admin**: El panel admin muestra si cada usuario esta verificado o no.
+57. **Comando `/registro`** en bot.py: Genera codigo de registro y lo envia al usuario.
+58. **Comando `/miid`** en bot.py: Muestra el Telegram ID del usuario.
+
+**Limites Removidos:**
+59. **LIMITE_ENVIOS_DIARIOS = Infinity** (motor_wsp.js): Sin limite de envios por dia.
+60. **MAX_CUENTAS_POR_USUARIO = 999999** (config_wsp.js, bot.py): Sin limite de cuentas.
+61. **MAX_GRUPOS_POR_USUARIO = 999999** (config_wsp.js, bot.py, db.py): Sin limite de grupos.
+62. **Limite de 5 cuentas TG removido** (web_panel.py): Dos checks eliminados.
+63. **Limite de grupos TG removido** (web_panel.py): Check de max_grupos eliminado al agregar grupos.
+64. **Anti-duplicado desactivado** (motor_wsp.js): `grupoTieneActividadNueva` siempre retorna true.
+65. **Display "Ilimitado"**: Panel y bot WSP muestran "Ilimitado" o "∞" en vez de numeros gigantes.
+
+**Campanas Mejoradas:**
+66. **Botones "Iniciar Todas" / "Parar Todas"** (panel.html): Nuevas funciones `iniciarTodasCampWsp()`, `detenerTodasCampWsp()`, `iniciarTodasCampTg()`, `detenerTodasCampTg()`.
+67. **estado_detalle tracking** (motor_wsp.js, db_wsp.js): Campanas ahora rastrean su estado detallado: `iniciando`, `activa`, `reposo_XXXs`, `detenida_manual`, `detenida_completada`, `detenida_actualizacion`.
+68. **Contador de reposo mejorado** (motor_wsp.js): Muestra minutos de reposo y hora aproximada de reanudacion.
+69. **Campana no se detiene silenciosamente** (motor_wsp.js): Si hay error inesperado, se notifica al usuario con el mensaje del error.
+70. **Reposo TG mejorado** (motor.py): Campanas TG ahora notifican al usuario sobre reposo entre rondas con estadisticas.
+71. **Panel muestra estado detallado**: "Activa", "En Reposo", "Detenida (actualiz.)" con badges de colores.
+
+**Bugs Corregidos:**
+72. **Double-verify bug en registro** (index_wsp.js): `verificarCodigoRegistro()` se llamaba 2 veces — la segunda fallaba porque el codigo ya estaba usado. Fix: usar `r.telegram_id` del resultado de `panelRegistro()`.
+73. **panelRegistro ahora retorna telegram_id**: Para evitar re-verificar el codigo.
+
 ## Notas Importantes para la Siguiente IA
 1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.
 2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).

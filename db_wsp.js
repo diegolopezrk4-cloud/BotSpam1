@@ -545,6 +545,29 @@ function init() {
             FOREIGN KEY(seller_id) REFERENCES sellers(id)
         );
     `);
+    // --- REGISTRATION CODES (para verificacion de cuenta) ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS registration_codes (
+            telegram_id TEXT NOT NULL,
+            code TEXT NOT NULL UNIQUE,
+            created_at TEXT DEFAULT (datetime('now')),
+            used INTEGER DEFAULT 0
+        );
+    `);
+    // Migration: verificado column in panel_users
+    try {
+        db.prepare("SELECT verificado FROM panel_users LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE panel_users ADD COLUMN verificado INTEGER DEFAULT 0");
+        console.log("   Columna 'verificado' agregada a panel_users");
+    }
+    // Migration: estado_detalle column in campanas
+    try {
+        db.prepare("SELECT estado_detalle FROM campanas LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE campanas ADD COLUMN estado_detalle TEXT DEFAULT NULL");
+        console.log("   Columna 'estado_detalle' agregada a campanas");
+    }
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -858,12 +881,12 @@ function actualizarStatsCampana(campanaId, enviados, errores) {
     db.prepare("UPDATE campanas SET enviados = enviados + ?, errores = errores + ? WHERE id = ?").run(enviados, errores, campanaId);
 }
 
-function setCampanaActiva(campanaId, activa) {
+function setCampanaActiva(campanaId, activa, estadoDetalle) {
     if (activa) {
         const inicio = nowPeru();
-        db.prepare("UPDATE campanas SET activa = 1, inicio = ? WHERE id = ?").run(inicio, campanaId);
+        db.prepare("UPDATE campanas SET activa = 1, inicio = ?, estado_detalle = ? WHERE id = ?").run(inicio, estadoDetalle || 'activa', campanaId);
     } else {
-        db.prepare("UPDATE campanas SET activa = 0 WHERE id = ?").run(campanaId);
+        db.prepare("UPDATE campanas SET activa = 0, estado_detalle = ? WHERE id = ?").run(estadoDetalle || 'detenida', campanaId);
     }
 }
 
@@ -1303,22 +1326,35 @@ function panelLogin(telegramId, password) {
             if (cfg.ADMIN_TELEGRAM_IDS && cfg.ADMIN_TELEGRAM_IDS.includes(String(telegramId))) esAdmin = true;
         } catch (e) {}
     }
-    return { ok: true, telegram_id: user.telegram_id, username: user.username, es_admin: esAdmin };
+    const verificado = esAdmin || (user.verificado === 1);
+    return { ok: true, telegram_id: user.telegram_id, username: user.username, es_admin: esAdmin, verificado };
 }
 
-function panelRegistro(telegramId, password, username) {
+function panelRegistro(telegramId, password, username, codigo) {
     const bcrypt = require("bcryptjs");
+    // Si se proporciona codigo de registro, verificar primero
+    if (codigo) {
+        const v = verificarCodigoRegistro(codigo);
+        if (!v.ok) return v;
+        telegramId = v.telegram_id; // Usar el ID del codigo
+    }
     const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
     if (existing) return { ok: false, error: "ya_registrado" };
+    // Validar que sea un ID numerico valido
+    if (!/^\d{5,15}$/.test(String(telegramId))) return { ok: false, error: "Telegram ID invalido (solo digitos, 5-15 caracteres)" };
     const hashed = bcrypt.hashSync(password, 10);
-    db.prepare("INSERT INTO panel_users (telegram_id, username, password) VALUES (?, ?, ?)").run(String(telegramId), username || '', hashed);
+    const verificado = codigo ? 1 : 0; // Si viene con codigo, ya esta verificado
+    db.prepare("INSERT INTO panel_users (telegram_id, username, password, verificado) VALUES (?, ?, ?, ?)").run(String(telegramId), username || '', hashed, verificado);
+    if (codigo) {
+        usarCodigoRegistro(codigo);
+    }
     // Crear usuario principal si no existe y darle 1 dia demo
     const user = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(String(telegramId));
     if (!user) {
         crearUsuario(String(telegramId), username || '');
         activarMembresia(String(telegramId), 1);
     }
-    return { ok: true };
+    return { ok: true, verificado: verificado === 1, telegram_id: String(telegramId) };
 }
 
 function panelCambiarPassword(telegramId, oldPass, newPass) {
@@ -1492,17 +1528,21 @@ function setTipoMembresia(wspId, tipo) {
 
 function getTodosUsuariosAdmin() {
     const users = db.prepare("SELECT * FROM usuarios ORDER BY fecha_registro DESC").all();
-    return users.map(u => ({
-        telegram_id: u.wsp_id,
-        username: u.username || u.nombre || "",
-        plan: u.plan || "sin_plan",
-        fecha_expira: u.fecha_expira || null,
-        activo: u.activo,
-        fecha_registro: u.fecha_registro,
-        es_admin: u.es_admin || 0,
-        tipo_membresia: u.tipo_membresia || "wsp+tg",
-        origen: "bot",
-    }));
+    return users.map(u => {
+        const panelUser = db.prepare("SELECT verificado FROM panel_users WHERE telegram_id = ?").get(u.wsp_id);
+        return {
+            telegram_id: u.wsp_id,
+            username: u.username || u.nombre || "",
+            plan: u.plan || "sin_plan",
+            fecha_expira: u.fecha_expira || null,
+            activo: u.activo,
+            fecha_registro: u.fecha_registro,
+            es_admin: u.es_admin || 0,
+            tipo_membresia: u.tipo_membresia || "wsp+tg",
+            verificado: panelUser ? panelUser.verificado : 0,
+            origen: "bot",
+        };
+    });
 }
 
 // --- PROGRESO ENVIO (RESUME) ---
@@ -1994,6 +2034,57 @@ function eliminarSellerCode(codeId, sellerId) {
     db.prepare("DELETE FROM seller_codes WHERE id = ? AND seller_id = ? AND usado = 0").run(codeId, sellerId);
 }
 
+// --- REGISTRATION CODES (verificacion de cuenta) ---
+function generarCodigoRegistro(telegramId) {
+    const crypto = require("crypto");
+    const tid = String(telegramId);
+    // Invalidar codigos previos no usados de este usuario
+    db.prepare("DELETE FROM registration_codes WHERE telegram_id = ? AND used = 0").run(tid);
+    // Cleanup codigos expirados globalmente (>30 min)
+    try { db.prepare("DELETE FROM registration_codes WHERE datetime(created_at) < datetime('now', '-30 minutes') AND used = 0").run(); } catch (e) {}
+    const code = "REG-" + crypto.randomBytes(3).toString("hex").toUpperCase().slice(0, 6);
+    db.prepare("INSERT INTO registration_codes (telegram_id, code) VALUES (?, ?)").run(tid, code);
+    return code;
+}
+
+function verificarCodigoRegistro(code) {
+    const row = db.prepare("SELECT * FROM registration_codes WHERE code = ? AND used = 0").get(String(code));
+    if (!row) return { ok: false, error: "Codigo invalido o ya usado" };
+    const created = new Date(row.created_at + "Z");
+    if (Date.now() - created.getTime() > 30 * 60 * 1000) {
+        db.prepare("DELETE FROM registration_codes WHERE code = ?").run(String(code));
+        return { ok: false, error: "Codigo expirado (max 30 min)" };
+    }
+    return { ok: true, telegram_id: row.telegram_id };
+}
+
+function usarCodigoRegistro(code) {
+    db.prepare("UPDATE registration_codes SET used = 1 WHERE code = ?").run(String(code));
+}
+
+function marcarVerificado(telegramId) {
+    db.prepare("UPDATE panel_users SET verificado = 1 WHERE telegram_id = ?").run(String(telegramId));
+}
+
+function estaVerificado(telegramId) {
+    const row = db.prepare("SELECT verificado FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+    return row ? row.verificado === 1 : false;
+}
+
+// --- CAMPAIGN STATE DETAIL ---
+function setCampanaEstadoDetalle(campanaId, estadoDetalle) {
+    db.prepare("UPDATE campanas SET estado_detalle = ? WHERE id = ?").run(estadoDetalle || null, campanaId);
+}
+
+function marcarCampanasDetenidaPorActualizacion() {
+    const activas = db.prepare("SELECT id FROM campanas WHERE activa = 1").all();
+    const ids = activas.map(c => c.id);
+    for (const id of ids) {
+        db.prepare("UPDATE campanas SET activa = 0, estado_detalle = 'detenida_actualizacion' WHERE id = ?").run(id);
+    }
+    return ids;
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -2069,4 +2160,8 @@ module.exports = {
     getSellerInvitesCount, getSellerInvites, registrarSellerInvite, isSellerUser,
     // Seller codes
     generarSellerCode, getSellerCodes, getSellerCodesPendientes, canjearSellerCode, eliminarSellerCode,
+    // Registration codes (verificacion de cuenta)
+    generarCodigoRegistro, verificarCodigoRegistro, usarCodigoRegistro, marcarVerificado, estaVerificado,
+    // Campaign state detail
+    setCampanaEstadoDetalle, marcarCampanasDetenidaPorActualizacion,
 };
