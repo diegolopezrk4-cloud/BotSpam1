@@ -313,6 +313,8 @@ function clearLink(userId, nombre) {
     }
 }
 
+const connectingPromises = {}; // { key: Promise } — prevents parallel connections to the same account
+
 async function getOrConnectClient(userId, nombre) {
     if (nombre === _botNombre && _botSock && _botSock.user) {
         return _botSock;
@@ -331,10 +333,21 @@ async function getOrConnectClient(userId, nombre) {
             delete clientSessions[key];
         }
     }
+    // If another call is already connecting this account, wait for it
+    if (connectingPromises[key]) {
+        return await connectingPromises[key];
+    }
     const sesiones = db.getSesiones(userId);
     const sesion = sesiones.find(s => s.nombre === nombre);
     if (!sesion) throw new Error(`Cuenta '${nombre}' no encontrada`);
-    return await connectClientAccount(userId, nombre, sesion.telefono);
+    // Lock: only one connection attempt at a time per account
+    connectingPromises[key] = connectClientAccount(userId, nombre, sesion.telefono);
+    try {
+        const sock = await connectingPromises[key];
+        return sock;
+    } finally {
+        delete connectingPromises[key];
+    }
 }
 
 // ============================================================
@@ -436,7 +449,7 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
     const textoFinal = addInvisibleChars(mensaje);
     try {
         let metadata = null;
-        for (let metaRetry = 0; metaRetry < 2; metaRetry++) {
+        for (let metaRetry = 0; metaRetry < 3; metaRetry++) {
             try {
                 metadata = await sock.groupMetadata(groupJid);
                 break;
@@ -445,8 +458,8 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
                 if (errMsg.includes("not-authorized") || errMsg.includes("forbidden") || errMsg.includes("item-not-found") || errMsg.includes("404")) {
                     return { sent: false, delivered: false, reason: "not_member" };
                 }
-                if (metaRetry === 0) {
-                    await delay(2000);
+                if (metaRetry < 2) {
+                    await delay(3000 * (metaRetry + 1));
                     continue;
                 }
                 return { sent: false, delivered: false, reason: "metadata_error" };

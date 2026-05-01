@@ -3791,14 +3791,16 @@ async function startBot() {
 
             // Auto-restart campaigns that were stopped by update (staggered to avoid connection conflicts)
             if (campanasDetenidas && campanasDetenidas.length) {
-                console.log(`[RESTART] ${campanasDetenidas.length} campana(s) pendientes de reinicio...`);
+                console.log(`[RESTART] ${campanasDetenidas.length} campana(s) pendientes de reinicio. Esperando 30s para sincronizar...`);
                 const porUsuario = {};
                 for (const c of campanasDetenidas) {
                     if (!porUsuario[c.user_id]) porUsuario[c.user_id] = [];
                     porUsuario[c.user_id].push(c);
                 }
-                // Stagger restarts with 10s delay between each to avoid WhatsApp connection conflicts
+                // Wait 30s for WhatsApp to fully sync group metadata before restarting campaigns
+                // Then stagger restarts with 10s delay between each
                 (async () => {
+                    await delay(30000);
                     for (const [uid, camps] of Object.entries(porUsuario)) {
                         let reiniciadas = [];
                         let fallidas = [];
