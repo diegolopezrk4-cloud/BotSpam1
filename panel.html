@@ -4937,8 +4937,9 @@ async function loadChatsWsp(){
     api('/api/chat/contactos?u='+userId+'&cuenta='+encodeURIComponent(cuenta))
   ]);
   const merged=new Map();
-  if(synced.ok&&synced.chats) synced.chats.forEach(c=>merged.set(c.jid,{jid:c.jid,nombre:c.nombre,unread:c.unread||0,ultimo_msg:''}));
+  if(synced.ok&&synced.chats) synced.chats.forEach(c=>{if(!c.jid.endsWith('@g.us'))merged.set(c.jid,{jid:c.jid,nombre:c.nombre,unread:c.unread||0,ultimo_msg:''})});
   if(local.ok&&local.contacts) local.contacts.forEach(c=>{
+    if(c.jid.endsWith('@g.us'))return;
     if(merged.has(c.jid)){const m=merged.get(c.jid);m.ultimo_msg=c.ultimo_msg||'';if(c.nombre)m.nombre=c.nombre;}
     else merged.set(c.jid,{jid:c.jid,nombre:c.nombre,unread:0,ultimo_msg:c.ultimo_msg||''});
   });
@@ -5018,14 +5019,14 @@ async function enviarMsgChatWsp(){
   msgDiv.textContent=msg;
   $('chatWspMensajes').appendChild(msgDiv);
   $('chatWspMensajes').scrollTop=$('chatWspMensajes').scrollHeight;
-  const r=await api('/api/chat/enviar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,jid:chatWspSelectedJid,mensaje:msg,cuenta:cuenta,nombre:chatWspSelectedName,_token:token})});
+  const r=await api('/api/chat/enviar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,jid:chatWspSelectedJid,mensaje:msg,cuenta:cuenta,nombre:chatWspSelectedName})});
   if(!r.ok){
     const errDiv=document.createElement('div');
     errDiv.style.cssText='align-self:flex-end;color:var(--danger);font-size:12px;padding:4px 8px';
     errDiv.textContent='Error: '+(r.error||'No enviado');
     $('chatWspMensajes').appendChild(errDiv);
   }else{
-    // Refresh contacts list to show this at top
+    toast('Mensaje enviado','success');
     setTimeout(()=>{loadChatsWsp()},1000);
   }
 }

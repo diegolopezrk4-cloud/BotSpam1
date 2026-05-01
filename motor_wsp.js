@@ -104,8 +104,8 @@ async function connectClientAccount(userId, nombre, telefono) {
                 if (jid.endsWith("@g.us") && !msg.key.fromMe && msg.message) {
                     registrarActividadGrupo(jid);
                 }
-                // Save incoming messages to chat history
-                if (!msg.key.fromMe && msg.message) {
+                // Save incoming personal messages to chat history (not groups)
+                if (jid.endsWith("@s.whatsapp.net") && !msg.key.fromMe && msg.message) {
                     const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || "";
                     if (text) {
                         try { db.saveChatMessage(userId, nombre, jid, msg.pushName||'', text, 'in'); } catch(e){}
