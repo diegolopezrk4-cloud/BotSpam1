@@ -17,8 +17,8 @@ const grupoUltimaActividad = {};
 // Track campaign rest state for countdown: { campanaId: { inicio: timestamp_ms, duracion_seg: number } }
 const campanaReposo = {};
 
-// Limite de envios diarios por cuenta (proteccion anti-ban)
-const LIMITE_ENVIOS_DIARIOS = 500;
+// Limite de envios diarios por cuenta (sin limite)
+const LIMITE_ENVIOS_DIARIOS = 999999;
 
 // Whole-word matching to avoid partial matches (e.g. 'no' in 'noches')
 function matchWholeWord(text, word) {
@@ -1219,16 +1219,12 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             if (!batchSize) { batchSize = 15; delayMinutes = delayMinutes || 3; }
             const DELAY_ENTRE_LOTES = batchSize ? delayMinutes * 60 * 1000 : 0;
             const displayName = grupoNombre || grupoJid || "seleccionados";
-            // Anti-ban: hourly limit (max 60 messages per hour)
-            const HOURLY_LIMIT = 60;
-            let hourlyCount = 0;
-            let hourStart = Date.now();
 
             const batchInfo = batchSize ? `\n📦 Lotes: ${batchSize} por lote, pausa ${delayMinutes} min entre lotes` : "";
             const resumeInfo = startIndex > 0 ? `\n🔄 Reanudando desde #${startIndex + 1}` : "";
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 5-15 seg aleatorio entre cada envio${batchInfo}\n\u{1F6E1} Anti-ban: lim ${HOURLY_LIMIT}/hora\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 10 / 60)} min`,
+                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 5-15 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 10 / 60)} min`,
                 });
             } catch (e) {}
 
@@ -1365,23 +1361,6 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                     const progressiveExtra = Math.floor(enviados / 20) * 500;
                     const cooldown = DELAY_MIN + Math.floor(Math.random() * (DELAY_MAX - DELAY_MIN)) + progressiveExtra;
                     await delay(cooldown);
-
-                    // Anti-ban: hourly limit check
-                    hourlyCount++;
-                    if (hourlyCount >= HOURLY_LIMIT) {
-                        const elapsed = Date.now() - hourStart;
-                        const remaining = 3600000 - elapsed;
-                        if (remaining > 0) {
-                            try {
-                                await botSock.sendMessage(userId, {
-                                    text: `\u{1F6E1} *Anti-ban*: Limite ${HOURLY_LIMIT}/hora alcanzado. Pausando ${Math.round(remaining/60000)} min...`,
-                                });
-                            } catch (e) {}
-                            await delay(remaining + 60000); // Wait until next hour + 1min buffer
-                        }
-                        hourlyCount = 0;
-                        hourStart = Date.now();
-                    }
                 }
             }
 

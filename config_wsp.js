@@ -36,7 +36,7 @@ module.exports = {
 
     // Limites
     MAX_CUENTAS_POR_USUARIO: 5,
-    MAX_GRUPOS_POR_USUARIO: 25,
+    MAX_GRUPOS_POR_USUARIO: 999999,
 
     // Base de datos
     DB_PATH: "./wsp_titan.db",
