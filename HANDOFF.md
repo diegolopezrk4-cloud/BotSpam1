@@ -850,6 +850,53 @@ python3 -c "import ast; ast.parse(open('bot.py').read())"  # OK
 
 ---
 
+## Cambios v11.1 — Escaneo Profundo de Bugs (PR #33 continuacion)
+
+Escaneo completo de todos los archivos del proyecto buscando bugs, race conditions, memory leaks y vulnerabilidades.
+
+#### BUG-013: Notificaciones WSP fallaban silenciosamente (CRITICO)
+- **Donde**: `motor_wsp.js` — funciones `enviarAPersonales()`, `enviarASeleccionados()`, `iniciarReporteDiario()`
+- **Sintoma**: Las notificaciones de progreso, completado y error de Envio Personal, Envio a Miembros y Reporte Diario nunca llegaban al usuario por WhatsApp
+- **Causa**: 12 llamadas a `botSock.sendMessage(userId, ...)` usaban el userId como string plano (ej: `"8001675901"`) sin convertirlo a formato JID (`"8001675901@s.whatsapp.net"`). Baileys requiere el JID completo
+- **Fix**: Todas las 12 llamadas ahora usan `notificarUsuario(botSock, userId, texto)` que hace la conversion correctamente (linea 582)
+- **Lineas afectadas**: ~988, ~1183, ~1197, ~1232, ~1239, ~1256, ~1262, ~1303, ~1328, ~1338, ~1427, ~1447
+
+#### BUG-014: reconnectLocks era codigo muerto
+- **Donde**: `motor_wsp.js` — `connectClientAccount()` linea 47-55
+- **Sintoma**: Multiples conexiones paralelas a la misma cuenta podian ocurrir (sin el lock de `connectingPromises`)
+- **Causa**: `reconnectLocks[key]` se verificaba en linea 53 pero nunca se seteaba a `true`
+- **Fix**: Ahora se activa `reconnectLocks[key] = true` al inicio y se libera con `delete reconnectLocks[key]` en todos los paths de salida (exito, error, timeout, reject)
+
+#### BUG-015: Memory leak en sesiones de login TG
+- **Donde**: `web_panel.py` — `web_login_sessions` y `web_qr_sessions`
+- **Sintoma**: Memoria del servidor crecia gradualmente, TelegramClients zombies acumulandose
+- **Causa**: Si un usuario iniciaba login (send_code/QR) pero no completaba la verificacion, el TelegramClient quedaba conectado en memoria para siempre
+- **Fix**: Agregado `_cleanup_stale_sessions()` task asincrono que cada 2 minutos limpia sesiones > 10 minutos, desconectando los clients. Agregado campo `created_at` a ambos dicts de sesiones
+
+#### Mejora: Timer de espera entre lotes en Envio a Miembros
+- **Donde**: `panel.html` + `motor_wsp.js`
+- **Sintoma**: El usuario no sabia cuanto faltaba para el siguiente lote
+- **Fix**: Se agrego un contador visual que muestra el tiempo restante para el proximo lote de envios
+
+### Archivos Modificados en v11.1
+| Archivo | Cambios |
+|---|---|
+| `motor_wsp.js` | 12 sendMessage→notificarUsuario; reconnectLocks fix; endpoint de estado de lote |
+| `web_panel.py` | Cleanup task para sesiones expiradas; timestamps en sesiones |
+| `panel.html` | Timer visual de espera entre lotes en Envio a Miembros |
+
+### Verificacion de Sintaxis v11.1
+```bash
+node -c index_wsp.js   # OK
+node -c motor_wsp.js   # OK
+node -c db_wsp.js      # OK
+node -c panel_server.js # OK
+python3 -c "import ast; ast.parse(open('bot.py').read())"      # OK
+python3 -c "import ast; ast.parse(open('web_panel.py').read())" # OK
+```
+
+---
+
 ## REGLAS PARA LA SIGUIENTE IA
 
 ### REGLA #1 — NUNCA elimines ninguna mejora existente

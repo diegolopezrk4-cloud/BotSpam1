@@ -847,6 +847,23 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-primary" onclick="agregarMiembrosAGrupo()">➕ Agregar Miembros al Grupo Destino</button>
         <button class="btn btn-danger" onclick="cancelarEnvioPersonal()">🛑 Detener Envio</button>
       </div>
+      <!-- Estado del envio con countdown -->
+      <div id="envioEstadoBox" style="display:none;background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:2px solid var(--accent)">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span id="envioEstadoIcon" style="font-size:24px">📤</span>
+          <div style="flex:1;min-width:200px">
+            <div style="font-weight:bold;font-size:14px" id="envioEstadoTitulo">Enviando...</div>
+            <div style="font-size:13px;color:var(--text2)" id="envioEstadoDetalle"></div>
+            <div style="margin-top:8px;background:var(--border);border-radius:8px;height:8px;overflow:hidden">
+              <div id="envioEstadoBarra" style="height:100%;background:var(--accent);border-radius:8px;transition:width 0.5s"></div>
+            </div>
+          </div>
+          <div id="envioEstadoCountdown" style="display:none;text-align:center;min-width:100px">
+            <div style="font-size:28px;font-weight:bold;color:var(--accent);font-family:monospace" id="envioCountdownTimer">00:00</div>
+            <div style="font-size:11px;color:var(--text2)">Proximo lote</div>
+          </div>
+        </div>
+      </div>
       <!-- Agregar miembros desde archivo TXT -->
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
         <h4 style="margin:0 0 10px 0">📋 Agregar Miembros desde Lista</h4>
@@ -2062,7 +2079,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoMsgSelect');checkPromoEnvioProgreso()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,auditoria:loadAuditoria,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){},pagos:loadPagos,adminpagos:loadAdminPagos,tickets:loadTickets,analytics:loadAnalytics,webhooks:loadWebhooks,admintickets:loadAdminTickets,adminbackups:loadAdminBackups};
+    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:function(){loadEnvioMiembros();iniciarPollingEnvio()},enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoMsgSelect');checkPromoEnvioProgreso()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,auditoria:loadAuditoria,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){},pagos:loadPagos,adminpagos:loadAdminPagos,tickets:loadTickets,analytics:loadAnalytics,webhooks:loadWebhooks,admintickets:loadAdminTickets,adminbackups:loadAdminBackups};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -3235,8 +3252,60 @@ async function enviarAMiembros(){
     payload.imagen_nombre=imgFile.name;
   }
   const r=await api('/api/enviar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.grupo_nombre?' de '+r.grupo_nombre:'')+(r.filtered?' ('+r.filtered+' filtrados)':'')+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');}
+  if(r.ok){toast('Envio iniciado: '+r.total+' miembros'+(r.grupo_nombre?' de '+r.grupo_nombre:'')+(r.filtered?' ('+r.filtered+' filtrados)':'')+(r.batch_size?' (lotes de '+r.batch_size+')':''),'success');iniciarPollingEnvio();}
   else{toast('Error: '+(r.error||''),'error');}
+}
+let _envioPollingInterval=null;
+let _envioCountdownInterval=null;
+function iniciarPollingEnvio(){
+  detenerPollingEnvio();
+  actualizarEstadoEnvio();
+  _envioPollingInterval=setInterval(actualizarEstadoEnvio,3000);
+}
+function detenerPollingEnvio(){
+  if(_envioPollingInterval){clearInterval(_envioPollingInterval);_envioPollingInterval=null;}
+  if(_envioCountdownInterval){clearInterval(_envioCountdownInterval);_envioCountdownInterval=null;}
+}
+async function actualizarEstadoEnvio(){
+  if(!userId)return;
+  try{
+    const r=await api('/api/envio_estado?u='+userId);
+    const box=$('envioEstadoBox');
+    if(!r.ok||!r.activo){
+      box.style.display='none';
+      detenerPollingEnvio();
+      return;
+    }
+    box.style.display='block';
+    const pct=r.total>0?Math.round((r.enviados+r.errores)/r.total*100):0;
+    $('envioEstadoBarra').style.width=pct+'%';
+    if(r.enPausa){
+      $('envioEstadoIcon').textContent='\u23F8';
+      $('envioEstadoTitulo').textContent='Pausa entre lotes — esperando...';
+      $('envioEstadoDetalle').textContent=r.enviados+'/'+r.total+' enviados | '+r.errores+' errores'+(r.grupoNombre?' | '+r.grupoNombre:'');
+      $('envioEstadoCountdown').style.display='block';
+      iniciarCountdown(r.pausaRestante);
+    }else{
+      $('envioEstadoIcon').textContent='\u{1F4E8}';
+      $('envioEstadoTitulo').textContent='Enviando '+(r.tipo==='miembros'?'a miembros':'personal')+'...';
+      $('envioEstadoDetalle').textContent=r.enviados+'/'+r.total+' enviados | '+r.errores+' errores'+(r.grupoNombre?' | '+r.grupoNombre:'');
+      $('envioEstadoCountdown').style.display='none';
+    }
+  }catch(e){}
+}
+function iniciarCountdown(segs){
+  if(_envioCountdownInterval){clearInterval(_envioCountdownInterval);_envioCountdownInterval=null;}
+  let restante=segs;
+  function render(){
+    const m=Math.floor(restante/60);
+    const s=restante%60;
+    const el=$('envioCountdownTimer');
+    if(el)el.textContent=(m<10?'0':'')+m+':'+(s<10?'0':'')+s;
+    if(restante<=0&&_envioCountdownInterval){clearInterval(_envioCountdownInterval);_envioCountdownInterval=null;}
+    restante--;
+  }
+  render();
+  _envioCountdownInterval=setInterval(render,1000);
 }
 async function debugTestSend(){
   const numero=$('debugNumero').value.trim(),msg=$('debugMsg').value.trim(),cuenta=$('emCuenta').value;

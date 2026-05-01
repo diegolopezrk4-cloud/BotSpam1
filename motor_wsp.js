@@ -1168,6 +1168,12 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
     const task = {
         running: true,
         cancel: () => { cancelled = true; },
+        enviados: 0,
+        errores: 0,
+        total: 0,
+        batchPauseUntil: null,
+        batchSize: parseInt(batchSize) || 0,
+        tipo: "personal",
     };
     envioPersonalActivo[userId] = task;
 
@@ -1197,6 +1203,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
             }
 
             const total = chats.length;
+            task.total = total;
             let enviados = 0;
             let errores = 0;
             // Random cooldown between 3-8 seconds
@@ -1227,10 +1234,12 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
                         await botSock.sendMessage(chat.jid, { text: textoFinal });
                     }
                     enviados++;
+                    task.enviados = enviados;
                     db.registrarEnvio(userId, 0, chat.jid, "enviado_personal");
                     if (_promoListeners[userId]) _promoListeners[userId].promoSentJids.add(chat.jid);
                 } catch (e) {
                     errores++;
+                    task.errores = errores;
                     console.error(`Error enviando a ${chat.numero}: ${e.message}`);
                     db.registrarEnvio(userId, 0, chat.jid, "error_personal");
                     // Add to retry queue (Mejora 4)
@@ -1246,12 +1255,15 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
 
                 // Batch pause: if batch_size configured, pause every N messages
                 if (batchSize && enviados > 0 && enviados % batchSize === 0 && !cancelled) {
+                    const pausaMs = (delayMinutes || 5) * 60 * 1000;
+                    task.batchPauseUntil = Date.now() + pausaMs;
                     try {
                         await notificarUsuario(botSock, userId, `\u23F8 Pausa de lote: ${enviados}/${total} enviados. Esperando ${delayMinutes} min...`);
                     } catch (e) {}
                     // Save progress in case of cancel during pause
                     db.guardarProgresoEnvio(userId, 'personal_' + userId, enviados, total, mensaje, chats.map(c => c.jid), 'Chats personales');
-                    await delay((delayMinutes || 5) * 60 * 1000);
+                    await delay(pausaMs);
+                    task.batchPauseUntil = null;
                     if (cancelled) break;
                 }
 
@@ -1290,12 +1302,20 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
         running: true,
         taskId,
         cancel: () => { cancelled = true; },
+        enviados: 0,
+        errores: 0,
+        total: jids.length,
+        batchPauseUntil: null,
+        batchSize: 0,
+        tipo: "miembros",
+        grupoNombre: grupoNombre || grupoJid || "seleccionados",
     };
     envioPersonalActivo[userId] = task;
 
     batchSize = parseInt(batchSize) || 0;
     delayMinutes = parseInt(delayMinutes) || 5;
     startIndex = parseInt(startIndex) || 0;
+    task.batchSize = batchSize;
 
     (async () => {
         try {
@@ -1335,10 +1355,12 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                     if (grupoJid) {
                         db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
                     }
+                    task.batchPauseUntil = Date.now() + DELAY_ENTRE_LOTES;
                     try {
                         await notificarUsuario(botSock, userId, `⏸ Lote de ${batchSize} completado (${i}/${total}). Pausando ${delayMinutes} minutos...`);
                     } catch (e) {}
                     await delay(DELAY_ENTRE_LOTES);
+                    task.batchPauseUntil = null;
                     if (cancelled) {
                         if (grupoJid) {
                             db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
@@ -1413,11 +1435,13 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
 
                     console.log(`[EnvioMiembros]   OK → key.id=${msgId || "?"} entrega=${estadoEntrega || "?"}`);
                     enviados++;
+                    task.enviados = enviados;
                     db.registrarEnvio(userId, 0, jid, "enviado_personal", grupoNombre, "personal", estadoEntrega, (mensaje || "").substring(0, 50));
                     if (_promoListeners[userId]) _promoListeners[userId].promoSentJids.add(jid);
                 } catch (e) {
                     console.log(`[EnvioMiembros]   ERROR → ${e.message}`);
                     errores++;
+                    task.errores = errores;
                     db.registrarEnvio(userId, 0, jid, "error_personal", grupoNombre, "personal");
                     // Add to retry queue (Mejora 4)
                     try { db.agregarRetryQueue(userId, jid, mensaje, imagenPath); } catch (re) {}

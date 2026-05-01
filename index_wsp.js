@@ -752,6 +752,32 @@ poll();
                 return res.end(JSON.stringify({ ok: stopped }));
             }
 
+            // GET /api/envio_estado — Estado del envio personal/miembros activo (progreso + countdown)
+            if (url.pathname === "/api/envio_estado" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const task = motor.envioPersonalActivo[userId];
+                if (!task || !task.running) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, activo: false }));
+                }
+                const now = Date.now();
+                const pauseRemaining = task.batchPauseUntil ? Math.max(0, Math.round((task.batchPauseUntil - now) / 1000)) : 0;
+                res.writeHead(200);
+                return res.end(JSON.stringify({
+                    ok: true,
+                    activo: true,
+                    tipo: task.tipo || "personal",
+                    enviados: task.enviados || 0,
+                    errores: task.errores || 0,
+                    total: task.total || 0,
+                    batchSize: task.batchSize || 0,
+                    enPausa: pauseRemaining > 0,
+                    pausaRestante: pauseRemaining,
+                    grupoNombre: task.grupoNombre || "",
+                }));
+            }
+
             // ─── PANEL AUTH ───
             if (url.pathname === "/api/panel_login" && req.method === "POST") {
                 const body = await readBody();
