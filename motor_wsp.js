@@ -1199,8 +1199,10 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
     }
 
     let cancelled = false;
+    const taskId = ++_taskIdCounter;
     const task = {
         running: true,
+        taskId,
         cancel: () => { cancelled = true; },
         enviados: 0,
         errores: 0,
@@ -1299,7 +1301,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
                         await notificarUsuario(botSock, userId, `\u23F8 Pausa de lote: ${enviados}/${total} enviados. Esperando ${delayMinutes} min...`);
                     } catch (e) {}
                     // Save progress in case of cancel during pause
-                    db.guardarProgresoEnvio(userId, 'personal_' + userId, enviados, total, mensaje, chats.map(c => c.jid), 'Chats personales');
+                    db.guardarProgresoEnvio(userId, 'personal_' + userId, chatIdx + 1, total, mensaje, chats.map(c => c.jid), 'Chats personales');
                     await delay(pausaMs);
                     task.batchPauseUntil = null;
                     if (cancelled) break;
@@ -1333,14 +1335,16 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
                 await notificarUsuario(botSock, userId, `\u274C Error en envio personal: ${e.message}`);
             } catch (ex) {}
         } finally {
-            delete envioPersonalActivo[userId];
+            if (envioPersonalActivo[userId]?.taskId === taskId) {
+                delete envioPersonalActivo[userId];
+            }
         }
     })();
 
     return true;
 }
 
-let _taskIdCounter = 0;
+let _taskIdCounter = 1000;
 async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes, grupoNombre, grupoJid, startIndex) {
     if (envioPersonalActivo[userId]) return false;
 

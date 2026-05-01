@@ -288,7 +288,7 @@ poll();
 
         // Helper para leer body POST con limite de tamaño (50MB max for images)
         const MAX_BODY_SIZE = 50 * 1024 * 1024;
-        const readBody = () => new Promise((resolve) => {
+        const _parseBody = () => new Promise((resolve) => {
             let data = "";
             let size = 0;
             let aborted = false;
@@ -307,6 +307,20 @@ poll();
             req.on("end", () => { if (!aborted) { try { resolve(JSON.parse(data)); } catch { resolve({}); } } });
             req.on("error", () => { if (!aborted) resolve({}); });
         });
+        // Centralized POST identity verification: ensure body.u matches authenticated user
+        const readBody = async () => {
+            const body = await _parseBody();
+            if (req._authUser && body && body.u && String(body.u) !== String(req._authUser)) {
+                const authU = db.getUsuario(String(req._authUser));
+                const isAdmin = (authU && authU.es_admin === 1) || (config.ADMIN_TELEGRAM_IDS && config.ADMIN_TELEGRAM_IDS.includes(String(req._authUser)));
+                if (!isAdmin) {
+                    const err = new Error("No autorizado para modificar datos de otro usuario");
+                    err._authForbidden = true;
+                    throw err;
+                }
+            }
+            return body;
+        };
 
         // Helper: obtener IP del cliente
         const getClientIp = () => req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress || "";
@@ -3677,6 +3691,11 @@ poll();
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
 
         } catch (e) {
+            if (res.headersSent) return;
+            if (e._authForbidden) {
+                res.writeHead(403);
+                return res.end(JSON.stringify({ ok: false, error: e.message }));
+            }
             res.writeHead(500);
             return res.end(JSON.stringify({ ok: false, error: e.message }));
         }
