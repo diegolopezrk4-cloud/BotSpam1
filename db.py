@@ -88,7 +88,7 @@ async def init_db():
         await db.execute("""
             CREATE TABLE IF NOT EXISTS limites_usuario (
                 user_id INTEGER PRIMARY KEY,
-                max_grupos INTEGER DEFAULT 25,
+                max_grupos INTEGER DEFAULT 999999,
                 FOREIGN KEY(user_id) REFERENCES usuarios(telegram_id)
             )
         """)
@@ -501,7 +501,7 @@ async def get_max_grupos(user_id):
             "SELECT max_grupos FROM limites_usuario WHERE user_id=?", (user_id,)
         ) as cur:
             row = await cur.fetchone()
-            return row[0] if row else 25
+            return row[0] if row else 999999
 
 async def set_max_grupos(user_id, limite):
     async with _connect() as db:

@@ -96,8 +96,6 @@ async def api_tg_auth_send_code(request):
         return web.json_response({"ok": False, "error": "Nombre invalido (solo letras, numeros, guion bajo, max 30)"})
 
     sesiones = await db.get_sesiones(user_id)
-    if len(sesiones) >= 5:
-        return web.json_response({"ok": False, "error": "Limite de 5 cuentas alcanzado"})
 
     for s in sesiones:
         if s["nombre"].lower() == nombre.lower():
@@ -218,8 +216,6 @@ async def api_tg_auth_qr_start(request):
     if not re.match(r'^[a-zA-Z0-9_]{1,30}$', nombre):
         return web.json_response({"ok": False, "error": "Nombre invalido"})
     sesiones = await db.get_sesiones(user_id)
-    if len(sesiones) >= 5:
-        return web.json_response({"ok": False, "error": "Limite de 5 cuentas"})
     for s in sesiones:
         if s["nombre"].lower() == nombre.lower():
             return web.json_response({"ok": False, "error": f"Ya tienes cuenta '{nombre}'"})
@@ -346,11 +342,6 @@ async def api_tg_grupos_add(request):
     link = body.get("link", "").strip()
     if not user_id or not link:
         return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
-
-    max_g = await db.get_max_grupos(user_id)
-    grupos_actuales = await db.get_grupos(user_id)
-    if len(grupos_actuales) >= max_g:
-        return web.json_response({"ok": False, "error": f"Limite de {max_g} grupos alcanzado"})
 
     if link.startswith("t.me/"):
         link = "https://" + link
@@ -1033,6 +1024,25 @@ async def api_tg_send_recovery(request):
         return web.json_response({"ok": False, "error": f"No se pudo enviar el mensaje. Asegurate de haber iniciado el bot (@BotSpamJM_bot) primero."})
 
 
+async def api_tg_notify_admin(request):
+    """Receive notification from WSP API and forward to admin via TG bot."""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "JSON invalido"}, status=400)
+    admin_id = body.get("admin_id")
+    message = body.get("message", "")
+    if not admin_id or not message:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    if not aiogram_bot:
+        return web.json_response({"ok": False, "error": "Bot TG no disponible"})
+    try:
+        await aiogram_bot.send_message(int(admin_id), message, parse_mode="Markdown")
+        return web.json_response({"ok": True})
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)})
+
+
 # ─────────────────────────────────────────
 #   SERVIDOR WEB
 # ─────────────────────────────────────────
@@ -1115,6 +1125,9 @@ def create_app():
 
     # Sync membresia
     app.router.add_post("/api/tg/sync_membresia", api_tg_sync_membresia)
+
+    # Notify admin via TG bot
+    app.router.add_post("/api/tg/notify_admin", api_tg_notify_admin)
 
     # Recovery
     app.router.add_post("/api/tg/send_recovery", api_tg_send_recovery)

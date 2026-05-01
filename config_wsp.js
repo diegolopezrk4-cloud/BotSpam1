@@ -19,9 +19,9 @@ module.exports = {
         mensual: { dias: 30, precio: "S/ 25.00", emoji: "\u{1F947}" },
     },
 
-    // Limites
-    MAX_CUENTAS_POR_USUARIO: 5,
-    MAX_GRUPOS_POR_USUARIO: 25,
+    // Sin limites (ilimitado)
+    MAX_CUENTAS_POR_USUARIO: 999999,
+    MAX_GRUPOS_POR_USUARIO: 999999,
 
     // Base de datos
     DB_PATH: "./wsp_titan.db",

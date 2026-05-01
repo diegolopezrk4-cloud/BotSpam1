@@ -318,24 +318,35 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="logo">📝</div>
     <h1>Crear Cuenta</h1>
     <p class="subtitle">Registrate para acceder al panel — Demo 1 dia gratis</p>
-    <div class="tg-id-help" id="tgIdHelp">
-      <h4>📌 Como obtener tu ID de Telegram</h4>
-      <ol>
-        <li>Abre Telegram y busca el bot: <a href="https://t.me/BotSpamJM_bot" target="_blank">@BotSpamJM_bot</a></li>
-        <li>Inicia el bot con /start y usa el comando /miid para obtener tu <b>ID numerico</b></li>
-        <li>Copia ese numero y pegalo aqui abajo</li>
-      </ol>
-      <p style="margin-top:10px;font-size:12px;color:var(--text2)">Tambien puedes contactar al creador para ayuda: <a href="https://t.me/JhonnyVip05" target="_blank">@JhonnyVip05</a></p>
+    <!-- Step 1: ID + username + password -->
+    <div id="regStep1">
+      <div class="tg-id-help" id="tgIdHelp">
+        <h4>📌 Como obtener tu ID de Telegram</h4>
+        <ol>
+          <li>Abre Telegram y busca el bot: <a href="https://t.me/BotSpamJM_bot" target="_blank">@BotSpamJM_bot</a></li>
+          <li>Inicia el bot con <b>/start</b> y usa <b>/miid</b> para obtener tu ID numerico</li>
+        </ol>
+        <p style="margin-top:10px;font-size:12px;color:var(--text2)">Tambien puedes contactar al creador para ayuda: <a href="https://t.me/JhonnyVip05" target="_blank">@JhonnyVip05</a></p>
+      </div>
+      <input type="text" id="regTelegramId" placeholder="Tu ID de Telegram (numerico)" autocomplete="off">
+      <input type="text" id="regUsername" placeholder="Nombre de usuario" autocomplete="off">
+      <input type="password" id="regPass" placeholder="Crear contrasena">
+      <input type="password" id="regPass2" placeholder="Confirmar contrasena">
+      <ul class="password-rules">
+        <li>Minimo 4 caracteres</li>
+        <li>Obtendras 1 dia de demo gratis al registrarte</li>
+      </ul>
+      <button class="btn-main" onclick="doRegisterStep1()" id="btnRegister">Registrarse</button>
     </div>
-    <input type="text" id="regId" placeholder="Tu ID de Telegram (numerico)" autocomplete="off">
-    <input type="text" id="regUsername" placeholder="Nombre de usuario" autocomplete="off">
-    <input type="password" id="regPass" placeholder="Crear contrasena">
-    <input type="password" id="regPass2" placeholder="Confirmar contrasena">
-    <ul class="password-rules">
-      <li>Minimo 4 caracteres</li>
-      <li>Obtendras 1 dia de demo gratis al registrarte</li>
-    </ul>
-    <button class="btn-main" onclick="doRegister()" id="btnRegister">Registrarse</button>
+    <!-- Step 2: Enter verification code -->
+    <div id="regStep2" style="display:none">
+      <p style="color:var(--accent2);font-size:13px;margin-bottom:12px">📨 Codigo de verificacion enviado a tu Telegram: <b id="regIdDisplay"></b></p>
+      <p style="color:var(--text2);font-size:12px;margin-bottom:12px">El codigo expira en 5 minutos. Si no lo recibes, verifica que iniciaste el bot @BotSpamJM_bot en Telegram.</p>
+      <input type="text" id="regCode" placeholder="Codigo de verificacion (REG-XXXXXX)" autocomplete="off" style="text-transform:uppercase;text-align:center;font-size:18px;letter-spacing:4px">
+      <button class="btn-main" onclick="doRegisterStep2()" id="btnRegVerify">Verificar y Entrar</button>
+      <div class="divider"></div>
+      <button class="link-btn" onclick="doResendRegCode()" id="btnResendCode">Reenviar codigo</button>
+    </div>
     <div class="divider"></div>
     <button class="link-btn" onclick="showLogin()">Ya tengo cuenta — Iniciar Sesion</button>
     <div style="margin-top:12px"><button class="link-btn" onclick="showPlatformSelector()" style="font-size:12px">⬅ Cambiar plataforma</button></div>
@@ -381,6 +392,24 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <button class="link-btn" onclick="showLogin()">Volver al Login</button>
     <div class="auth-error" id="recoverError"></div>
     <div class="auth-success" id="recoverSuccess"></div>
+  </div>
+</div>
+
+<!-- VERIFICATION SCREEN -->
+<div class="auth-container" id="authVerify" style="display:none">
+  <div class="auth-card" style="max-width:500px">
+    <div class="logo">🔐</div>
+    <h1>Verifica tu Cuenta</h1>
+    <p class="subtitle">Tu cuenta necesita verificacion para poder usar el panel.</p>
+    <p style="color:var(--accent2);font-size:13px;margin-bottom:12px">📨 Se envio un codigo de verificacion a tu Telegram.</p>
+    <p style="color:var(--text2);font-size:12px;margin-bottom:12px">El codigo expira en 5 minutos. Si no lo recibes, haz clic en "Reenviar codigo".</p>
+    <input type="text" id="verifyCode" placeholder="Codigo de verificacion (REG-XXXXXX)" autocomplete="off" style="text-transform:uppercase;text-align:center;font-size:18px;letter-spacing:4px">
+    <button class="btn-main" onclick="doVerify()" id="btnVerify">Verificar Cuenta</button>
+    <div class="divider"></div>
+    <button class="link-btn" onclick="doResendVerifyCode()" id="btnResendVerify">Reenviar codigo</button>
+    <button class="link-btn" onclick="doLogout()">Cerrar Sesion</button>
+    <div class="auth-error" id="verifyError"></div>
+    <div class="auth-success" id="verifySuccess"></div>
   </div>
 </div>
 
@@ -660,7 +689,11 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="section" id="sec-campanas">
       <h2>📋 Campanas</h2>
       <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Las campanas son envios continuos y automaticos. A diferencia del Envio Unico, una campana envia tu mensaje a los grupos en ciclos repetitivos con intervalos configurables. Ideal para mantener presencia constante en grupos.</p>
-      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearCampana()">➕ Crear Campana</button></div>
+      <div style="margin-bottom:15px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="showCrearCampana()">➕ Crear Campana</button>
+        <button class="btn btn-success" onclick="iniciarTodasCampWsp()">🚀 Iniciar Todas</button>
+        <button class="btn btn-danger" onclick="detenerTodasCampWsp()">⏹ Parar Todas</button>
+      </div>
       <div id="campanasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
@@ -1391,7 +1424,11 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="section" id="sec-tgcampanas">
       <h2>📋 Campanas Telegram</h2>
       <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Crea y gestiona campanas de envio para Telegram.</p>
-      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearTgCampana()">➕ Nueva Campana</button></div>
+      <div style="margin-bottom:15px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="showCrearTgCampana()">➕ Nueva Campana</button>
+        <button class="btn btn-success" onclick="iniciarTodasCampTg()">🚀 Iniciar Todas</button>
+        <button class="btn btn-danger" onclick="detenerTodasCampTg()">⏹ Parar Todas</button>
+      </div>
       <div id="tgCampanasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
@@ -1791,37 +1828,104 @@ async function doLogin(){
   userId=id;
   esAdmin=r.es_admin||false;
   esSeller=r.es_seller||false;
+  const verificado=r.verificado||false;
   localStorage.setItem('panel_uid',id);localStorage.setItem('panel_token',r.token);
   localStorage.setItem('panel_admin',esAdmin?'1':'0');
   localStorage.setItem('panel_seller',esSeller?'1':'0');
+  localStorage.setItem('panel_verificado',verificado?'1':'0');
+  if(!verificado&&!esAdmin){showVerificationScreen();return}
   showApp();
 }
 
-async function doRegister(){
-  const id=$('regId').value.trim(),username=$('regUsername').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
+let _regTid='',_regUser='',_regPass='';
+async function doRegisterStep1(){
+  const tid=$('regTelegramId').value.trim(),username=$('regUsername').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
   hideMsg('regError');hideMsg('regSuccess');
-  if(!id||!username||!pass){showErr('regError','Completa todos los campos');return}
+  if(!tid||!username||!pass){showErr('regError','Completa todos los campos (ID, nombre, contrasena)');return}
+  if(!/^\d{5,15}$/.test(tid)){showErr('regError','El ID de Telegram debe ser numerico (5-15 digitos)');return}
   if(pass.length<4){showErr('regError','La contrasena debe tener minimo 4 caracteres');return}
   if(pass!==pass2){showErr('regError','Las contrasenas no coinciden');return}
   $('btnRegister').disabled=true;$('btnRegister').textContent='Registrando...';
-  const r=await api('/api/panel_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id,password:pass,username})});
+  const r=await api('/api/panel_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:tid,password:pass,username})});
   $('btnRegister').disabled=false;$('btnRegister').textContent='Registrarse';
   if(!r.ok){
     const msgs={'ya_registrado':'Ya tienes cuenta. Inicia sesion.'};
     showErr('regError',msgs[r.error]||r.error||'Error');return;
   }
-  showMsg('regSuccess','Registro exitoso! Demo de 1 dia activado. Inicia sesion.');
-  setTimeout(()=>{showLogin();$('loginId').value=id},2000);
+  _regTid=tid;_regUser=username;_regPass=pass;
+  $('regIdDisplay').textContent=tid;
+  $('regStep1').style.display='none';$('regStep2').style.display='block';
+  hideMsg('regError');
+  showMsg('regSuccess','Cuenta creada! Revisa tu Telegram para el codigo de verificacion.');
+}
+async function doRegisterStep2(){
+  hideMsg('regError');hideMsg('regSuccess');
+  const code=$('regCode').value.trim().toUpperCase();
+  if(!code){showErr('regError','Ingresa el codigo de verificacion que recibiste en Telegram');return}
+  $('btnRegVerify').disabled=true;$('btnRegVerify').textContent='Verificando...';
+  const r=await api('/api/verificar_cuenta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codigo:code,telegram_id:_regTid})});
+  $('btnRegVerify').disabled=false;$('btnRegVerify').textContent='Verificar y Entrar';
+  if(!r.ok){showErr('regError',r.error||'Codigo invalido o expirado');return}
+  showMsg('regSuccess','Cuenta verificada! Entrando al panel...');
+  const lr=await api('/api/panel_login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:_regTid,password:_regPass})});
+  if(lr.ok){
+    userId=_regTid;esAdmin=lr.es_admin||false;esSeller=lr.es_seller||false;
+    localStorage.setItem('panel_uid',_regTid);localStorage.setItem('panel_token',lr.token);
+    localStorage.setItem('panel_admin',esAdmin?'1':'0');localStorage.setItem('panel_seller',esSeller?'1':'0');
+    localStorage.setItem('panel_verificado','1');
+    setTimeout(()=>{showApp()},1500);
+  } else {
+    showMsg('regSuccess','Cuenta verificada! Ahora inicia sesion.');
+    setTimeout(()=>{showLogin();$('loginId').value=_regTid},2000);
+  }
+}
+async function doResendRegCode(){
+  hideMsg('regError');hideMsg('regSuccess');
+  if(!_regTid){showErr('regError','Error: no hay ID registrado');return}
+  $('btnResendCode').disabled=true;$('btnResendCode').textContent='Enviando...';
+  const r=await api('/api/reenviar_codigo_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:_regTid})});
+  $('btnResendCode').disabled=false;$('btnResendCode').textContent='Reenviar codigo';
+  if(!r.ok){showErr('regError',r.error||'Error al reenviar');return}
+  showMsg('regSuccess','Nuevo codigo enviado a tu Telegram. El anterior fue desactivado.');
 }
 
-function doLogout(){localStorage.removeItem('panel_uid');localStorage.removeItem('panel_token');localStorage.removeItem('panel_admin');localStorage.removeItem('panel_seller');location.reload()}
+function showVerificationScreen(){
+  document.querySelectorAll('.auth-container').forEach(el=>el.style.display='none');
+  $('authVerify').style.display='flex';$('app').style.display='none';
+  _sendVerifyCodeAuto();
+}
+async function _sendVerifyCodeAuto(){
+  if(!userId)return;
+  try{await api('/api/reenviar_codigo_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId})})}catch(_){}
+}
+async function doResendVerifyCode(){
+  hideMsg('verifyError');hideMsg('verifySuccess');
+  $('btnResendVerify').disabled=true;$('btnResendVerify').textContent='Enviando...';
+  const r=await api('/api/reenviar_codigo_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId})});
+  $('btnResendVerify').disabled=false;$('btnResendVerify').textContent='Reenviar codigo';
+  if(!r.ok){showErr('verifyError',r.error||'Error al reenviar');return}
+  showMsg('verifySuccess','Nuevo codigo enviado a tu Telegram.');
+}
+async function doVerify(){
+  hideMsg('verifyError');hideMsg('verifySuccess');
+  const code=$('verifyCode').value.trim().toUpperCase();
+  if(!code){showErr('verifyError','Ingresa tu codigo de verificacion');return}
+  $('btnVerify').disabled=true;$('btnVerify').textContent='Verificando...';
+  const r=await api('/api/verificar_cuenta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codigo:code,telegram_id:userId})});
+  $('btnVerify').disabled=false;$('btnVerify').textContent='Verificar Cuenta';
+  if(!r.ok){showErr('verifyError',r.error||'Error de verificacion');return}
+  showMsg('verifySuccess','Cuenta verificada! Entrando al panel...');
+  localStorage.setItem('panel_verificado','1');
+  setTimeout(()=>{$('authVerify').style.display='none';showApp()},1500);
+}
+function doLogout(){localStorage.removeItem('panel_uid');localStorage.removeItem('panel_token');localStorage.removeItem('panel_admin');localStorage.removeItem('panel_seller');localStorage.removeItem('panel_verificado');location.reload()}
 
 function showErr(id,msg){const el=$(id);el.style.display='block';el.textContent=msg;el.className='auth-error';el.style.display='block'}
 function showMsg(id,msg){const el=$(id);el.style.display='block';el.textContent=msg}
 function hideMsg(id){$(id).style.display='none'}
 
 async function showApp(){
-  $('authLogin').style.display='none';$('authRegister').style.display='none';$('platformSelector').style.display='none';$('authRecovery').style.display='none';
+  $('authLogin').style.display='none';$('authRegister').style.display='none';$('platformSelector').style.display='none';$('authRecovery').style.display='none';$('authVerify').style.display='none';
   $('app').style.display='block';
   $('sideUserId').textContent=userId;
   if($('tgIdDisplay'))$('tgIdDisplay').textContent=userId;
@@ -2079,6 +2183,31 @@ async function detenerTgCampana(id){
   if(!requireMembresia())return;
   const r=await api('/api/tg/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});
   toast(r.ok?'Campana detenida':(r.error||'Error'),r.ok?'success':'error');loadTgCampanas();
+}
+async function iniciarTodasCampTg(){
+  if(!requireMembresia())return;
+  const r=await api('/api/tg/campanas?u='+userId);
+  if(!r.ok||!r.campanas||!r.campanas.length){toast('No hay campanas TG','error');return}
+  let ok=0,err=0;
+  for(const c of r.campanas){
+    if(!c.en_ejecucion){
+      const res=await api('/api/tg/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id:c.id})});
+      if(res.ok)ok++;else err++;
+    }
+  }
+  toast(`Iniciadas: ${ok}${err?' | Errores: '+err:''}`,(ok&&!err)?'success':'warning');loadTgCampanas();
+}
+async function detenerTodasCampTg(){
+  const r=await api('/api/tg/campanas?u='+userId);
+  if(!r.ok||!r.campanas||!r.campanas.length){toast('No hay campanas TG','error');return}
+  let ok=0;
+  for(const c of r.campanas){
+    if(c.en_ejecucion){
+      await api('/api/tg/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id:c.id})});
+      ok++;
+    }
+  }
+  toast(`${ok} campana(s) TG detenida(s)`,'success');loadTgCampanas();
 }
 async function showEditTgCampMsg(id){
   if(!requireMembresia())return;
@@ -2551,7 +2680,14 @@ async function loadCampanas(){
   let h='';
   c.forEach(x=>{
     _wspCampanasData[x.id]=x;
-    const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
+    const ed=x.estado_detalle||'';
+    let estadoLabel='Detenida';
+    let estadoClass='badge-danger';
+    if(x.activa){
+      if(ed.startsWith('reposo')){estadoLabel='En Reposo';estadoClass='badge-warn'}
+      else{estadoLabel='Activa';estadoClass='badge-success'}
+    }else if(ed==='detenida_actualizacion'){estadoLabel='Detenida (actualiz.)';estadoClass='badge-warn'}
+    const estado=`<span class="badge ${estadoClass}">${estadoLabel}</span>`;
     h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
     const runBtn=x.activa?`<button class="btn btn-danger btn-sm" onclick="detenerCamp(${x.id})">⏹ Detener</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})">🚀 Iniciar</button>`;
     h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div style="display:flex;gap:6px;align-items:center">${estado} ${runBtn} <button class="btn btn-primary btn-sm" onclick="showEditWspCamp(${x.id})">✏ Editar</button> <button class="btn btn-danger btn-sm" onclick="elimCamp(${x.id})">🗑</button></div></div>`;
@@ -2569,6 +2705,31 @@ async function crearCamp(){const n=$('cN').value.trim(),m=$('cM').value.trim(),i
 async function iniciarCamp(id){const r=await api('/api/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast(r.ok?'Iniciada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas()}
 async function detenerCamp(id){await api('/api/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast('Detenida','success');loadCampanas()}
 async function elimCamp(id){await api('/api/campanas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminada','success');loadCampanas()}
+async function iniciarTodasCampWsp(){
+  if(!requireMembresia())return;
+  const r=await api('/api/campanas?u='+userId);
+  if(!r.ok||!r.campanas||!r.campanas.length){toast('No hay campanas','error');return}
+  let ok=0,err=0;
+  for(const c of r.campanas){
+    if(!c.activa){
+      const res=await api('/api/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:c.id})});
+      if(res.ok)ok++;else err++;
+    }
+  }
+  toast(`Iniciadas: ${ok}${err?' | Errores: '+err:''}`,(ok&&!err)?'success':'warning');loadCampanas();
+}
+async function detenerTodasCampWsp(){
+  const r=await api('/api/campanas?u='+userId);
+  if(!r.ok||!r.campanas||!r.campanas.length){toast('No hay campanas','error');return}
+  let ok=0;
+  for(const c of r.campanas){
+    if(c.activa){
+      await api('/api/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:c.id})});
+      ok++;
+    }
+  }
+  toast(`${ok} campana(s) detenida(s)`,'success');loadCampanas();
+}
 async function showEditWspCamp(id){
   if(!requireMembresia())return;
   const d=_wspCampanasData[id]||{};
@@ -3633,7 +3794,7 @@ async function loadAdminUsuarios(){
   const users=r.usuarios||[];
   if(!users.length){$('adminContent').innerHTML='<div class="empty-state"><div class="icon">\ud83d\udc51</div><p>No hay usuarios registrados</p></div>';return}
   let h='<div class="table-wrap"><div class="table-header"><h3>\ud83d\udc64 '+users.length+' Usuarios</h3></div>';
-  h+='<table><thead><tr><th>ID</th><th>Usuario</th><th>Plan</th><th>Tipo</th><th>Expira</th><th>Registro</th><th>Admin</th><th>Acciones</th></tr></thead><tbody>';
+  h+='<table><thead><tr><th>ID</th><th>Usuario</th><th>Plan</th><th>Tipo</th><th>Verificado</th><th>Expira</th><th>Registro</th><th>Admin</th><th>Acciones</th></tr></thead><tbody>';
   users.forEach(u=>{
     const exp=u.plan==='permanente'?'\u221e':(u.fecha_expira?new Date(u.fecha_expira).toLocaleDateString('es'):'N/A');
     const reg=u.fecha_registro?new Date(u.fecha_registro).toLocaleDateString('es'):'?';
@@ -3641,8 +3802,10 @@ async function loadAdminUsuarios(){
     const planBadge=u.es_admin?'<span class="badge badge-info">Admin</span>':u.plan==='permanente'?'<span class="badge badge-success">Permanente</span>':activo?'<span class="badge badge-success">'+u.plan+'</span>':'<span class="badge badge-danger">'+(u.plan||'sin plan')+' (exp)</span>';
     const tipoBadge=(u.tipo_membresia||'wsp+tg');
     const origenTag=u.origen==='bot'?' <span class="badge badge-info" style="font-size:9px">Bot</span>':'';
+    const verifBadge=u.verificado?'<span class="badge badge-success">Si</span>':'<span class="badge badge-danger">No</span>';
     h+=`<tr><td style="font-size:11px">${u.telegram_id}${origenTag}</td><td>${u.username||'-'}</td><td>${planBadge}</td>`;
     h+=`<td style="font-size:11px">${tipoBadge}</td>`;
+    h+=`<td>${verifBadge}</td>`;
     h+=`<td style="font-size:11px">${exp}</td>`;
     h+=`<td style="font-size:11px">${reg}</td>`;
     h+=`<td>${u.es_admin?'Si':'No'}</td>`;
@@ -4640,7 +4803,9 @@ window.addEventListener('load',()=>{
   if(uid&&token){
     userId=uid;
     if(savedPlatform)currentPlatform=savedPlatform;
-    showApp();
+    const isVerif=localStorage.getItem('panel_verificado')==='1';
+    const isAdm=localStorage.getItem('panel_admin')==='1';
+    if(!isVerif&&!isAdm){showVerificationScreen()}else{showApp()}
   } else if(savedPlatform){
     currentPlatform=savedPlatform;
     selectPlatform(savedPlatform);

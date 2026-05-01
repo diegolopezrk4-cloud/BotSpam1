@@ -14,8 +14,8 @@ const reporteInterval = {};  // { userId: intervalId }
 // Updated by message listeners — used to detect if someone else posted after our spam
 const grupoUltimaActividad = {};
 
-// Limite de envios diarios por cuenta (proteccion anti-ban)
-const LIMITE_ENVIOS_DIARIOS = 500;
+// Sin limite de envios (el usuario decide)
+const LIMITE_ENVIOS_DIARIOS = Infinity;
 
 // Whole-word matching to avoid partial matches (e.g. 'no' in 'noches')
 function matchWholeWord(text, word) {
@@ -343,16 +343,9 @@ function registrarEnvioCampana(campanaId, grupoJid) {
 }
 
 // Check if group had activity from others since our last campaign send
+// NOTE: Anti-duplicate desactivado para permitir envios sin limite
 function grupoTieneActividadNueva(campanaId, grupoJid) {
-    const row = db.getUltimoEnvioCampana(campanaId, grupoJid);
-    if (!row) return true; // never sent = treat as new
-    const envioTime = new Date(row.ultimo_envio + "Z").getTime();
-    const ultimaActividad = grupoUltimaActividad[grupoJid];
-    // If we sent recently (last 30 min) from THIS campaign, skip even without activity data
-    const minutesSinceSend = (Date.now() - envioTime) / 60000;
-    if (minutesSinceSend < 30) return false;
-    if (ultimaActividad === undefined) return true; // no data (e.g. after restart) — allow send
-    return ultimaActividad > envioTime;
+    return true; // Siempre permitir envio (sin limite)
 }
 
 // ============================================================
@@ -504,7 +497,7 @@ function iniciarCampana(campanaId, userId, botSock) {
         try {
             const campana = db.getCampanaById(campanaId);
             if (!campana) return;
-            db.setCampanaActiva(campanaId, true);
+            db.setCampanaActiva(campanaId, true, 'iniciando');
 
             const sesionesNombres = db.getSesionesCampana(campanaId);
             let gruposLinks = db.getGruposCampana(campanaId);
@@ -557,7 +550,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                     horarioMsg = `\n\u{1F553} Horario: ${horario.hora_inicio}:00 - ${horario.hora_fin}:00`;
                 }
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`,
+                    text: `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}\n\n\u{1F4A1} Envios ilimitados`,
                 });
             } catch (e) {}
 
@@ -806,9 +799,12 @@ function iniciarCampana(campanaId, userId, botSock) {
                         enviosDiaMsg = "\n\u{1F4CA} Envios hoy: " + enviosDia.map(e => `${e.cuenta_nombre}=${e.total}`).join(", ");
                     }
 
-                    let esperaMsg = numCuentas === 1
-                        ? `\u23F0 Esperando 10 min...`
-                        : `\u23F0 Esperando ${conf.espera_ciclo || 600}s...`;
+                    const esperaSeg = numCuentas === 1 ? 600 : (conf.espera_ciclo || 600);
+                    const esperaMin = Math.round(esperaSeg / 60);
+                    const reanudarEn = new Date(Date.now() + esperaSeg * 1000).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" });
+                    let esperaMsg = `\u23F3 Reposo: ${esperaMin} min (reanuda ~${reanudarEn})`;
+
+                    db.setCampanaEstadoDetalle(campanaId, `reposo_${esperaSeg}s`);
 
                     try {
                         await botSock.sendMessage(userId, {
@@ -816,18 +812,20 @@ function iniciarCampana(campanaId, userId, botSock) {
                         });
                     } catch (e) {}
 
-                    if (numCuentas === 1) {
-                        await delay(600 * 1000);
-                    } else {
-                        await delay((conf.espera_ciclo || 600) * 1000);
-                    }
+                    await delay(esperaSeg * 1000);
+                    db.setCampanaEstadoDetalle(campanaId, 'activa');
                     delayMultiplier = Math.max(1.0, delayMultiplier - 0.5);
                 }
             }
         } catch (e) {
             console.error(`Error campana ${campanaId}: ${e.message}`);
+            try {
+                await botSock.sendMessage(userId, {
+                    text: `\u26A0 *${campanaId}*: Error inesperado: ${e.message}\nLa campana se detuvo. Intenta reiniciarla.`,
+                });
+            } catch (_) {}
         } finally {
-            db.setCampanaActiva(campanaId, false);
+            db.setCampanaActiva(campanaId, false, cancelled ? 'detenida_manual' : 'detenida_completada');
             delete tareasActivas[campanaId];
         }
     })();

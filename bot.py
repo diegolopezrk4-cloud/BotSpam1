@@ -37,8 +37,8 @@ API_ID    = int(os.environ.get("API_ID", "35451933"))
 API_HASH  = os.environ.get("API_HASH", "2070761744260118720b34e6bf20f2eb")
 YAPE_NUM  = os.environ.get("YAPE_NUM", "9776680776")
 
-MAX_CUENTAS_POR_USUARIO = 5
-MAX_GRUPOS_POR_USUARIO  = 25
+MAX_CUENTAS_POR_USUARIO = 999999  # Sin limite
+MAX_GRUPOS_POR_USUARIO  = 999999  # Sin limite
 
 PLANES = {
     "diario":  {"dias": 1,  "precio": "S/ 2.00",  "emoji": "🥉"},
@@ -233,6 +233,41 @@ async def build_menu_text(user_id):
 # ╔══════════════════════════════════════╗
 # ║    /start  &  MENU PRINCIPAL        ║
 # ╚══════════════════════════════════════╝
+@dp.message(Command("registro"))
+async def cmd_registro(msg: types.Message):
+    """Genera un codigo de registro para el panel web"""
+    uid = msg.from_user.id
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "http://127.0.0.1:3000/api/generar_codigo_registro",
+                json={"telegram_id": str(uid)},
+            ) as resp:
+                data = await resp.json()
+        if data.get("ok"):
+            code = data["code"]
+            await msg.answer(
+                f"🔐 *Codigo de Registro*\n\n"
+                f"Tu codigo: `{code}`\n\n"
+                f"📋 Instrucciones:\n"
+                f"1. Ve al panel web\n"
+                f"2. Haz click en 'Crear Cuenta'\n"
+                f"3. Pega este codigo en el campo 'Codigo de registro'\n"
+                f"4. Completa tu nombre y contrasena\n\n"
+                f"⏰ El codigo expira en 30 minutos.\n"
+                f"💡 Tu ID de Telegram: `{uid}`",
+                parse_mode="Markdown",
+            )
+        else:
+            await msg.answer(f"❌ Error: {data.get('error', 'desconocido')}")
+    except Exception as e:
+        await msg.answer(f"❌ Error al generar codigo: {str(e)}")
+
+@dp.message(Command("miid"))
+async def cmd_miid(msg: types.Message):
+    """Muestra el ID de Telegram del usuario"""
+    await msg.answer(f"🆔 Tu ID de Telegram: `{msg.from_user.id}`", parse_mode="Markdown")
+
 @dp.message(Command("start"))
 async def cmd_start(msg: types.Message, state: FSMContext):
     uid = msg.from_user.id
