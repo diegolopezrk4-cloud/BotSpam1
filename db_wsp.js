@@ -545,6 +545,18 @@ function init() {
             FOREIGN KEY(seller_id) REFERENCES sellers(id)
         );
     `);
+    // Synced contacts from WhatsApp events
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS synced_contacts (
+            user_id TEXT,
+            cuenta TEXT,
+            jid TEXT,
+            nombre TEXT DEFAULT '',
+            notify TEXT DEFAULT '',
+            updated_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY(user_id, cuenta, jid)
+        );
+    `);
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -1994,6 +2006,41 @@ function eliminarSellerCode(codeId, sellerId) {
     db.prepare("DELETE FROM seller_codes WHERE id = ? AND seller_id = ? AND usado = 0").run(codeId, sellerId);
 }
 
+// --- SYNCED CONTACTS (from WhatsApp events) ---
+function upsertSyncedContact(userId, cuenta, jid, nombre, notify) {
+    db.prepare(`INSERT INTO synced_contacts (user_id, cuenta, jid, nombre, notify, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(user_id, cuenta, jid) DO UPDATE SET
+            nombre = CASE WHEN excluded.nombre != '' THEN excluded.nombre ELSE synced_contacts.nombre END,
+            notify = CASE WHEN excluded.notify != '' THEN excluded.notify ELSE synced_contacts.notify END,
+            updated_at = datetime('now')
+    `).run(userId, cuenta, jid, nombre || '', notify || '');
+}
+
+function upsertSyncedContactsBulk(userId, cuenta, contacts) {
+    const stmt = db.prepare(`INSERT INTO synced_contacts (user_id, cuenta, jid, nombre, notify, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(user_id, cuenta, jid) DO UPDATE SET
+            nombre = CASE WHEN excluded.nombre != '' THEN excluded.nombre ELSE synced_contacts.nombre END,
+            notify = CASE WHEN excluded.notify != '' THEN excluded.notify ELSE synced_contacts.notify END,
+            updated_at = datetime('now')
+    `);
+    const tx = db.transaction((list) => {
+        for (const c of list) {
+            stmt.run(userId, cuenta, c.jid, c.nombre || '', c.notify || '');
+        }
+    });
+    tx(contacts);
+}
+
+function getSyncedContacts(userId, cuenta) {
+    return db.prepare("SELECT * FROM synced_contacts WHERE user_id = ? AND cuenta = ? ORDER BY updated_at DESC").all(userId, cuenta);
+}
+
+function limpiarSyncedContacts(userId, cuenta) {
+    db.prepare("DELETE FROM synced_contacts WHERE user_id = ? AND cuenta = ?").run(userId, cuenta);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -2069,4 +2116,6 @@ module.exports = {
     getSellerInvitesCount, getSellerInvites, registrarSellerInvite, isSellerUser,
     // Seller codes
     generarSellerCode, getSellerCodes, getSellerCodesPendientes, canjearSellerCode, eliminarSellerCode,
+    // Synced contacts
+    upsertSyncedContact, upsertSyncedContactsBulk, getSyncedContacts, limpiarSyncedContacts,
 };

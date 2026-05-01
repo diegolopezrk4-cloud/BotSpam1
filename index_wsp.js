@@ -611,7 +611,7 @@ poll();
                     }
                     let chats = [];
                     if (sock) {
-                        chats = await motor.listarChatsPersonales(sock);
+                        chats = await motor.listarChatsPersonales(sock, userId, cuenta);
                     }
                     // Also include manually added numbers
                     if (cuenta) {
@@ -2425,6 +2425,53 @@ async function startBot() {
 
     botSock.ev.on("creds.update", saveCreds);
 
+    // Sync contacts from bot's main account
+    botSock.ev.on("messaging-history.set", ({ contacts: histContacts, chats: histChats }) => {
+        try {
+            const contactList = [];
+            if (histContacts && histContacts.length) {
+                for (const c of histContacts) {
+                    if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                        contactList.push({ jid: c.id, nombre: c.name || c.notify || '', notify: c.notify || '' });
+                    }
+                }
+            }
+            if (histChats && histChats.length) {
+                for (const ch of histChats) {
+                    if (ch.id && ch.id.endsWith("@s.whatsapp.net") && ch.id !== "status@broadcast") {
+                        if (!contactList.some(c => c.jid === ch.id)) {
+                            contactList.push({ jid: ch.id, nombre: ch.name || '', notify: '' });
+                        }
+                    }
+                }
+            }
+            if (contactList.length) {
+                // Save for all admin JIDs
+                for (const aid of adminJids) {
+                    db.upsertSyncedContactsBulk(aid, motor.BOT_NOMBRE, contactList);
+                }
+                console.log(`[WSP] Bot synced ${contactList.length} contacts from history`);
+            }
+        } catch (e) {
+            console.error(`[WSP] Error syncing bot contacts: ${e.message}`);
+        }
+    });
+    botSock.ev.on("contacts.upsert", (contacts) => {
+        try {
+            const cl = [];
+            for (const c of contacts) {
+                if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                    cl.push({ jid: c.id, nombre: c.name || c.notify || '', notify: c.notify || '' });
+                }
+            }
+            if (cl.length) {
+                for (const aid of adminJids) {
+                    db.upsertSyncedContactsBulk(aid, motor.BOT_NOMBRE, cl);
+                }
+            }
+        } catch (e) {}
+    });
+
     botSock.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
@@ -2493,6 +2540,16 @@ async function startBot() {
             // Track group activity from OTHER users (for duplicate spam detection)
             if (jid.endsWith("@g.us") && !msg.key.fromMe) {
                 motor.registrarActividadGrupo(jid);
+            }
+
+            // Track personal contacts from incoming messages
+            if (jid.endsWith("@s.whatsapp.net")) {
+                try {
+                    const pushName = msg.pushName || '';
+                    for (const aid of adminJids) {
+                        db.upsertSyncedContact(aid, motor.BOT_NOMBRE, jid, pushName, pushName);
+                    }
+                } catch (e) {}
             }
 
             // Grupos: solo permitir comandos admin
@@ -3259,11 +3316,12 @@ async function showEnvioPersonal(jid) {
     await send(jid, "\u{1F50D} Buscando chats personales...");
 
     try {
-        const chats = await motor.listarChatsPersonales(botSock);
+        const chats = await motor.listarChatsPersonales(botSock, jid, motor.BOT_NOMBRE);
         if (!chats.length) {
             return await send(jid,
                 `\u274C No se encontraron chats personales.\n\n` +
-                `\u{1F4A1} Asegurate de que el bot tenga conversaciones abiertas con tus clientes.\n\n` +
+                `\u{1F4A1} Los contactos se sincronizan automaticamente al conectar la cuenta.\n` +
+                `Intenta reconectar la cuenta o espera unos minutos.\n\n` +
                 `*0.* \u{1F519} Volver`
             );
         }

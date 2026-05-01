@@ -62,10 +62,62 @@ async function connectClientAccount(userId, nombre, telefono) {
         sock.ev.on("messages.upsert", ({ messages }) => {
             for (const msg of messages) {
                 const jid = msg.key?.remoteJid;
-                if (jid && jid.endsWith("@g.us") && !msg.key.fromMe && msg.message) {
+                if (!jid || !msg.message) continue;
+                if (jid.endsWith("@g.us") && !msg.key.fromMe) {
                     registrarActividadGrupo(jid);
                 }
+                // Track personal contacts from incoming/outgoing messages
+                if (jid.endsWith("@s.whatsapp.net") && jid !== "status@broadcast") {
+                    try {
+                        const num = jid.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "");
+                        const pushName = msg.pushName || '';
+                        db.upsertSyncedContact(userId, nombre, jid, pushName, pushName);
+                    } catch (e) {}
+                }
             }
+        });
+        // Sync contacts from history (runs on initial connect)
+        sock.ev.on("messaging-history.set", ({ contacts: histContacts, chats: histChats }) => {
+            try {
+                const contactList = [];
+                if (histContacts && histContacts.length) {
+                    for (const c of histContacts) {
+                        if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                            contactList.push({ jid: c.id, nombre: c.name || c.notify || '', notify: c.notify || '' });
+                        }
+                    }
+                }
+                if (histChats && histChats.length) {
+                    for (const ch of histChats) {
+                        if (ch.id && ch.id.endsWith("@s.whatsapp.net") && ch.id !== "status@broadcast") {
+                            const exists = contactList.some(c => c.jid === ch.id);
+                            if (!exists) {
+                                contactList.push({ jid: ch.id, nombre: ch.name || '', notify: '' });
+                            }
+                        }
+                    }
+                }
+                if (contactList.length) {
+                    db.upsertSyncedContactsBulk(userId, nombre, contactList);
+                    console.log(`[WSP] Synced ${contactList.length} contacts for ${nombre}`);
+                }
+            } catch (e) {
+                console.error(`[WSP] Error syncing history contacts: ${e.message}`);
+            }
+        });
+        // Sync individual contact updates
+        sock.ev.on("contacts.upsert", (contacts) => {
+            try {
+                const contactList = [];
+                for (const c of contacts) {
+                    if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                        contactList.push({ jid: c.id, nombre: c.name || c.notify || '', notify: c.notify || '' });
+                    }
+                }
+                if (contactList.length) {
+                    db.upsertSyncedContactsBulk(userId, nombre, contactList);
+                }
+            } catch (e) {}
         });
         return sock;
     }
@@ -185,6 +237,54 @@ async function linkAccount(userId, nombre) {
             });
             sock.ev.on("creds.update", freshSave);
             linkData.sock = sock;
+            // Sync contacts on newly linked account
+            sock.ev.on("messaging-history.set", ({ contacts: histContacts, chats: histChats }) => {
+                try {
+                    const contactList = [];
+                    if (histContacts && histContacts.length) {
+                        for (const c of histContacts) {
+                            if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                                contactList.push({ jid: c.id, nombre: c.name || c.notify || '', notify: c.notify || '' });
+                            }
+                        }
+                    }
+                    if (histChats && histChats.length) {
+                        for (const ch of histChats) {
+                            if (ch.id && ch.id.endsWith("@s.whatsapp.net") && ch.id !== "status@broadcast") {
+                                if (!contactList.some(c => c.jid === ch.id)) {
+                                    contactList.push({ jid: ch.id, nombre: ch.name || '', notify: '' });
+                                }
+                            }
+                        }
+                    }
+                    if (contactList.length) {
+                        db.upsertSyncedContactsBulk(userId, nombre, contactList);
+                        console.log(`[WSP] Synced ${contactList.length} contacts on link for ${nombre}`);
+                    }
+                } catch (e) {}
+            });
+            sock.ev.on("contacts.upsert", (contacts) => {
+                try {
+                    const cl = [];
+                    for (const c of contacts) {
+                        if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                            cl.push({ jid: c.id, nombre: c.name || c.notify || '', notify: c.notify || '' });
+                        }
+                    }
+                    if (cl.length) db.upsertSyncedContactsBulk(userId, nombre, cl);
+                } catch (e) {}
+            });
+            sock.ev.on("messages.upsert", ({ messages }) => {
+                for (const msg of messages) {
+                    const jid = msg.key?.remoteJid;
+                    if (!jid || !msg.message) continue;
+                    if (jid.endsWith("@s.whatsapp.net") && jid !== "status@broadcast") {
+                        try {
+                            db.upsertSyncedContact(userId, nombre, jid, msg.pushName || '', msg.pushName || '');
+                        } catch (e) {}
+                    }
+                }
+            });
 
             sock.ev.on("connection.update", async (update) => {
                 const { connection, lastDisconnect, qr } = update;
@@ -1010,28 +1110,27 @@ function getCampanasActivas() {
 // ============================================================
 const envioPersonalActivo = {}; // { userId: { running, cancel } }
 
-async function listarChatsPersonales(botSock) {
+async function listarChatsPersonales(botSock, userId, cuenta) {
     const chats = [];
-    try {
-        const store = botSock.store || null;
-        // Obtener todos los chats usando fetchAllContacts o store
-        // Baileys no tiene un "getChats" directo, pero podemos listar contactos
-        // y chats recientes usando las conversaciones
-        const contacts = await botSock.fetchAllContacts?.() || [];
-        const contactJids = new Set();
-        for (const c of contacts) {
-            if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
-                contactJids.add(c.id);
-                const num = c.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
-                chats.push({
-                    jid: c.id,
-                    nombre: c.name || c.notify || num,
-                    numero: num,
-                });
+    const addedJids = new Set();
+    // Read from synced_contacts table (populated by WhatsApp events)
+    if (userId && cuenta) {
+        try {
+            const synced = db.getSyncedContacts(userId, cuenta);
+            for (const c of synced) {
+                if (c.jid && c.jid.endsWith("@s.whatsapp.net") && c.jid !== "status@broadcast" && !addedJids.has(c.jid)) {
+                    addedJids.add(c.jid);
+                    const num = c.jid.replace(/@s\.whatsapp\.net$/, "").replace(/:\d+$/, "");
+                    chats.push({
+                        jid: c.jid,
+                        nombre: c.nombre || c.notify || num,
+                        numero: num,
+                    });
+                }
             }
+        } catch (e) {
+            console.error(`Error loading synced contacts: ${e.message}`);
         }
-    } catch (e) {
-        console.error(`Error listando chats personales: ${e.message}`);
     }
     return chats;
 }
@@ -1054,7 +1153,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
     (async () => {
         try {
             // Obtener la lista de chats personales
-            const chats = await listarChatsPersonales(botSock);
+            const chats = await listarChatsPersonales(botSock, userId, cuenta);
             // Incluir numeros manuales subidos por el usuario
             if (cuenta) {
                 try {
