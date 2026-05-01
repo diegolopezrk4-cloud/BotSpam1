@@ -1817,7 +1817,8 @@ async function doLogin(){
   localStorage.setItem('panel_admin',esAdmin?'1':'0');
   localStorage.setItem('panel_seller',esSeller?'1':'0');
   // Si no esta verificado, mostrar pantalla de verificacion y enviar codigo
-  if(!r.verificado){
+  // Usar === para evitar bloquear si el campo no existe (backwards compat)
+  if(r.verificado===false || r.verificado===0){
     localStorage.setItem('panel_verificando','1');
     // Enviar codigo automaticamente
     api('/api/reenviar_codigo_verificacion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id})});
@@ -1908,7 +1909,8 @@ async function showApp(){
   const m=await api('/api/check_membresia?u='+userId);
   if(m.ok){
     // Verificar si el usuario esta verificado (server-side check)
-    if(!m.verificado){
+    // Si verificado no existe en respuesta (server viejo), asumir verificado
+    if(m.verificado===false || m.verificado===0){
       localStorage.setItem('panel_verificando','1');
       // Enviar codigo automaticamente
       api('/api/reenviar_codigo_verificacion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId})});
