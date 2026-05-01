@@ -592,24 +592,33 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <!-- VER CHATS WSP -->
     <div class="section" id="sec-chatswsp">
       <h2>💬 Ver Chats WhatsApp</h2>
-      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Visualiza y responde tus chats personales de WhatsApp directamente desde el panel.</p>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia y recibe mensajes de WhatsApp directamente desde el panel.</p>
       <div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap;align-items:flex-end">
         <div class="form-group" style="margin-bottom:0;flex:1;min-width:150px">
           <label>Cuenta WSP</label>
           <select id="chatWspCuenta" onchange="loadChatsWsp()"><option value="">Cargando...</option></select>
         </div>
-        <button class="btn btn-primary" onclick="loadChatsWsp()">🔄 Actualizar Chats</button>
+        <button class="btn btn-primary" onclick="loadChatsWsp()">🔄 Actualizar</button>
       </div>
-      <div style="display:flex;gap:15px;height:500px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--bg)">
+      <div style="display:flex;gap:15px;height:550px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--bg)">
         <!-- Lista de chats -->
-        <div id="chatWspLista" style="width:300px;border-right:1px solid var(--border);overflow-y:auto;flex-shrink:0">
-          <div style="padding:15px;text-align:center;color:var(--text2)">Selecciona una cuenta y carga los chats</div>
+        <div style="width:320px;border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0">
+          <div style="padding:10px;border-bottom:1px solid var(--border)">
+            <div style="display:flex;gap:8px">
+              <input type="text" id="chatWspNewNum" placeholder="Numero (ej: 51999999999)" style="flex:1;margin:0;font-size:13px">
+              <button class="btn btn-success btn-sm" onclick="iniciarChatWsp()" title="Nuevo chat">💬+</button>
+            </div>
+            <input type="text" id="chatWspBuscar" placeholder="Buscar chat..." oninput="filtrarChatsWsp()" style="margin-top:6px;font-size:13px">
+          </div>
+          <div id="chatWspLista" style="flex:1;overflow-y:auto">
+            <div style="padding:15px;text-align:center;color:var(--text2)">Selecciona una cuenta</div>
+          </div>
         </div>
         <!-- Panel de conversacion -->
         <div id="chatWspConversacion" style="flex:1;display:flex;flex-direction:column">
           <div id="chatWspHeader" style="padding:12px 15px;border-bottom:1px solid var(--border);font-weight:bold;background:var(--bg2)">Selecciona un chat</div>
           <div id="chatWspMensajes" style="flex:1;overflow-y:auto;padding:15px;display:flex;flex-direction:column;gap:8px">
-            <div style="text-align:center;color:var(--text2);margin-top:50px">← Selecciona un chat para ver la conversacion</div>
+            <div style="text-align:center;color:var(--text2);margin-top:50px">← Selecciona un chat o escribe un numero nuevo</div>
           </div>
           <div id="chatWspInputBox" style="padding:12px 15px;border-top:1px solid var(--border);display:none;gap:10px;align-items:center">
             <input type="text" id="chatWspInput" placeholder="Escribe un mensaje..." style="flex:1;margin:0" onkeydown="if(event.key==='Enter')enviarMsgChatWsp()">
@@ -4904,6 +4913,7 @@ async function forzarBackup(){
 // ═══════════════════════════════════════
 let chatWspSelectedJid=null;
 let chatWspSelectedName=null;
+let chatWspAllContacts=[];
 
 async function loadChatsWsp(){
   const sel=$('chatWspCuenta');
@@ -4921,30 +4931,68 @@ async function loadChatsWsp(){
     return;
   }
   $('chatWspLista').innerHTML='<div style="padding:15px;text-align:center"><span class="spinner"></span> Cargando chats...</div>';
-  const c=await api('/api/chats_personales?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
-  if(!c.ok){$('chatWspLista').innerHTML='<div style="padding:15px;color:var(--danger)">'+esc(c.error||'Error')+'</div>';return}
-  if(!c.chats||c.chats.length===0){$('chatWspLista').innerHTML='<div style="padding:15px;text-align:center;color:var(--text2)">No hay chats disponibles</div>';return}
+  const c=await api('/api/chat/contactos?u='+userId+'&cuenta='+encodeURIComponent(cuenta));
+  chatWspAllContacts=c.ok?c.contacts:[];
+  renderChatsWspList(chatWspAllContacts);
+}
+
+function renderChatsWspList(contacts){
+  if(!contacts||contacts.length===0){
+    $('chatWspLista').innerHTML='<div style="padding:15px;text-align:center;color:var(--text2);font-size:13px">No hay chats aun.<br>Escribe un numero arriba para iniciar.</div>';
+    return;
+  }
   let h='';
-  c.chats.forEach(ch=>{
-    const name=ch.nombre||ch.numero||ch.jid.replace('@s.whatsapp.net','');
-    h+=`<div class="chat-item" onclick="selectChatWsp('${esc(ch.jid)}','${esc(name)}')" style="padding:12px 15px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.2s" onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background=''" ${chatWspSelectedJid===ch.jid?'style="background:var(--bg2);border-left:3px solid var(--accent)"':''}>
+  contacts.forEach(ch=>{
+    const name=ch.nombre||ch.jid.replace('@s.whatsapp.net','');
+    const num=ch.jid.replace('@s.whatsapp.net','');
+    const sel=chatWspSelectedJid===ch.jid?'background:var(--bg2);border-left:3px solid var(--accent)':'';
+    h+=`<div onclick="selectChatWsp('${esc(ch.jid)}','${esc(name)}')" style="padding:10px 15px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.2s;${sel}" onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background='${chatWspSelectedJid===ch.jid?'var(--bg2)':''}'">
       <div style="font-weight:500;font-size:14px">${esc(name)}</div>
-      <div style="font-size:12px;color:var(--text2)">${esc(ch.numero||ch.jid.replace('@s.whatsapp.net',''))}</div>
+      <div style="font-size:11px;color:var(--text2)">${esc(num)}</div>
+      ${ch.ultimo_msg?`<div style="font-size:12px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(ch.ultimo_msg)}</div>`:''}
     </div>`;
   });
   $('chatWspLista').innerHTML=h;
 }
 
-function selectChatWsp(jid,name){
+function filtrarChatsWsp(){
+  const q=($('chatWspBuscar')?.value||'').toLowerCase();
+  if(!q){renderChatsWspList(chatWspAllContacts);return}
+  renderChatsWspList(chatWspAllContacts.filter(c=>(c.nombre||'').toLowerCase().includes(q)||c.jid.includes(q)));
+}
+
+function iniciarChatWsp(){
+  let num=($('chatWspNewNum')?.value||'').replace(/[^0-9]/g,'');
+  if(!num||num.length<8){toast('Ingresa un numero valido (ej: 51999999999)','error');return}
+  const jid=num+'@s.whatsapp.net';
+  $('chatWspNewNum').value='';
+  selectChatWsp(jid,num);
+}
+
+async function selectChatWsp(jid,name){
   chatWspSelectedJid=jid;
   chatWspSelectedName=name;
-  $('chatWspHeader').innerHTML='<span>'+esc(name)+'</span><span style="font-size:12px;color:var(--text2);margin-left:10px">'+esc(jid.replace('@s.whatsapp.net',''))+'</span>';
+  const num=jid.replace('@s.whatsapp.net','');
+  $('chatWspHeader').innerHTML='<span>'+esc(name)+'</span><span style="font-size:12px;color:var(--text2);margin-left:10px">'+esc(num)+'</span>';
   $('chatWspInputBox').style.display='flex';
-  $('chatWspMensajes').innerHTML='<div style="text-align:center;color:var(--text2);padding:20px">Chat listo. Escribe un mensaje abajo para enviar.</div>';
-  // Highlight selected
-  document.querySelectorAll('#chatWspLista .chat-item').forEach(el=>{el.style.borderLeft='';el.style.background=''});
-  event.currentTarget.style.borderLeft='3px solid var(--accent)';
-  event.currentTarget.style.background='var(--bg2)';
+  // Load message history
+  const cuenta=$('chatWspCuenta').value;
+  const r=await api('/api/chat/mensajes?u='+userId+'&cuenta='+encodeURIComponent(cuenta)+'&jid='+encodeURIComponent(jid));
+  let html='';
+  if(r.ok&&r.messages&&r.messages.length>0){
+    r.messages.forEach(m=>{
+      if(m.direction==='out'){
+        html+=`<div style="align-self:flex-end;background:var(--accent);color:white;padding:8px 12px;border-radius:12px 12px 0 12px;max-width:70%;word-break:break-word;font-size:14px">${esc(m.mensaje)}<div style="font-size:10px;opacity:0.7;margin-top:3px">${m.timestamp||''}</div></div>`;
+      }else{
+        html+=`<div style="align-self:flex-start;background:var(--bg2);padding:8px 12px;border-radius:12px 12px 12px 0;max-width:70%;word-break:break-word;font-size:14px">${esc(m.mensaje)}<div style="font-size:10px;color:var(--text2);margin-top:3px">${m.timestamp||''}</div></div>`;
+      }
+    });
+  }else{
+    html='<div style="text-align:center;color:var(--text2);padding:20px">Sin mensajes previos. Escribe algo para iniciar la conversacion.</div>';
+  }
+  $('chatWspMensajes').innerHTML=html;
+  $('chatWspMensajes').scrollTop=$('chatWspMensajes').scrollHeight;
+  renderChatsWspList(chatWspAllContacts);
   $('chatWspInput').focus();
 }
 
@@ -4954,19 +5002,20 @@ async function enviarMsgChatWsp(){
   if(!msg||!chatWspSelectedJid)return;
   const cuenta=$('chatWspCuenta').value;
   input.value='';
-  // Add message to chat visually
   const msgDiv=document.createElement('div');
   msgDiv.style.cssText='align-self:flex-end;background:var(--accent);color:white;padding:8px 12px;border-radius:12px 12px 0 12px;max-width:70%;word-break:break-word;font-size:14px';
   msgDiv.textContent=msg;
   $('chatWspMensajes').appendChild(msgDiv);
   $('chatWspMensajes').scrollTop=$('chatWspMensajes').scrollHeight;
-  // Send via API
-  const r=await api('/api/chat/enviar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,jid:chatWspSelectedJid,mensaje:msg,cuenta:cuenta,_token:token})});
+  const r=await api('/api/chat/enviar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,jid:chatWspSelectedJid,mensaje:msg,cuenta:cuenta,nombre:chatWspSelectedName,_token:token})});
   if(!r.ok){
     const errDiv=document.createElement('div');
     errDiv.style.cssText='align-self:flex-end;color:var(--danger);font-size:12px;padding:4px 8px';
     errDiv.textContent='Error: '+(r.error||'No enviado');
     $('chatWspMensajes').appendChild(errDiv);
+  }else{
+    // Refresh contacts list to show this at top
+    setTimeout(()=>{loadChatsWsp()},1000);
   }
 }
 

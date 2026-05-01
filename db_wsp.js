@@ -2632,6 +2632,49 @@ function isUsuarioVerificado(telegramId) {
     return user ? user.verificado === 1 : false;
 }
 
+// ── Chat History (panel inbox) ──────────────────
+function initChatHistory() {
+    db.exec(`CREATE TABLE IF NOT EXISTS chat_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        cuenta TEXT NOT NULL,
+        jid TEXT NOT NULL,
+        nombre TEXT DEFAULT '',
+        mensaje TEXT NOT NULL,
+        direction TEXT DEFAULT 'out',
+        timestamp TEXT DEFAULT (datetime('now'))
+    )`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_hist ON chat_history(user_id, cuenta, jid)`);
+    db.exec(`CREATE TABLE IF NOT EXISTS chat_contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        cuenta TEXT NOT NULL,
+        jid TEXT NOT NULL UNIQUE,
+        nombre TEXT DEFAULT '',
+        ultimo_msg TEXT DEFAULT '',
+        updated_at TEXT DEFAULT (datetime('now'))
+    )`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_contacts ON chat_contacts(user_id, cuenta, jid)`);
+}
+
+function saveChatMessage(userId, cuenta, jid, nombre, mensaje, direction) {
+    initChatHistory();
+    db.prepare(`INSERT INTO chat_history (user_id, cuenta, jid, nombre, mensaje, direction) VALUES (?,?,?,?,?,?)`).run(String(userId), cuenta, jid, nombre||'', mensaje, direction||'out');
+    db.prepare(`INSERT INTO chat_contacts (user_id, cuenta, jid, nombre, ultimo_msg, updated_at) VALUES (?,?,?,?,?,datetime('now'))
+        ON CONFLICT(user_id, cuenta, jid) DO UPDATE SET nombre=excluded.nombre, ultimo_msg=excluded.ultimo_msg, updated_at=datetime('now')`)
+        .run(String(userId), cuenta, jid, nombre||'', mensaje.substring(0,100));
+}
+
+function getChatContacts(userId, cuenta) {
+    initChatHistory();
+    return db.prepare(`SELECT * FROM chat_contacts WHERE user_id=? AND cuenta=? ORDER BY updated_at DESC`).all(String(userId), cuenta);
+}
+
+function getChatMessages(userId, cuenta, jid, limit) {
+    initChatHistory();
+    return db.prepare(`SELECT * FROM chat_history WHERE user_id=? AND cuenta=? AND jid=? ORDER BY timestamp DESC LIMIT ?`).all(String(userId), cuenta, jid, limit||50);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -2741,4 +2784,6 @@ module.exports = {
     generarCodigoRegistro, verificarCodigoRegistro, marcarCodigoRegistroUsado, limpiarCodigosRegistroExpirados,
     // Account verification
     verificarCuentaExistente, isUsuarioVerificado,
+    // Chat history (panel inbox)
+    saveChatMessage, getChatContacts, getChatMessages,
 };

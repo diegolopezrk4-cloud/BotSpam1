@@ -714,9 +714,42 @@ poll();
                         return res.end(JSON.stringify({ ok: false, error: "Cuenta no conectada" }));
                     }
                     const result = await sock.sendMessage(body.jid, { text: body.mensaje });
+                    // Save to chat history
+                    try { db.saveChatMessage(body.u, body.cuenta||'default', body.jid, body.nombre||'', body.mensaje, 'out'); } catch(e2){}
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, msgId: result?.key?.id }));
                 } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // GET /api/chat/contactos — Lista de contactos con historial de chat
+            if (url.pathname === "/api/chat/contactos" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const cuenta = url.searchParams.get("cuenta");
+                if (!userId || !cuenta) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o cuenta" })); }
+                try {
+                    const contacts = db.getChatContacts(userId, cuenta);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, contacts }));
+                } catch(e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // GET /api/chat/mensajes — Historial de mensajes de un chat
+            if (url.pathname === "/api/chat/mensajes" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const cuenta = url.searchParams.get("cuenta");
+                const jid = url.searchParams.get("jid");
+                if (!userId || !cuenta || !jid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, cuenta o jid" })); }
+                try {
+                    const messages = db.getChatMessages(userId, cuenta, jid, 50);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, messages: messages.reverse() }));
+                } catch(e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
                 }
