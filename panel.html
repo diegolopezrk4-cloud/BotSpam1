@@ -1856,6 +1856,7 @@ async function doRegister(){
 
 function showVerificacion(){
   document.querySelectorAll('.auth-container').forEach(c=>c.style.display='none');
+  $('app').style.display='none';
   $('authVerificar').style.display='flex';
   hideMsg('verifError');hideMsg('verifSuccess');
   if($('verifCodigo'))$('verifCodigo').value='';
@@ -1873,7 +1874,14 @@ async function doVerificar(){
   if(!r.ok){showErr('verifError',r.error||'Codigo invalido o expirado');return}
   localStorage.removeItem('panel_verificando');
   showMsg('verifSuccess','Cuenta verificada! Redirigiendo...');
-  setTimeout(()=>{showLogin();$('loginId').value=tid},1500);
+  // Si tiene token, ir directo al panel; si no, ir al login
+  const hasToken=localStorage.getItem('panel_token');
+  if(hasToken){
+    userId=tid;
+    setTimeout(()=>showApp(),1500);
+  } else {
+    setTimeout(()=>{showLogin();$('loginId').value=tid},1500);
+  }
 }
 
 async function doReenviarCodigo(){
@@ -1894,14 +1902,20 @@ function hideMsg(id){$(id).style.display='none'}
 
 async function showApp(){
   $('authLogin').style.display='none';$('authRegister').style.display='none';$('platformSelector').style.display='none';$('authRecovery').style.display='none';
-  $('app').style.display='block';
-  $('sideUserId').textContent=userId;
-  if($('tgIdDisplay'))$('tgIdDisplay').textContent=userId;
   // Check admin
   esAdmin=localStorage.getItem('panel_admin')==='1';
-  // Verificar membresia
+  // Verificar membresia y verificacion
   const m=await api('/api/check_membresia?u='+userId);
   if(m.ok){
+    // Verificar si el usuario esta verificado (server-side check)
+    if(!m.verificado){
+      localStorage.setItem('panel_verificando','1');
+      // Enviar codigo automaticamente
+      api('/api/reenviar_codigo_verificacion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId})});
+      showVerificacion();
+      return;
+    }
+    localStorage.removeItem('panel_verificando');
     esAdmin=m.es_admin||esAdmin;
     membresiaActiva=m.activa;
     if(m.membresia){
@@ -1914,6 +1928,9 @@ async function showApp(){
       }
     }
   }
+  $('app').style.display='block';
+  $('sideUserId').textContent=userId;
+  if($('tgIdDisplay'))$('tgIdDisplay').textContent=userId;
   // Mostrar items admin
   if(esAdmin){
     document.querySelectorAll('.admin-only').forEach(el=>el.style.display='');

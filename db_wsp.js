@@ -1488,12 +1488,14 @@ function checkMembresia(userId) {
             if (cfg.ADMIN_TELEGRAM_IDS && cfg.ADMIN_TELEGRAM_IDS.includes(String(userId))) esAdmin = true;
         } catch (e) {}
     }
-    if (!user) return { ok: true, activa: false, es_admin: esAdmin, membresia: null };
+    const verificado = isUserVerificado(userId);
+    if (!user) return { ok: true, activa: false, es_admin: esAdmin, verificado, membresia: null };
     const activo = user.activo && (user.plan === 'permanente' || !user.fecha_expira || new Date(user.fecha_expira) > new Date());
     return {
         ok: true,
         activa: activo || esAdmin,
         es_admin: esAdmin,
+        verificado,
         membresia: {
             plan: user.plan,
             fecha_expira: user.fecha_expira,
