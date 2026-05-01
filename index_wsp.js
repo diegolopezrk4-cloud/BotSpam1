@@ -433,6 +433,15 @@ poll();
                 return res.end(JSON.stringify({ ok: true }));
             }
 
+            // GET /api/campana_reposo?id=CAMP_ID — Estado de reposo con countdown
+            if (url.pathname === "/api/campana_reposo" && req.method === "GET") {
+                const campId = url.searchParams.get("id");
+                if (!campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                const estado = motor.getCampanaReposo(parseInt(campId));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...estado }));
+            }
+
             // GET /api/historial?u=USER_ID — Historial de envíos
             if (url.pathname === "/api/historial" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
@@ -704,21 +713,26 @@ poll();
             }
             if (url.pathname === "/api/panel_registro" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                if (!body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta password" })); }
+                if (!body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
                 const r = db.panelRegistro(body.telegram_id, body.password, body.username || '');
-                // Sync 1-day demo to TG database
                 if (r.ok) {
-                    try {
-                        const http = require("http");
-                        const syncData = JSON.stringify({ telegram_id: body.telegram_id, dias: 1, plan: "demo", username: body.username || "" });
-                        const syncReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
-                        syncReq.on("error", () => {});
-                        syncReq.write(syncData);
-                        syncReq.end();
-                    } catch (_) {}
+                    const regTid = r.telegram_id;
+                    // NO sync demo to TG — solo se crea usuario+demo al verificar codigo
+                    // Send verification code to user via TG bot
+                    if (r.code) {
+                        try {
+                            const http = require("http");
+                            const tgData = JSON.stringify({ admin_id: regTid, message: `🔐 *Codigo de verificacion*\n\nTu codigo: *${r.code}*\n\n⏰ Expira en 5 minutos.\nIngresalo en la pagina para completar tu registro.` });
+                            const tgReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/notify_admin", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(tgData) } });
+                            tgReq.on("error", () => {});
+                            tgReq.write(tgData);
+                            tgReq.end();
+                        } catch (_) {}
+                    }
                 }
                 res.writeHead(200);
-                return res.end(JSON.stringify(r));
+                return res.end(JSON.stringify({ ok: r.ok, error: r.error, verificado: r.verificado }));
             }
             if (url.pathname === "/api/panel_cambiar_password" && req.method === "POST") {
                 const body = await readBody();
@@ -2326,6 +2340,85 @@ poll();
                 return res.end(JSON.stringify({ ok: true, plan: planLabel, seller: result.seller_nombre }));
             }
 
+            // POST /api/generar_codigo_registro — Bot TG genera codigo de registro para un usuario
+            if (url.pathname === "/api/generar_codigo_registro" && req.method === "POST") {
+                const body = await readBody();
+                const tid = String(body.telegram_id || "").trim();
+                if (!tid || !/^\d{5,15}$/.test(tid)) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Telegram ID invalido" })); }
+                const code = db.generarCodigoRegistro(tid);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, code }));
+            }
+
+            // POST /api/verificar_cuenta — Usuario existente verifica su cuenta con codigo
+            if (url.pathname === "/api/verificar_cuenta" && req.method === "POST") {
+                const body = await readBody();
+                const codigo = String(body.codigo || "").trim().toUpperCase();
+                const tid = String(body.telegram_id || "").trim();
+                if (!codigo || !tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta codigo o telegram_id" })); }
+                const v = db.verificarCodigoRegistro(codigo);
+                if (!v.ok) { res.writeHead(200); return res.end(JSON.stringify(v)); }
+                if (v.telegram_id !== tid) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "Codigo no corresponde a tu cuenta" })); }
+                db.usarCodigoRegistro(codigo);
+                db.marcarVerificado(tid);
+                // Crear usuario principal + demo de 1 dia al verificar (no antes)
+                const panelUser = db.getPanelUser(tid);
+                const username = panelUser ? panelUser.username : tid;
+                const existingUser = db.getUsuario(tid);
+                if (!existingUser) {
+                    db.crearUsuario(tid, username);
+                    db.activarMembresia(tid, 1);
+                }
+                // Sync 1-day demo to TG database
+                try {
+                    const http = require("http");
+                    const syncData = JSON.stringify({ telegram_id: tid, dias: 1, plan: "demo", username: username });
+                    const syncReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                    syncReq.on("error", () => {});
+                    syncReq.write(syncData);
+                    syncReq.end();
+                } catch (_) {}
+                // Notify admin via WSP + TG about verification
+                try {
+                    const config = require("./config_wsp");
+                    const adminId = config.ADMIN_TELEGRAM_IDS[0];
+                    const notifMsg = `✅ *Nuevo usuario verificado*\n\n👤 ${username}\n🆔 ${tid}\n📅 Demo 1 dia activado\n\nYa puede usar el panel.`;
+                    if (adminId && botSock) {
+                        botSock.sendMessage(adminId + "@s.whatsapp.net", { text: notifMsg }).catch(() => {});
+                    }
+                    // Also notify via TG API
+                    try {
+                        const http = require("http");
+                        const tgData = JSON.stringify({ admin_id: adminId, message: notifMsg });
+                        const tgReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/notify_admin", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(tgData) } });
+                        tgReq.on("error", () => {});
+                        tgReq.write(tgData);
+                        tgReq.end();
+                    } catch (_) {}
+                } catch (_) {}
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Cuenta verificada exitosamente" }));
+            }
+
+            // POST /api/reenviar_codigo_registro — Generar nuevo codigo y enviar al TG del usuario
+            if (url.pathname === "/api/reenviar_codigo_registro" && req.method === "POST") {
+                const body = await readBody();
+                const tid = String(body.telegram_id || "").trim();
+                if (!tid || !/^\d{5,15}$/.test(tid)) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Telegram ID invalido" })); }
+                const code = db.generarCodigoRegistro(tid);
+                // Send code via TG bot
+                try {
+                    const http = require("http");
+                    const tgData = JSON.stringify({ admin_id: tid, message: `🔐 *Codigo de verificacion*\n\nTu codigo: *${code}*\n\n⏰ Expira en 5 minutos.\nIngresalo en la pagina para verificar tu cuenta.` });
+                    const tgReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/notify_admin", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(tgData) } });
+                    tgReq.on("error", () => {});
+                    tgReq.write(tgData);
+                    tgReq.end();
+                } catch (_) {}
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
@@ -3063,7 +3156,8 @@ async function showGrupos(jid) {
             const display = g.nombre || (g.link.endsWith("@g.us") ? g.link.replace("@g.us", "") : g.link);
             texto += `  ${i + 1}. ${display}\n`;
         }
-        texto += `\nTotal: ${grupos.length}/${maxG}\n`;
+        const maxGLabel = maxG >= 999999 ? '\u221e' : maxG;
+        texto += `\nTotal: ${grupos.length}/${maxGLabel}\n`;
     } else {
         texto += "  (sin grupos)\n";
     }
@@ -3307,7 +3401,7 @@ async function handleFSM(jid, msg, text, trimmed, state) {
         // --- CUENTAS ---
         case "cuentas": {
             if (trimmed === "1") {
-                if (db.getSesiones(jid).length >= config.MAX_CUENTAS_POR_USUARIO) {
+                if (config.MAX_CUENTAS_POR_USUARIO < 999999 && db.getSesiones(jid).length >= config.MAX_CUENTAS_POR_USUARIO) {
                     return await send(jid, `\u274C Limite de ${config.MAX_CUENTAS_POR_USUARIO} cuentas alcanzado.`);
                 }
                 setState(jid, "cuenta_nueva", { step: "telefono" });
@@ -3570,9 +3664,10 @@ async function handleFSM(jid, msg, text, trimmed, state) {
             if (added) resp += `\u2705 Agregados: ${added}\n`;
             if (dupes) resp += `\u26A0 Ya existian: ${dupes}\n`;
             if (errors) resp += `\u274C Links invalidos: ${errors}\n`;
-            if (skipped) resp += `\u{1F6AB} Limite alcanzado (${maxG}): ${skipped} omitidos\n`;
+            if (skipped) resp += `\u{1F6AB} Limite alcanzado: ${skipped} omitidos\n`;
             if (!added && !dupes && !errors && !skipped) resp += `\u274C No se agrego ningun grupo.\n`;
-            resp += `\n\u{1F310} Total grupos ahora: ${current.length + added}/${maxG}`;
+            const maxGLabel = maxG >= 999999 ? '\u221e' : maxG;
+            resp += `\n\u{1F310} Total grupos ahora: ${current.length + added}/${maxGLabel}`;
 
             await send(jid, resp);
             return await showGrupos(jid);
@@ -4646,14 +4741,14 @@ async function showLimiteDiario(jid) {
     clearState(jid);
     const envios = db.getEnviosDiariosTotal(jid);
     const baneadas = db.getCuentasBaneadas(jid);
-    let texto = `\u{1F6E1} *LIMITE DIARIO DE ENVIOS*\n\n`;
-    texto += `Limite actual: *${motor.LIMITE_ENVIOS_DIARIOS}* envios por cuenta/dia\n\n`;
+    const limTxt = motor.LIMITE_ENVIOS_DIARIOS === Infinity ? 'Ilimitado' : String(motor.LIMITE_ENVIOS_DIARIOS);
+    let texto = `\u{1F6E1} *ENVIOS DIARIOS*\n\n`;
+    texto += `Limite actual: *${limTxt}*\n\n`;
 
     if (envios.length) {
         texto += `\u{1F4CA} *Envios hoy:*\n`;
         for (const e of envios) {
-            const pct = Math.round(e.total / motor.LIMITE_ENVIOS_DIARIOS * 100);
-            texto += `\u2022 ${e.cuenta_nombre}: ${e.total}/${motor.LIMITE_ENVIOS_DIARIOS} (${pct}%)\n`;
+            texto += `\u2022 ${e.cuenta_nombre}: ${e.total} envios\n`;
         }
     } else {
         texto += `Sin envios hoy.\n`;
