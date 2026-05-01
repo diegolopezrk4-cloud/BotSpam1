@@ -1229,5 +1229,48 @@ CI: lint-and-check OK | docker-build OK
 
 ---
 
+## Cambios v12.5 — Fixes de Campanas + Filtro Verificacion (PR actual)
+
+### BUG-FIX: botSock.sendMessage sin try/catch crasheaba campanas (CRITICO)
+- **Donde**: `motor_wsp.js` — `iniciarCampana()` lineas 522 y 543
+- **Sintoma**: Si `botSock` era null o la conexion WSP fallaba al enviar notificacion, toda la funcion `iniciarCampana` crasheaba con error no capturado. Los clientes veian error al iniciar campanas.
+- **Causa**: Dos llamadas a `botSock.sendMessage()` (cuando no hay cuentas/grupos asignados, y cuando no se pudo conectar ninguna cuenta) NO estaban envueltas en try/catch. Todas las demas llamadas SI lo estaban.
+- **Fix**: Envueltas ambas llamadas en `try { if (botSock) await botSock.sendMessage(...); } catch (e) {}`. La campana retorna normalmente incluso si la notificacion falla.
+- **Archivo**: `motor_wsp.js` (lineas 522, 543)
+
+### MEJORA: Filtro de usuarios no verificados en admin panel
+- **Donde**: `db_wsp.js` — `getTodosUsuariosAdmin()` linea 1860
+- **Sintoma**: Admin veia TODOS los usuarios incluyendo los que no habian verificado su cuenta (basura/spam de registros incompletos)
+- **Fix**: LEFT JOIN con `panel_users` para obtener campo `verificado`. Filtro `.filter(u => u.verificado === 1 || u.es_admin === 1)` para solo mostrar usuarios verificados y admins.
+- **Archivo**: `db_wsp.js`
+
+### Ya implementado en sync-servidor (verificado)
+- **TAREA 2**: Auto-restart de campanas en errores inesperados (catch block lineas 838-864)
+- **TAREA 3**: Botones "Iniciar Todas" / "Parar Todas" en campanas (linea 693 + funciones 2783-2784)
+- **TAREA 5**: Badge "reiniciando" en getEstadoCampanaBadge (linea 2730)
+
+### Archivos Modificados en v12.5
+| Archivo | Cambios |
+|---|---|
+| `motor_wsp.js` | try/catch en 2 sendMessage de iniciarCampana (lineas 522, 543) |
+| `db_wsp.js` | getTodosUsuariosAdmin con LEFT JOIN panel_users + filtro verificado |
+
+### Verificacion de Sintaxis v12.5
+```
+node -c motor_wsp.js   OK
+node -c index_wsp.js   OK
+node -c db_wsp.js      OK
+node -c panel_server.js OK
+python3 ast.parse bot.py OK
+python3 ast.parse web_panel.py OK
+```
+
+### Comando de actualizacion
+```bash
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777671083-v12.5-fixes && npm install && bash start.sh
+```
+
+---
+
 ## REGLA #9 — SIEMPRE ENVIAR HANDOFF
 La IA que trabaje en este proyecto DEBE enviar el HANDOFF.md actualizado al usuario al finalizar su sesion. Sin excepcion.

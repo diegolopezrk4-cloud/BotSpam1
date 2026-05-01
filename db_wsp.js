@@ -1858,18 +1858,21 @@ function setTipoMembresia(wspId, tipo) {
 }
 
 function getTodosUsuariosAdmin() {
-    const users = db.prepare("SELECT * FROM usuarios ORDER BY fecha_registro DESC").all();
-    return users.map(u => ({
-        telegram_id: u.wsp_id,
-        username: u.username || u.nombre || "",
-        plan: u.plan || "sin_plan",
-        fecha_expira: u.fecha_expira || null,
-        activo: u.activo,
-        fecha_registro: u.fecha_registro,
-        es_admin: u.es_admin || 0,
-        tipo_membresia: u.tipo_membresia || "wsp+tg",
-        origen: "bot",
-    }));
+    const users = db.prepare("SELECT u.*, p.verificado FROM usuarios u LEFT JOIN panel_users p ON u.wsp_id = p.telegram_id ORDER BY u.fecha_registro DESC").all();
+    return users
+        .map(u => ({
+            telegram_id: u.wsp_id,
+            username: u.username || u.nombre || "",
+            plan: u.plan || "sin_plan",
+            fecha_expira: u.fecha_expira || null,
+            activo: u.activo,
+            fecha_registro: u.fecha_registro,
+            es_admin: u.es_admin || 0,
+            tipo_membresia: u.tipo_membresia || "wsp+tg",
+            verificado: u.verificado || 0,
+            origen: "bot",
+        }))
+        .filter(u => u.verificado === 1 || u.es_admin === 1);
 }
 
 // --- PROGRESO ENVIO (RESUME) ---

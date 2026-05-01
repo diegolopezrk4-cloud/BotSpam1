@@ -519,7 +519,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             const horario = db.getCampanaHorario(campanaId);
 
             if (!sesionesNombres.length || !gruposLinks.length) {
-                await botSock.sendMessage(userId, { text: "\u26A0 Campana sin cuentas o grupos asignados." });
+                try { if (botSock) await botSock.sendMessage(userId, { text: "\u26A0 Campana sin cuentas o grupos asignados." }); } catch (e) {}
                 return;
             }
 
@@ -540,7 +540,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                 }
             }
             if (!socks.length) {
-                await botSock.sendMessage(userId, { text: "\u274C No se pudo conectar ninguna cuenta." });
+                try { if (botSock) await botSock.sendMessage(userId, { text: "\u274C No se pudo conectar ninguna cuenta." }); } catch (e) {}
                 return;
             }
 
