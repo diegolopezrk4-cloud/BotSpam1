@@ -1423,13 +1423,15 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                 try {
                     // Verify number has WhatsApp before sending
                     const numToCheck = jid.replace(/@s\.whatsapp\.net$/, "");
+                    let skipThisNumber = false;
                     try {
                         const [onWa] = await botSock.onWhatsApp(jid);
                         if (!onWa || !onWa.exists) {
                             console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid} NO TIENE WSP, saltando`);
                             errores++;
+                            task.errores = errores;
                             db.registrarEnvio(userId, 0, jid, "sin_whatsapp", grupoNombre, "personal");
-                            continue;
+                            skipThisNumber = true;
                         }
                     } catch (verifyErr) {
                         // If verification fails, continue sending anyway
@@ -1437,8 +1439,16 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                     }
 
                     // Check if number is in individual blacklist
-                    if (db.estaEnBlacklistNumero(userId, numToCheck)) {
+                    if (!skipThisNumber && db.estaEnBlacklistNumero(userId, numToCheck)) {
                         console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid} en blacklist, saltando`);
+                        errores++;
+                        task.errores = errores;
+                        skipThisNumber = true;
+                    }
+
+                    if (skipThisNumber) {
+                        // Still apply a short delay to avoid rapid-fire API calls (anti-ban)
+                        await delay(humanDelay(1500, 3000));
                         continue;
                     }
 
