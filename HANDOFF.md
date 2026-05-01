@@ -1102,3 +1102,43 @@ cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 &&
 
 ### REGLA #8 — Ver Chats WSP/TG esta ELIMINADO
 No re-implementar la funcionalidad de Ver Chats WSP ni Ver Chats TG. Fue eliminada intencionalmente en v11.
+
+### REGLA #9 — OBLIGATORIO enviar HANDOFF actualizado al usuario
+Cuando termines de hacer cambios, SIEMPRE debes enviar el archivo HANDOFF.md actualizado al usuario como archivo adjunto. El usuario lo necesita para darselo a la siguiente IA. No asumas que lo tiene — SIEMPRE envialo.
+
+---
+
+## Cambios v12.1 — Limites Eliminados + CI Fix (Node 20)
+
+### Limites eliminados (pedido por el usuario)
+- **`LIMITE_ENVIOS_DIARIOS`**: 500 → 999999 (sin limite de envios diarios por cuenta)
+- **`MAX_GRUPOS_POR_USUARIO`**: 25 → 999999 (sin limite de grupos que pueden subir)
+- **Limite por hora eliminado**: Se quito el limite de 60 mensajes/hora en `enviarASeleccionados`
+- El usuario quiere envio ilimitado y subida de grupos ilimitada
+
+### CI Fix — Node 18 → Node 20
+- `@whiskeysockets/baileys@6.7.21` requiere Node.js 20+ 
+- **`.github/workflows/ci.yml`**: `node-version: '18'` → `node-version: '20'`
+- **`Dockerfile`**: `FROM node:18-alpine` → `FROM node:20-alpine`
+- CI ahora pasa verde (lint-and-check + docker-build)
+
+### Verificacion de registro — CONFIRMADO funcionando
+El sistema de verificacion esta completo y correcto:
+1. Solo por Telegram ID numerico (5-15 digitos)
+2. 1 ID por cuenta (verifica duplicados)
+3. Al registrar → genera codigo REG-XXXXXX → envia via TG bot puerto 3002
+4. Pantalla de verificacion en el panel web
+5. Codigo expira en 5 minutos
+6. Codigo nuevo invalida el anterior (DELETE WHERE used = 0)
+7. Codigo es de uso unico (marcado used = 1 despues de verificar)
+8. Admin se auto-verifica sin codigo
+9. Boton "Reenviar codigo" disponible
+10. Limpieza automatica de codigos expirados cada 5 min
+
+### Archivos Modificados en v12.1
+| Archivo | Cambios |
+|---|---|
+| `motor_wsp.js` | LIMITE_ENVIOS_DIARIOS = 999999; eliminado hourly limit |
+| `config_wsp.js` | MAX_GRUPOS_POR_USUARIO = 999999 |
+| `Dockerfile` | node:18-alpine → node:20-alpine |
+| `.github/workflows/ci.yml` | node-version: 18 → 20 |
