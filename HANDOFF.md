@@ -897,6 +897,66 @@ python3 -c "import ast; ast.parse(open('web_panel.py').read())" # OK
 
 ---
 
+## Cambios v11.2 — Escaneo Completo de Todo el Codigo (PR #33 continuacion)
+
+Escaneo profundo de los 10 archivos completos (index_wsp.js, motor_wsp.js, db_wsp.js, panel.html, bot.py, motor.py, db.py, web_panel.py, wsp_bridge.py, panel_server.js) buscando bugs, race conditions, problemas de seguridad, edge cases y errores logicos.
+
+#### BUG-016: Race condition en enviarAPersonales — cleanup podia borrar tarea nueva (MEDIO)
+- **Donde**: `motor_wsp.js` — `enviarAPersonales()` bloque `finally` (linea ~1336)
+- **Sintoma**: Si el usuario cancelaba un envio personal e inmediatamente iniciaba un envio a miembros, el envio a miembros perdia su referencia en `envioPersonalActivo` y no se podia cancelar. Tambien podia causar dos envios corriendo en paralelo
+- **Causa**: El bloque `finally` de `enviarAPersonales` hacia `delete envioPersonalActivo[userId]` sin verificar que la tarea que estaba borrando fuera la suya. Si entre el cancel y el finally se iniciaba otra tarea, el finally borraba la nueva tarea
+- **Contexto**: `enviarASeleccionados` ya tenia la proteccion correcta con `taskId` (linea ~1552: `if (envioPersonalActivo[userId]?.taskId === taskId)`), pero `enviarAPersonales` no
+- **Fix**: Agregado `taskId` a `enviarAPersonales` usando el mismo `_taskIdCounter` global. El bloque `finally` ahora verifica `envioPersonalActivo[userId]?.taskId === taskId` antes de borrar. Asi solo borra su propia tarea, nunca la de otro envio
+- **Archivos**: `motor_wsp.js` (linea ~1202-1337)
+
+#### BUG-017: POST endpoints no verificaban identidad del usuario autenticado (MEDIO — Seguridad)
+- **Donde**: `index_wsp.js` — Todos los ~50 endpoints POST que aceptan `body.u`
+- **Sintoma**: Un usuario con sesion activa (token valido) podia enviar requests POST con el ID de Telegram de OTRO usuario en `body.u` y modificar sus campanas, mensajes, grupos, envios, templates, etc.
+- **Causa**: La funcion `verifyPostUser(body)` existia (linea ~1059) y verificaba correctamente que `body.u` coincidiera con `req._authUser`, pero solo se usaba en UN endpoint (`/api/desvincular`). Los demas ~50 endpoints POST confiaban ciegamente en `body.u`
+- **Contexto**: Los endpoints GET ya tenian verificacion centralizada (linea ~1050-1056: si el request tiene parametro `u` en query string, se verifica contra `req._authUser`). Pero los POST no tenian esta proteccion
+- **Fix**: Verificacion centralizada dentro de `readBody()`. Ahora al parsear el body de cualquier POST, si `body.u` existe y no coincide con `req._authUser`, se verifica si el usuario es admin (admins pueden operar sobre cualquier usuario). Si no es admin, lanza error con `_authForbidden = true`. El catch exterior del request handler detecta este flag y retorna HTTP 403 en vez de 500
+- **Detalle tecnico**:
+  - `_parseBody()` — funcion interna que parsea el JSON del body (antes era `readBody`)
+  - `readBody()` — ahora es async wrapper que llama a `_parseBody()` + verifica identidad
+  - Catch exterior: `if (e._authForbidden) { res.writeHead(403); ... }` con `if (res.headersSent) return;` para seguridad
+- **Archivos**: `index_wsp.js` (linea ~289-323, ~3682-3690)
+
+#### BUG-018: enviarAPersonales guardaba indice de progreso incorrecto en pausa de lote (BAJO)
+- **Donde**: `motor_wsp.js` — `enviarAPersonales()` bloque de pausa de lote (linea ~1302)
+- **Sintoma**: Si habia errores durante el envio y el envio entraba en pausa de lote, el progreso guardado mostraba una posicion incorrecta
+- **Causa**: `db.guardarProgresoEnvio(userId, ..., enviados, ...)` usaba `enviados` (solo cuenta envios exitosos) en vez de `chatIdx + 1` (posicion real del cursor en el array). Si de 15 mensajes enviados, 3 daban error, `enviados = 12` pero el indice real era `chatIdx = 15`. Al reanudar o mostrar progreso, el numero no coincidia
+- **Contexto**: `enviarASeleccionados` ya usaba correctamente `i + 1` como indice de progreso (linea ~1498)
+- **Fix**: Cambiado `enviados` por `chatIdx + 1` en la llamada a `guardarProgresoEnvio()`
+- **Archivos**: `motor_wsp.js` (linea ~1302)
+
+### Archivos Escaneados Sin Bugs Adicionales
+| Archivo | Resultado del Escaneo |
+|---|---|
+| `db_wsp.js` (~2837 lineas) | SQL seguro — todas las queries usan prepared statements (`.prepare().run()`). Sin inyeccion SQL posible. Funciones de cache de grupos (`cacheGruposSesion`, `getGruposCacheTodos`) correctas con deduplicacion |
+| `panel.html` (~5749 lineas) | XSS protegido — funcion `esc()` (linea 1741) escapa correctamente `& < > " ' \``. Todos los `innerHTML` con datos de usuario usan `esc()`. API calls usan `fetch` con headers correctos |
+| `bot.py` (~4467 lineas) | FSM correcto — estados no se solapan, transiciones bien definidas. Handlers de callbacks usan `state.clear()` correctamente. Sin race conditions en handlers async |
+| `motor.py` (~1100 lineas) | Async correcto — `asyncio.sleep()` con `asyncio.get_event_loop()` funciona. Envio TG con manejo de FloodWaitError (respeta el wait_seconds de Telegram) |
+| `db.py` (~743 lineas) | SQL seguro — usa `aiosqlite` con parametros placeholder (?). Sin concatenacion de strings en queries |
+| `web_panel.py` (~1163 lineas) | Auth correcto — validacion de input con regex para telefono y nombre. Limite de 5 cuentas. Cleanup de sesiones ya arreglado en v11.1 |
+| `wsp_bridge.py` (~220 lineas) | Error handling correcto — timeout de 15s en requests HTTP, manejo de `asyncio.TimeoutError` y excepciones genericas |
+| `panel_server.js` (~131 lineas) | Proxy correcto — timeouts diferenciados (120s para detectar/carpeta, 30s para otros). X-Forwarded-For enviado correctamente |
+
+### Archivos Modificados en v11.2
+| Archivo | Cambios |
+|---|---|
+| `motor_wsp.js` | taskId en enviarAPersonales para cleanup seguro; progreso batch corregido (chatIdx+1 en vez de enviados) |
+| `index_wsp.js` | readBody centralizado con verificacion de identidad POST; catch exterior con manejo de 403 |
+
+### Verificacion de Sintaxis v11.2
+```bash
+node -c index_wsp.js   # OK
+node -c motor_wsp.js   # OK
+node -c db_wsp.js      # OK
+node -c panel_server.js # OK
+```
+
+---
+
 ## REGLAS PARA LA SIGUIENTE IA
 
 ### REGLA #1 — NUNCA elimines ninguna mejora existente
