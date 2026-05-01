@@ -945,7 +945,23 @@ function agregarSesion(userId, nombre, telefono) {
 function eliminarSesion(userId, nombre) {
     db.prepare("DELETE FROM sesiones WHERE user_id = ? AND nombre = ?").run(userId, nombre);
     db.prepare("DELETE FROM campana_sesiones WHERE sesion_nombre = ?").run(nombre);
-    db.prepare("DELETE FROM session_grupos_cache WHERE user_id = ? AND sesion_nombre = ?").run(userId, nombre);
+    // Keep groups cache so user can reuse groups with another account
+}
+
+// Get cached groups from ALL sessions (active + removed) for a user
+function getGruposCacheTodos(userId) {
+    const rows = db.prepare(
+        "SELECT DISTINCT grupo_jid AS jid, subject, size, es_admin AS esAdmin, can_post AS canPost, announce, sesion_nombre, fecha_cache FROM session_grupos_cache WHERE user_id = ? ORDER BY fecha_cache DESC"
+    ).all(userId);
+    // Deduplicate by jid — keep the most recent entry
+    const seen = new Set();
+    return rows.filter(r => {
+        if (seen.has(r.jid)) return false;
+        seen.add(r.jid);
+        return true;
+    }).map(r => ({
+        jid: r.jid, subject: r.subject, size: r.size, esAdmin: !!r.esAdmin, canPost: !!r.canPost, announce: !!r.announce, sesion_nombre: r.sesion_nombre, cached: true, fecha_cache: r.fecha_cache
+    }));
 }
 
 // --- GRUPOS ---
@@ -2760,7 +2776,7 @@ module.exports = {
     // Promo sent tracking
     getPromoSentJids,
     // Session grupos cache
-    cacheGruposSesion, getGruposCacheSesion, limpiarGruposCacheSesion, limpiarTodosGruposCacheUsuario,
+    cacheGruposSesion, getGruposCacheSesion, getGruposCacheTodos, limpiarGruposCacheSesion, limpiarTodosGruposCacheUsuario,
     // Bot logs (Mejora 6)
     agregarLog, getLogs, limpiarLogs,
     // Grupo secciones

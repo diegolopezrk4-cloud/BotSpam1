@@ -389,6 +389,40 @@ function randomDelay(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// Anti-ban: simulate human typing before sending a message
+async function simularEscritura(sock, jid, textoLength) {
+    try {
+        // Mark as "available" first
+        await sock.sendPresenceUpdate("available");
+        await delay(500 + Math.floor(Math.random() * 500));
+        // Subscribe to presence to appear natural
+        await sock.presenceSubscribe(jid);
+        await delay(300 + Math.floor(Math.random() * 400));
+        // Start "composing" (typing indicator)
+        await sock.sendPresenceUpdate("composing", jid);
+        // Typing duration proportional to message length (50-100ms per char, capped)
+        const typingMs = Math.min(Math.max(textoLength * (50 + Math.floor(Math.random() * 50)), 2000), 6000);
+        await delay(typingMs);
+        // Stop composing
+        await sock.sendPresenceUpdate("paused", jid);
+        await delay(200 + Math.floor(Math.random() * 300));
+    } catch (e) {
+        // Non-critical — just skip presence simulation
+    }
+}
+
+// Anti-ban: generate a more human-like delay (gaussian-ish distribution)
+function humanDelay(minMs, maxMs) {
+    // Use Box-Muller for bell-curve around center
+    const u1 = Math.random();
+    const u2 = Math.random();
+    const normal = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    const center = (minMs + maxMs) / 2;
+    const spread = (maxMs - minMs) / 4;
+    const result = Math.round(center + normal * spread);
+    return Math.max(minMs, Math.min(maxMs, result));
+}
+
 function addInvisibleChars(text) {
     const invisibles = ["\u200B", "\u200C", "\u200D", "\uFEFF"];
     let result = "";
@@ -1206,13 +1240,13 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
             task.total = total;
             let enviados = 0;
             let errores = 0;
-            // Random cooldown between 3-8 seconds
-            const DELAY_MIN_P = 3000;
-            const DELAY_MAX_P = 8000;
+            // Anti-ban: human-like delays with typing simulation
+            const DELAY_MIN_P = 5000;
+            const DELAY_MAX_P = 12000;
 
             const batchInfo = batchSize ? `\n\u{1F4E6} Lotes de ${batchSize} mensajes, pausa ${delayMinutes} min entre lotes` : '';
             try {
-                await notificarUsuario(botSock, userId, `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round(total * 5.5 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`);
+                await notificarUsuario(botSock, userId, `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 5-12 seg + simulacion de escritura${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round(total * 12 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`);
             } catch (e) {}
 
             for (let chatIdx = 0; chatIdx < chats.length; chatIdx++) {
@@ -1225,6 +1259,10 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
 
                 try {
                     const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
+
+                    // Anti-ban: simulate typing before sending
+                    await simularEscritura(botSock, chat.jid, textoFinal.length);
+
                     if (imagenPath && fs.existsSync(imagenPath)) {
                         await botSock.sendMessage(chat.jid, {
                             image: fs.readFileSync(imagenPath),
@@ -1267,10 +1305,20 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
                     if (cancelled) break;
                 }
 
-                // Esperar entre cada envio
+                // Anti-ban: human-like delay (bell curve 5-12s)
                 if (!cancelled) {
-                    const cooldownP = DELAY_MIN_P + Math.floor(Math.random() * (DELAY_MAX_P - DELAY_MIN_P));
+                    let cooldownP = humanDelay(DELAY_MIN_P, DELAY_MAX_P);
+                    // Every 3-7 messages, add extra long pause to simulate reading
+                    if (enviados > 0 && enviados % (3 + Math.floor(Math.random() * 5)) === 0) {
+                        cooldownP += humanDelay(10000, 25000);
+                    }
                     await delay(cooldownP);
+                    // Occasionally go "unavailable" briefly
+                    if (Math.random() < 0.15) {
+                        try { await botSock.sendPresenceUpdate("unavailable"); } catch (e) {}
+                        await delay(humanDelay(3000, 8000));
+                        try { await botSock.sendPresenceUpdate("available"); } catch (e) {}
+                    }
                 }
             }
 
@@ -1322,16 +1370,16 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             const total = jids.length;
             let enviados = 0;
             let errores = 0;
-            // Random cooldown between 3-8 seconds (more human-like)
-            const DELAY_MIN = 3000;
-            const DELAY_MAX = 8000;
+            // Anti-ban: human-like delays with typing simulation
+            const DELAY_MIN = 5000;
+            const DELAY_MAX = 12000;
             const DELAY_ENTRE_LOTES = batchSize ? delayMinutes * 60 * 1000 : 0;
             const displayName = grupoNombre || grupoJid || "seleccionados";
 
             const batchInfo = batchSize ? `\n📦 Lotes: ${batchSize} por lote, pausa ${delayMinutes} min entre lotes` : "";
             const resumeInfo = startIndex > 0 ? `\n🔄 Reanudando desde #${startIndex + 1}` : "";
             try {
-                await notificarUsuario(botSock, userId, `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 5.5 / 60)} min`);
+                await notificarUsuario(botSock, userId, `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 5-12 seg + simulacion de escritura${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 12 / 60)} min`);
             } catch (e) {}
 
             // Save progress at the start so we can resume if interrupted
@@ -1396,6 +1444,10 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
 
                     const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
                     console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid}`);
+
+                    // Anti-ban: simulate typing before sending
+                    await simularEscritura(botSock, jid, textoFinal.length);
+
                     let result;
                     if (imagenPath && fs.existsSync(imagenPath)) {
                         result = await botSock.sendMessage(jid, {
@@ -1459,9 +1511,19 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                 }
 
                 if (!cancelled) {
-                    // Random cooldown between 3-8 seconds (human-like)
-                    const cooldown = DELAY_MIN + Math.floor(Math.random() * (DELAY_MAX - DELAY_MIN));
+                    // Anti-ban: human-like delay (bell curve 5-12s)
+                    let cooldown = humanDelay(DELAY_MIN, DELAY_MAX);
+                    // Every 3-7 messages, add an extra long pause (15-30s) to simulate reading
+                    if (enviados > 0 && enviados % (3 + Math.floor(Math.random() * 5)) === 0) {
+                        cooldown += humanDelay(10000, 25000);
+                    }
                     await delay(cooldown);
+                    // Occasionally go "unavailable" briefly to look more natural
+                    if (Math.random() < 0.15) {
+                        try { await botSock.sendPresenceUpdate("unavailable"); } catch (e) {}
+                        await delay(humanDelay(3000, 8000));
+                        try { await botSock.sendPresenceUpdate("available"); } catch (e) {}
+                    }
                 }
             }
 

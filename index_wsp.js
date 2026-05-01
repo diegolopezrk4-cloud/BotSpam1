@@ -1298,8 +1298,15 @@ poll();
                 const userId = url.searchParams.get("u");
                 const cuenta = url.searchParams.get("cuenta");
                 const forceRefresh = url.searchParams.get("refresh") === "1";
+                const usarCache = url.searchParams.get("cached") === "1";
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 try {
+                    // If requesting all cached groups (no account needed)
+                    if (usarCache) {
+                        const cached = db.getGruposCacheTodos(userId);
+                        res.writeHead(200);
+                        return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true }));
+                    }
                     // Check cache first (unless force refresh)
                     if (cuenta && !forceRefresh) {
                         const cached = db.getGruposCacheSesion(userId, cuenta);
@@ -1311,7 +1318,17 @@ poll();
                     let sock;
                     const sesionNombre = cuenta || null;
                     if (cuenta) {
-                        sock = await motor.getOrConnectClient(userId, cuenta);
+                        try {
+                            sock = await motor.getOrConnectClient(userId, cuenta);
+                        } catch (connErr) {
+                            // Connection failed — fall back to cached groups
+                            const cached = cuenta ? db.getGruposCacheSesion(userId, cuenta) : db.getGruposCacheTodos(userId);
+                            if (cached.length > 0) {
+                                res.writeHead(200);
+                                return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true, aviso: "Cuenta desconectada, mostrando grupos en cache" }));
+                            }
+                            throw connErr;
+                        }
                     } else {
                         const sesiones = db.getSesiones(userId);
                         if (sesiones.length > 0) {
@@ -1319,11 +1336,23 @@ poll();
                         } else if (botSock) {
                             sock = botSock;
                         } else {
+                            // No active sessions — try returning all cached groups
+                            const cached = db.getGruposCacheTodos(userId);
+                            if (cached.length > 0) {
+                                res.writeHead(200);
+                                return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true, aviso: "Sin cuentas activas, mostrando grupos en cache" }));
+                            }
                             res.writeHead(503);
                             return res.end(JSON.stringify({ ok: false, error: "No tienes cuentas WSP vinculadas." }));
                         }
                     }
                     if (!sock || !sock.user) {
+                        // Account not connected — fall back to cached groups
+                        const cached = cuenta ? db.getGruposCacheSesion(userId, cuenta) : db.getGruposCacheTodos(userId);
+                        if (cached.length > 0) {
+                            res.writeHead(200);
+                            return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true, aviso: "Cuenta no conectada, mostrando grupos en cache" }));
+                        }
                         res.writeHead(503);
                         return res.end(JSON.stringify({ ok: false, error: "Cuenta no conectada." }));
                     }
@@ -1345,6 +1374,12 @@ poll();
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, grupos }));
                 } catch (e) {
+                    // Last resort: try cached groups before returning error
+                    const cached = db.getGruposCacheTodos(userId);
+                    if (cached.length > 0) {
+                        res.writeHead(200);
+                        return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true, aviso: "Error conectando, mostrando grupos en cache" }));
+                    }
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
                 }
