@@ -1252,6 +1252,13 @@ CI: lint-and-check OK | docker-build OK
 - **Fix Backend**: Eliminado fallback a `botSock`. Ahora requiere `body.cuenta` obligatorio, con error descriptivo si falta o falla la conexion.
 - **Archivos**: `panel.html` (showAutoJoin, ejecutarAutoJoin), `index_wsp.js` (endpoint /api/autojoin)
 
+### BUG-FIX: git reset --hard restauraba DB antigua (cuentas borradas reaparecian)
+- **Donde**: `.gitignore` + archivos rastreados por git
+- **Sintoma**: Despues de actualizar con `git reset --hard`, las cuentas borradas reaparecian y las nuevas se perdian.
+- **Causa**: Los archivos `wsp_titan.db-shm` y `wsp_titan.db-wal` (journals de SQLite WAL) estaban rastreados en git. El patron `*.db` en .gitignore NO los cubria. Al hacer `git reset --hard`, se restauraban los journals viejos, corrompiendo/revirtiendo la base de datos.
+- **Fix**: (1) `git rm --cached` para dejar de rastrear los archivos WAL. (2) Agregados `*.db-shm`, `*.db-wal`, `*.db-journal` al `.gitignore`.
+- **Archivos**: `.gitignore`
+
 ### BUG-FIX: 'sqlite3.Row' object has no attribute 'get' en Campanas TG (CRITICO)
 - **Donde**: `db.py` — todas las funciones que retornan filas de la base de datos TG
 - **Sintoma**: Al iniciar campanas TG o usar funciones que llaman `.get()` en filas de la DB, aparecia "Error interno: 'sqlite3.Row' object has no attribute 'get'"
@@ -1272,6 +1279,7 @@ CI: lint-and-check OK | docker-build OK
 | `panel.html` | showAutoJoin con selector de cuenta + validacion |
 | `index_wsp.js` | /api/autojoin requiere cuenta obligatoria, sin fallback a botSock |
 | `db.py` | row_factory cambiado de aiosqlite.Row a _dict_factory (fix .get()) |
+| `.gitignore` | Agregados *.db-shm, *.db-wal, *.db-journal |
 
 ### Verificacion de Sintaxis v12.5
 ```
@@ -1285,8 +1293,9 @@ python3 ast.parse web_panel.py OK
 
 ### Comando de actualizacion
 ```bash
-cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777671083-v12.5-fixes && npm install && bash start.sh
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && cp wsp_titan.db wsp_titan.db.bak 2>/dev/null; cp titan.db titan.db.bak 2>/dev/null; git fetch origin && git reset --hard origin/devin/1777671083-v12.5-fixes && cp wsp_titan.db.bak wsp_titan.db 2>/dev/null; cp titan.db.bak titan.db 2>/dev/null; npm install && bash start.sh
 ```
+**NOTA**: El comando ahora hace backup de las DBs antes del reset y las restaura despues, para no perder datos de cuentas/sesiones.
 
 ---
 
