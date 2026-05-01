@@ -4906,13 +4906,14 @@ let chatWspSelectedJid=null;
 let chatWspSelectedName=null;
 
 async function loadChatsWsp(){
-  // Load cuentas dropdown
   const sel=$('chatWspCuenta');
+  const prev=sel.value;
   const r=await api('/api/sesiones?u='+userId);
   if(r.ok&&r.sesiones){
     let opts='<option value="">-- Selecciona cuenta --</option>';
     r.sesiones.forEach(s=>{opts+=`<option value="${esc(s.nombre)}">${esc(s.nombre)} ${s.activa?'🟢':'🔴'}</option>`});
     sel.innerHTML=opts;
+    if(prev) sel.value=prev;
   }
   const cuenta=sel.value;
   if(!cuenta){
@@ -4977,11 +4978,13 @@ let chatTgSelectedName=null;
 
 async function loadChatsTg(){
   const sel=$('chatTgCuenta');
+  const prev=sel.value;
   const r=await api('/api/sesiones_tg?u='+userId);
   if(r.ok&&r.sesiones){
     let opts='<option value="">-- Selecciona cuenta --</option>';
     r.sesiones.forEach(s=>{opts+=`<option value="${esc(s.nombre)}">${esc(s.nombre)} ${s.activa?'🟢':'🔴'}</option>`});
     sel.innerHTML=opts;
+    if(prev) sel.value=prev;
   }
   const cuenta=sel.value;
   if(!cuenta){
