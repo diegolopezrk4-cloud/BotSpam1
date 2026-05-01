@@ -2773,7 +2773,23 @@ async function elimProg(id){await api('/api/programados/del',{method:'POST',head
 // --- CAMPANAS ---
 function getEstadoCampanaBadge(x){
   if(x.activa){
-    if(x.estado_detalle==='en_reposo') return '<span class="badge" style="background:#f39c12;color:#fff">En reposo</span>';
+    if(x.estado_detalle && x.estado_detalle.startsWith('en_reposo')){
+      let timerHtml='';
+      const parts=x.estado_detalle.split('|');
+      if(parts.length===3){
+        const inicio=parseInt(parts[1]);
+        const duracion=parseInt(parts[2]);
+        const ahora=Math.floor(Date.now()/1000);
+        const transcurrido=ahora-inicio;
+        const restante=Math.max(0,duracion-transcurrido);
+        const tMin=Math.floor(transcurrido/60);
+        const tSeg=transcurrido%60;
+        const rMin=Math.floor(restante/60);
+        const rSeg=restante%60;
+        timerHtml=` (${rMin}m ${rSeg}s restante)`;
+      }
+      return '<span class="badge" style="background:#f39c12;color:#fff">En reposo'+timerHtml+'</span>';
+    }
     return '<span class="badge badge-success">Activa</span>';
   }
   if(x.estado_detalle==='detenida_actualizacion') return '<span class="badge" style="background:#e67e22;color:#fff">Detenida (actualización)</span>';
@@ -2786,7 +2802,8 @@ async function loadCampanas(){
   const c=r.campanas||[];
   if(!c.length){$('campanasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay campanas.</p></div>';return}
   _wspCampanasData={};
-  let h='';
+  const hayActivas=c.some(x=>x.activa);
+  let h='<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn btn-success btn-sm" onclick="iniciarTodasCamp()">🚀 Iniciar Todas</button><button class="btn btn-outline btn-sm" onclick="loadCampanas()">🔄 Actualizar</button></div>';
   c.forEach(x=>{
     _wspCampanasData[x.id]=x;
     const estado=getEstadoCampanaBadge(x);
@@ -2801,10 +2818,15 @@ async function loadCampanas(){
     h+=`</div>`;
   });
   $('campanasContent').innerHTML=h;
+  if(hayActivas)startCampAutoRefresh();
 }
 function showCrearCampana(){showModal(`<h3>➕ Crear Campana WSP</h3><div class="form-group"><label>Nombre</label><input id="cN" placeholder="Nombre"></div><div class="form-group"><label>Mensaje</label><textarea id="cM" rows="4" placeholder="Texto a enviar a los grupos"></textarea></div><div class="form-group"><label>Intervalo entre grupos (seg)</label><input id="cI" type="number" value="20" min="5"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearCamp()">Crear</button></div>`)}
 async function crearCamp(){const n=$('cN').value.trim(),m=$('cM').value.trim(),iv=parseInt($('cI').value)||60;if(!n||!m){toast('Completa','error');return}closeModal();const r=await api('/api/campanas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,mensaje:m,intervalo:iv})});toast(r.ok?'Creada':'Error',r.ok?'success':'error');loadCampanas()}
-async function iniciarCamp(id){const r=await api('/api/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast(r.ok?'Iniciada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas()}
+async function iniciarCamp(id){const r=await api('/api/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast(r.ok?(r.ya_activa?'Ya estaba activa':'Iniciada'):'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas()}
+async function iniciarTodasCamp(){const r=await api('/api/campanas/iniciar_todas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId})});toast(r.ok?`${r.iniciadas} iniciadas, ${r.errores} errores`:'Error',r.ok?'success':'error');loadCampanas()}
+let _campRefreshInterval=null;
+function startCampAutoRefresh(){if(_campRefreshInterval)return;_campRefreshInterval=setInterval(()=>{const hasActive=Object.values(_wspCampanasData).some(x=>x.activa);if(hasActive)loadCampanas();else{clearInterval(_campRefreshInterval);_campRefreshInterval=null}},15000)}
+
 async function detenerCamp(id){const r=await api('/api/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast(r.ok?'Detenida':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas()}
 async function elimCamp(id){await api('/api/campanas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminada','success');loadCampanas()}
 async function showEditWspCamp(id){

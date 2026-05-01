@@ -420,7 +420,7 @@ poll();
                     const grupos = db.getGruposCampana(c.id);
                     const sesiones = db.getSesionesCampana(c.id);
                     return { ...c, intervalo_min: conf.intervalo_min, intervalo_max: conf.intervalo_max, espera_ciclo: conf.espera_ciclo, grupos_count: grupos.length, sesiones_count: sesiones.length, camp_sesiones: sesiones, camp_grupos: grupos };
-                });
+                }).sort((a, b) => a.id - b.id);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campanas }));
             }
@@ -498,9 +498,27 @@ poll();
                 if (!grupos.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Campana sin grupos asignados. Edita la campana y asigna al menos un grupo." })); }
                 // Set active immediately so frontend sees the change on reload
                 db.setCampanaActiva(campId, true);
-                motor.iniciarCampana(campId, body.u, botSock);
+                const started = motor.iniciarCampana(campId, body.u, botSock);
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, campana: camp.nombre }));
+                return res.end(JSON.stringify({ ok: true, campana: camp.nombre, ya_activa: !started }));
+            }
+
+            // POST /api/campanas/iniciar_todas — Iniciar TODAS las campañas del usuario
+            if (url.pathname === "/api/campanas/iniciar_todas" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const campanas = db.getCampanas(body.u);
+                let iniciadas = 0, errores = 0;
+                for (const c of campanas) {
+                    const sesiones = db.getSesionesCampana ? db.getSesionesCampana(c.id) : [];
+                    const grupos = db.getGruposCampana ? db.getGruposCampana(c.id) : [];
+                    if (!sesiones.length || !grupos.length) { errores++; continue; }
+                    db.setCampanaActiva(c.id, true);
+                    const ok = motor.iniciarCampana(c.id, body.u, botSock);
+                    if (ok) iniciadas++; else errores++;
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, iniciadas, errores, total: campanas.length }));
             }
 
             // POST /api/detener — Detener campaña { id|campana_id }
@@ -661,6 +679,54 @@ poll();
                 }
             }
 
+            // GET /api/chat/contactos — Lista de contactos con historial de chat
+            if (url.pathname === "/api/chat/contactos" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const cuenta = url.searchParams.get("cuenta");
+                if (!userId || !cuenta) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o cuenta" })); }
+                try {
+                    const contacts = db.getChatContacts(userId, cuenta);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, contacts }));
+                } catch(e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // GET /api/chat/synced — Lista de chats sincronizados desde WhatsApp
+            if (url.pathname === "/api/chat/synced" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const cuenta = url.searchParams.get("cuenta");
+                const tipo = url.searchParams.get("tipo") || null;
+                if (!userId || !cuenta) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o cuenta" })); }
+                try {
+                    const chats = db.getSyncedChats(userId, cuenta, tipo);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, chats }));
+                } catch(e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // GET /api/chat/mensajes — Historial de mensajes de un chat
+            if (url.pathname === "/api/chat/mensajes" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const cuenta = url.searchParams.get("cuenta");
+                const jid = url.searchParams.get("jid");
+                if (!userId || !cuenta || !jid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, cuenta o jid" })); }
+                try {
+                    const messages = db.getChatMessages(userId, cuenta, jid, 50);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, messages: messages.reverse() }));
+                } catch(e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+||||||| parent of 95dffc5 (fix: remove WSP chat feature, fix campaign reposo timer, add iniciar todas, order campaigns)
             // GET /api/chats_personales?u=USER_ID&cuenta=X — Listar chats personales
             if (url.pathname === "/api/chats_personales" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
@@ -714,58 +780,9 @@ poll();
                         return res.end(JSON.stringify({ ok: false, error: "Cuenta no conectada" }));
                     }
                     const result = await sock.sendMessage(body.jid, { text: body.mensaje });
-                    // Save to chat history
-                    try { db.saveChatMessage(body.u, body.cuenta||'default', body.jid, body.nombre||'', body.mensaje, 'out'); } catch(e2){}
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, msgId: result?.key?.id }));
                 } catch (e) {
-                    res.writeHead(500);
-                    return res.end(JSON.stringify({ ok: false, error: e.message }));
-                }
-            }
-
-            // GET /api/chat/contactos — Lista de contactos con historial de chat
-            if (url.pathname === "/api/chat/contactos" && req.method === "GET") {
-                const userId = url.searchParams.get("u");
-                const cuenta = url.searchParams.get("cuenta");
-                if (!userId || !cuenta) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o cuenta" })); }
-                try {
-                    const contacts = db.getChatContacts(userId, cuenta);
-                    res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, contacts }));
-                } catch(e) {
-                    res.writeHead(500);
-                    return res.end(JSON.stringify({ ok: false, error: e.message }));
-                }
-            }
-
-            // GET /api/chat/synced — Lista de chats sincronizados desde WhatsApp
-            if (url.pathname === "/api/chat/synced" && req.method === "GET") {
-                const userId = url.searchParams.get("u");
-                const cuenta = url.searchParams.get("cuenta");
-                const tipo = url.searchParams.get("tipo") || null;
-                if (!userId || !cuenta) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o cuenta" })); }
-                try {
-                    const chats = db.getSyncedChats(userId, cuenta, tipo);
-                    res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, chats }));
-                } catch(e) {
-                    res.writeHead(500);
-                    return res.end(JSON.stringify({ ok: false, error: e.message }));
-                }
-            }
-
-            // GET /api/chat/mensajes — Historial de mensajes de un chat
-            if (url.pathname === "/api/chat/mensajes" && req.method === "GET") {
-                const userId = url.searchParams.get("u");
-                const cuenta = url.searchParams.get("cuenta");
-                const jid = url.searchParams.get("jid");
-                if (!userId || !cuenta || !jid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, cuenta o jid" })); }
-                try {
-                    const messages = db.getChatMessages(userId, cuenta, jid, 50);
-                    res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, messages: messages.reverse() }));
-                } catch(e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
                 }

@@ -895,7 +895,7 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                     await notificarUsuario(botSock, userId, `\u23F8 *${campana.nombre}* — Ciclo #${ciclo} completado\n\u2705 ${c.enviados} enviados | \u274C ${c.errores} errores\n\u{1F310} ${gruposLinks.length} grupo(s) activos\n\n\u{1F6D1} *Estado: EN REPOSO*\n\u23F0 Reanuda en ${esperaMin} minuto(s)${reporteExtra}${enviosDiaMsg}`);
 
-                    db.setCampanaEstadoDetalle(campanaId, 'en_reposo');
+                    db.setCampanaEstadoDetalle(campanaId, `en_reposo|${Math.floor(Date.now()/1000)}|${esperaSeg}`);
 
                     await delay(esperaSeg * 1000);
 
@@ -1093,32 +1093,6 @@ function getCampanasActivas() {
 // ENVIO PERSONAL: Leer chats personales y enviar con delay
 // ============================================================
 const envioPersonalActivo = {}; // { userId: { running, cancel } }
-
-async function listarChatsPersonales(botSock) {
-    const chats = [];
-    try {
-        const store = botSock.store || null;
-        // Obtener todos los chats usando fetchAllContacts o store
-        // Baileys no tiene un "getChats" directo, pero podemos listar contactos
-        // y chats recientes usando las conversaciones
-        const contacts = await botSock.fetchAllContacts?.() || [];
-        const contactJids = new Set();
-        for (const c of contacts) {
-            if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
-                contactJids.add(c.id);
-                const num = c.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
-                chats.push({
-                    jid: c.id,
-                    nombre: c.name || c.notify || num,
-                    numero: num,
-                });
-            }
-        }
-    } catch (e) {
-        console.error(`Error listando chats personales: ${e.message}`);
-    }
-    return chats;
-}
 
 async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, batchSize, delayMinutes) {
     if (envioPersonalActivo[userId]) return false;
@@ -1741,7 +1715,6 @@ module.exports = {
     detenerReporteDiario,
     iniciarResponder,
     detenerResponder,
-    listarChatsPersonales,
     enviarAPersonales,
     enviarASeleccionados,
     detenerEnvioPersonal,
