@@ -2890,6 +2890,7 @@ poll();
                 let qrPath = null;
                 if (body.qr_imagen_base64) {
                     const buf = Buffer.from(body.qr_imagen_base64, 'base64');
+                    if (!fs.existsSync('comprobantes')) fs.mkdirSync('comprobantes', { recursive: true });
                     qrPath = `comprobantes/qr_${Date.now()}.png`;
                     fs.writeFileSync(qrPath, buf);
                 }
@@ -2905,14 +2906,18 @@ poll();
                 if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
                 let qrPath = undefined;
+                const oldMetodo = db.getMetodosPago().find(m => m.id === parseInt(body.id));
                 if (body.qr_imagen_base64) {
                     const buf = Buffer.from(body.qr_imagen_base64, 'base64');
+                    if (!fs.existsSync('comprobantes')) fs.mkdirSync('comprobantes', { recursive: true });
                     qrPath = `comprobantes/qr_${Date.now()}.png`;
                     fs.writeFileSync(qrPath, buf);
+                    if (oldMetodo && oldMetodo.qr_imagen) try { fs.unlinkSync(oldMetodo.qr_imagen); } catch (_) {}
                 } else if (body.qr_imagen_eliminar) {
+                    if (oldMetodo && oldMetodo.qr_imagen) try { fs.unlinkSync(oldMetodo.qr_imagen); } catch (_) {}
                     qrPath = null;
                 }
-                db.editarMetodoPago(parseInt(body.id), body.nombre, body.valor, body.instrucciones || "", body.activo !== false, qrPath);
+                db.editarMetodoPago(parseInt(body.id), body.nombre, body.valor, body.instrucciones || "", !!body.activo, qrPath);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
@@ -2922,6 +2927,8 @@ poll();
                 const body = await readBody();
                 if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                const oldMetodo = db.getMetodosPago().find(m => m.id === parseInt(body.id));
+                if (oldMetodo && oldMetodo.qr_imagen) try { fs.unlinkSync(oldMetodo.qr_imagen); } catch (_) {}
                 db.eliminarMetodoPago(parseInt(body.id));
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));

@@ -5043,7 +5043,7 @@ async function adminPagosTab(tab){
         const qrCell=m.qr_imagen?'<img src="/api/metodo_pago/qr?id='+m.id+'" style="max-width:60px;border-radius:4px">':'<span style="color:var(--text2);font-size:11px">Sin QR</span>';
         h+=`<tr><td>${esc(m.nombre)}</td><td>${esc(m.tipo)}</td><td>${esc(m.valor)}</td><td>${qrCell}</td><td style="max-width:200px;font-size:12px">${esc(m.instrucciones||'')}</td>
         <td><span class="badge ${m.activo?'badge-success':'badge-danger'}">${m.activo?'Si':'No'}</span></td>
-        <td style="display:flex;gap:4px"><button class="btn btn-sm btn-primary" onclick="showEditarMetodoPago(${m.id},'${esc(m.nombre)}','${esc(m.valor)}','${esc(m.instrucciones||'')}',${m.activo},${m.qr_imagen?'true':'false'})">Editar</button>
+        <td style="display:flex;gap:4px"><button class="btn btn-sm btn-primary" onclick="showEditarMetodoPago(${m.id})">Editar</button>
         <button class="btn btn-sm btn-danger" onclick="eliminarMetodoPago(${m.id})">Eliminar</button></td></tr>`;
       });
       h+='</tbody></table>';
@@ -5088,7 +5088,12 @@ async function crearMetodoPago(){
   toast(r.ok?'Metodo creado':'Error: '+(r.error||''),r.ok?'success':'error');
   if(r.ok){closeModal();adminPagosTab('metodos')}
 }
-function showEditarMetodoPago(id,nombre,valor,instrucciones,activo,qrImagen){
+async function showEditarMetodoPago(id){
+  const res=await api('/api/admin/metodos_pago?u='+userId);
+  if(!res.ok){toast('Error cargando metodo','error');return}
+  const m=(res.metodos||[]).find(x=>x.id===id);
+  if(!m){toast('Metodo no encontrado','error');return}
+  const nombre=m.nombre||'';const valor=m.valor||'';const instrucciones=m.instrucciones||'';const activo=m.activo;const qrImagen=m.qr_imagen;
   const qrHtml=qrImagen?'<div style="margin-bottom:8px"><img src="/api/metodo_pago/qr?id='+id+'" style="max-width:150px;border-radius:8px"><br><button class="btn btn-sm btn-danger" style="margin-top:5px" onclick="document.getElementById(\'mpEditQrEliminar\').value=\'1\';this.parentElement.style.display=\'none\'">Eliminar QR</button></div>':'';
   showModal(`<h3>Editar Metodo de Pago #${id}</h3>
     <div class="form-group"><label>Nombre</label><input type="text" id="mpEditNombre" value="${esc(nombre)}"></div>

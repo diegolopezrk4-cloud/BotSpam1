@@ -1600,8 +1600,8 @@ function eliminarUsuarioPanel(telegramId) {
     try { db.prepare("DELETE FROM panel_users WHERE telegram_id = ?").run(tid); } catch(_){}
     try { db.prepare("DELETE FROM registration_codes WHERE telegram_id = ?").run(tid); } catch(_){}
     try { db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(tid); } catch(_){}
-    try { db.prepare("DELETE FROM active_sessions WHERE user_id = ?").run(tid); } catch(_){}
-    try { db.prepare("DELETE FROM user_2fa WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM active_sessions WHERE telegram_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM user_2fa WHERE telegram_id = ?").run(tid); } catch(_){}
     try { db.prepare("DELETE FROM login_attempts WHERE telegram_id = ?").run(tid); } catch(_){}
     // Config y datos del usuario
     try { db.prepare("DELETE FROM user_envio_config WHERE user_id = ?").run(tid); } catch(_){}
@@ -2515,7 +2515,8 @@ function getMetodosPagoActivos() {
 }
 
 function crearMetodoPago(tipo, nombre, valor, instrucciones, qrImagen) {
-    db.prepare("INSERT INTO metodos_pago (tipo, nombre, valor, instrucciones, qr_imagen) VALUES (?, ?, ?, ?, ?)").run(tipo, nombre, valor, instrucciones || '', qrImagen || null);
+    const info = db.prepare("INSERT INTO metodos_pago (tipo, nombre, valor, instrucciones, qr_imagen) VALUES (?, ?, ?, ?, ?)").run(tipo, nombre, valor, instrucciones || '', qrImagen || null);
+    return db.prepare("SELECT * FROM metodos_pago WHERE id = ?").get(info.lastInsertRowid);
 }
 
 function editarMetodoPago(id, nombre, valor, instrucciones, activo, qrImagen) {
