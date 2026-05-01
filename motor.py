@@ -462,8 +462,18 @@ async def worker_campana(campana_id, user_id, bot_notificar=None):
                         pass
                 break
             else:
-                # Pausa entre rondas
-                await asyncio.sleep(random.randint(intervalo_min, max(intervalo_min, intervalo_max)))
+                # Pausa entre rondas (reposo)
+                espera_ciclo = config.get("espera_ciclo", 600)
+                espera_min = round(espera_ciclo / 60)
+                if bot_notificar:
+                    try:
+                        await bot_notificar.send_message(user_id,
+                            f"📊 *{campana['nombre']}* ronda #{ronda}\n"
+                            f"✅ {enviados} env | ❌ {errores} err\n"
+                            f"⏳ Reposo: {espera_min} min")
+                    except Exception:
+                        pass
+                await asyncio.sleep(espera_ciclo)
 
     except asyncio.CancelledError:
         logger.info(f"Campaña {campana_id} cancelada por el usuario.")
