@@ -35,6 +35,7 @@ WEB_PORT = int(os.environ.get("TG_API_PORT", 3002))
 ADMIN_ID = 8001675901
 
 web_login_sessions = {}
+SESSION_EXPIRY_SECONDS = 600  # 10 minutes max for login sessions
 aiogram_bot = None
 
 
@@ -98,6 +99,7 @@ async def api_tg_auth_send_code(request):
             "nombre": nombre,
             "phone_code_hash": result.phone_code_hash,
             "user_id": user_id,
+            "created_at": datetime.now(PERU_TZ).timestamp(),
         }
         return web.json_response({"ok": True, "status": "code_sent", "token": token})
     except Exception as e:
@@ -210,7 +212,8 @@ async def api_tg_auth_qr_start(request):
         qr_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
         web_qr_sessions[token] = {
             "client": client, "qr_login": qr_login, "user_id": user_id,
-            "nombre": nombre, "status": "waiting_scan", "qr": qr_b64
+            "nombre": nombre, "status": "waiting_scan", "qr": qr_b64,
+            "created_at": datetime.now(PERU_TZ).timestamp(),
         }
         async def wait_for_scan():
             try:
@@ -1124,10 +1127,37 @@ def create_app():
     return app
 
 
+async def _cleanup_stale_sessions():
+    """Periodically clean up abandoned login sessions to prevent memory leaks."""
+    while True:
+        await asyncio.sleep(120)  # Check every 2 minutes
+        now = datetime.now(PERU_TZ).timestamp()
+        stale = [t for t, s in web_login_sessions.items()
+                 if now - s.get("created_at", 0) > SESSION_EXPIRY_SECONDS]
+        for token in stale:
+            session = web_login_sessions.pop(token, None)
+            if session and session.get("client"):
+                try:
+                    await session["client"].disconnect()
+                except Exception:
+                    pass
+            logger.info(f"Sesion login expirada limpiada: {token[:8]}...")
+        stale_qr = [t for t, s in web_qr_sessions.items()
+                     if now - s.get("created_at", 0) > SESSION_EXPIRY_SECONDS]
+        for token in stale_qr:
+            session = web_qr_sessions.pop(token, None)
+            if session and session.get("client"):
+                try:
+                    await session["client"].disconnect()
+                except Exception:
+                    pass
+
+
 async def start_web_panel():
     app = create_app()
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", WEB_PORT)
     await site.start()
+    asyncio.create_task(_cleanup_stale_sessions())
     logger.info(f"TG API backend corriendo en puerto {WEB_PORT}")

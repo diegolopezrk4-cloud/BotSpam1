@@ -53,6 +53,7 @@ async function connectClientAccount(userId, nombre, telefono) {
     if (reconnectLocks[key]) {
         throw new Error("Ya se esta reconectando esta cuenta. Espera un momento.");
     }
+    reconnectLocks[key] = true;
     fs.mkdirSync(sessionDir, { recursive: true });
 
     async function createSocket() {
@@ -142,7 +143,13 @@ async function connectClientAccount(userId, nombre, telefono) {
         return sock;
     }
 
-    const sock = await createSocket();
+    let sock;
+    try {
+        sock = await createSocket();
+    } catch (e) {
+        delete reconnectLocks[key];
+        throw e;
+    }
 
     return new Promise((resolve, reject) => {
         let resolved = false;
@@ -156,6 +163,7 @@ async function connectClientAccount(userId, nombre, telefono) {
                 clientSessions[key] = sock;
                 if (!resolved) {
                     resolved = true;
+                    delete reconnectLocks[key];
                     resolve(sock);
                 }
             }
@@ -168,6 +176,7 @@ async function connectClientAccount(userId, nombre, telefono) {
                     try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
                     if (!resolved) {
                         resolved = true;
+                        delete reconnectLocks[key];
                         reject(new Error("Sesion WSP expirada o cerrada. Re-vincula tu cuenta desde Cuentas WSP."));
                     }
                 } else if (resolved && reconnectAttempts < MAX_RECONNECT) {
@@ -183,6 +192,7 @@ async function connectClientAccount(userId, nombre, telefono) {
                     }
                 } else if (!resolved) {
                     resolved = true;
+                    delete reconnectLocks[key];
                     reject(new Error("Conexion cerrada" + (code ? ` (code ${code})` : "") + ". Intenta de nuevo."));
                 }
             }
@@ -190,6 +200,7 @@ async function connectClientAccount(userId, nombre, telefono) {
         setTimeout(() => {
             if (!resolved) {
                 resolved = true;
+                delete reconnectLocks[key];
                 try { sock.end(); } catch (e) {}
                 reject(new Error("Timeout conectando cuenta (60s)"));
             }
@@ -985,7 +996,7 @@ function iniciarReporteDiario(userId, botSock) {
             if (baneadas.length) {
                 texto += `\n\u{1F6A8} *Cuentas baneadas:* ${baneadas.map(b => b.cuenta_nombre).join(", ")}`;
             }
-            await botSock.sendMessage(userId, { text: texto });
+            await notificarUsuario(botSock, userId, texto);
         } catch (e) {
             console.error(`Error reporte diario: ${e.message}`);
         }
@@ -1180,9 +1191,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
             }
             if (!chats.length) {
                 try {
-                    await botSock.sendMessage(userId, {
-                        text: "\u274C No se encontraron chats personales para enviar.",
-                    });
+                    await notificarUsuario(botSock, userId, "\u274C No se encontraron chats personales para enviar.");
                 } catch (e) {}
                 return;
             }
@@ -1196,9 +1205,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
 
             const batchInfo = batchSize ? `\n\u{1F4E6} Lotes de ${batchSize} mensajes, pausa ${delayMinutes} min entre lotes` : '';
             try {
-                await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round(total * 5.5 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`,
-                });
+                await notificarUsuario(botSock, userId, `\u{1F4E8} *ENVIO PERSONAL INICIADO*\n\n\u{1F464} ${total} chat(s) personales encontrados\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round(total * 5.5 / 60)} min\n\n\u{1F4A1} Escribe *cancelar envio* para detener.`);
             } catch (e) {}
 
             for (let chatIdx = 0; chatIdx < chats.length; chatIdx++) {
@@ -1233,18 +1240,14 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
                 // Progreso cada 10 envios
                 if (enviados % 10 === 0 && enviados > 0) {
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u{1F4E8} Progreso: ${enviados}/${total} enviados (${errores} errores)...`,
-                        });
+                        await notificarUsuario(botSock, userId, `\u{1F4E8} Progreso: ${enviados}/${total} enviados (${errores} errores)...`);
                     } catch (e) {}
                 }
 
                 // Batch pause: if batch_size configured, pause every N messages
                 if (batchSize && enviados > 0 && enviados % batchSize === 0 && !cancelled) {
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u23F8 Pausa de lote: ${enviados}/${total} enviados. Esperando ${delayMinutes} min...`,
-                        });
+                        await notificarUsuario(botSock, userId, `\u23F8 Pausa de lote: ${enviados}/${total} enviados. Esperando ${delayMinutes} min...`);
                     } catch (e) {}
                     // Save progress in case of cancel during pause
                     db.guardarProgresoEnvio(userId, 'personal_' + userId, enviados, total, mensaje, chats.map(c => c.jid), 'Chats personales');
@@ -1261,17 +1264,13 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
 
             // Resultado final
             try {
-                await botSock.sendMessage(userId, {
-                    text: `\u2705 *ENVIO PERSONAL COMPLETADO*\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Cancelado por el usuario" : ""}`,
-                });
+                await notificarUsuario(botSock, userId, `\u2705 *ENVIO PERSONAL COMPLETADO*\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Cancelado por el usuario" : ""}`);
             } catch (e) {}
 
         } catch (e) {
             console.error(`Error envio personal ${userId}: ${e.message}`);
             try {
-                await botSock.sendMessage(userId, {
-                    text: `\u274C Error en envio personal: ${e.message}`,
-                });
+                await notificarUsuario(botSock, userId, `\u274C Error en envio personal: ${e.message}`);
             } catch (ex) {}
         } finally {
             delete envioPersonalActivo[userId];
@@ -1312,9 +1311,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             const batchInfo = batchSize ? `\n📦 Lotes: ${batchSize} por lote, pausa ${delayMinutes} min entre lotes` : "";
             const resumeInfo = startIndex > 0 ? `\n🔄 Reanudando desde #${startIndex + 1}` : "";
             try {
-                await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 5.5 / 60)} min`,
-                });
+                await notificarUsuario(botSock, userId, `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 5.5 / 60)} min`);
             } catch (e) {}
 
             // Save progress at the start so we can resume if interrupted
@@ -1339,9 +1336,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                         db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
                     }
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `⏸ Lote de ${batchSize} completado (${i}/${total}). Pausando ${delayMinutes} minutos...`,
-                        });
+                        await notificarUsuario(botSock, userId, `⏸ Lote de ${batchSize} completado (${i}/${total}). Pausando ${delayMinutes} minutos...`);
                     } catch (e) {}
                     await delay(DELAY_ENTRE_LOTES);
                     if (cancelled) {
@@ -1351,9 +1346,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                         break;
                     }
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `▶️ Reanudando envio... (${i}/${total})`,
-                        });
+                        await notificarUsuario(botSock, userId, `▶️ Reanudando envio... (${i}/${total})`);
                     } catch (e) {}
                 }
 
@@ -1437,9 +1430,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
 
                 if (enviados % 10 === 0 && enviados > 0 && !(batchSize && enviados % batchSize === 0)) {
                     try {
-                        await botSock.sendMessage(userId, {
-                            text: `\u{1F4E8} Progreso: ${i + 1}/${total} (${enviados} ok, ${errores} err)...`,
-                        });
+                        await notificarUsuario(botSock, userId, `\u{1F4E8} Progreso: ${i + 1}/${total} (${enviados} ok, ${errores} err)...`);
                     } catch (e) {}
                 }
 
@@ -1456,9 +1447,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             }
 
             try {
-                await botSock.sendMessage(userId, {
-                    text: `\u2705 *ENVIO A MIEMBROS ${cancelled ? "PAUSADO" : "COMPLETADO"}*\n📂 Grupo: ${displayName}\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Pausado — puedes reanudar desde el panel" : ""}`,
-                });
+                await notificarUsuario(botSock, userId, `\u2705 *ENVIO A MIEMBROS ${cancelled ? "PAUSADO" : "COMPLETADO"}*\n📂 Grupo: ${displayName}\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Pausado — puedes reanudar desde el panel" : ""}`);
             } catch (e) {}
 
         } catch (e) {
