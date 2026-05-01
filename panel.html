@@ -963,6 +963,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
             </select>
           </div>
           <button class="btn btn-success" onclick="guardarPlantillaPromo()">💾 Guardar Actual</button>
+          <button class="btn btn-primary btn-sm" onclick="editarPlantillaPromo()">✏️ Editar</button>
           <button class="btn btn-danger btn-sm" onclick="eliminarPlantillaPromo()">🗑</button>
         </div>
         <div id="promoPlantillasLista" style="margin-top:10px"></div>
@@ -3733,6 +3734,23 @@ async function eliminarPlantillaPromo(){
   if(r.ok){toast('Plantilla eliminada','success');loadPromoPlantillas();}
   else{toast('Error','error')}
 }
+async function editarPlantillaPromo(){
+  const id=$('promoPlantillaSelect')?.value;
+  if(!id){toast('Selecciona una plantilla para editar','error');return}
+  const payload={
+    id:parseInt(id),
+    palabra_aceptar:$('promoAceptar')?.value||'si',
+    palabra_rechazar:$('promoRechazar')?.value||'no',
+    respuesta_aceptar:$('promoRespAceptar')?.value||'',
+    respuesta_rechazar:$('promoRespRechazar')?.value||'',
+    timeout_horas:parseInt($('promoTimeout')?.value)||24,
+    recordatorio:$('promoRecordatorio')?.checked?1:0,
+    msg_recordatorio:$('promoMsgRecordatorio')?.value||''
+  };
+  const r=await api('/api/promo/plantillas/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r.ok){toast('Plantilla actualizada','success');loadPromoPlantillas();}
+  else{toast('Error: '+(r.error||''),'error')}
+}
 
 // Load accounts for promo dropdown
 async function loadPromoCuentas(){
@@ -4143,15 +4161,17 @@ let _pagosPlanes=null;
 async function loadPagos(){
   const el=$('pagosContent');
   el.innerHTML='<div class="loading-dots"><span></span><span></span><span></span></div>';
-  const [planesR,metodosR,histR]=await Promise.all([
+  const [planesR,metodosR,histR,binHistR]=await Promise.all([
     api('/api/pagos/planes'),
     api('/api/metodos_pago'),
-    api('/api/comprobante/historial?u='+userId)
+    api('/api/comprobante/historial?u='+userId),
+    api('/api/pagos/historial?u='+userId)
   ]);
   const planes=planesR.ok?planesR.planes:{};
   _pagosPlanes=planes;
   const metodos=metodosR.ok?metodosR.metodos:[];
   const comprobantes=histR.ok?histR.comprobantes:[];
+  const binancePagos=binHistR.ok?binHistR.pagos:[];
   const binanceEnabled=planesR.binance_enabled;
   let h='';
   // Plans cards
@@ -4190,6 +4210,15 @@ async function loadPagos(){
     comprobantes.forEach((c,i)=>{
       const badge=c.estado==='aprobado'?'badge-success':c.estado==='rechazado'?'badge-danger':'badge-warning';
       h+=`<tr><td>${i+1}</td><td>${esc(c.plan_key)}</td><td>${esc(c.metodo_pago)}</td><td><span class="badge ${badge}">${esc(c.estado)}</span></td><td style="font-size:11px">${c.fecha_creado||'-'}</td></tr>`;
+    });
+    h+='</tbody></table></div>';
+  }
+  // Binance Pay history
+  if(binancePagos.length){
+    h+='<div class="table-wrap" style="margin-top:15px"><div class="table-header"><h3>🪙 Historial Binance Pay</h3></div><table><thead><tr><th>#</th><th>Plan</th><th>Monto</th><th>Estado</th><th>Fecha</th></tr></thead><tbody>';
+    binancePagos.forEach((p,i)=>{
+      const badge=p.estado==='paid'?'badge-success':p.estado==='expired'?'badge-danger':'badge-warning';
+      h+=`<tr><td>${i+1}</td><td>${esc(p.plan||'-')}</td><td>${esc(p.monto||'-')} ${esc(p.moneda||'')}</td><td><span class="badge ${badge}">${esc(p.estado)}</span></td><td style="font-size:11px">${p.fecha||'-'}</td></tr>`;
     });
     h+='</tbody></table></div>';
   }
