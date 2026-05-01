@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax check JS
+        run: |
+          node -c index_wsp.js
+          node -c db_wsp.js
+          node -c motor_wsp.js
+          node -c config_wsp.js
+          node -c panel_server.js
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: pip install aiohttp aiosqlite python-telegram-bot pyflakes
+
+      - name: Check Python syntax
+        run: |
+          python -m py_compile bot.py
+          python -m py_compile motor.py
+          python -m py_compile db.py
+          python -m py_compile wsp_bridge.py
+
+      - name: Pyflakes lint
+        run: pyflakes bot.py motor.py db.py wsp_bridge.py || true
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Node Dockerfile
+        run: docker build -t botspam-node .
+
+      - name: Build Python Dockerfile
+        run: docker build -f Dockerfile.python -t botspam-python .
