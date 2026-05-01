@@ -564,6 +564,13 @@ function init() {
         }
         console.log("   Columna 'verificado' agregada a panel_users (existentes = 0, admin = 1)");
     }
+    // Migración: qr_imagen column en metodos_pago (para imagen QR del metodo de pago)
+    try {
+        db.prepare("SELECT qr_imagen FROM metodos_pago LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE metodos_pago ADD COLUMN qr_imagen TEXT DEFAULT NULL");
+        console.log("   Columna 'qr_imagen' agregada a metodos_pago");
+    }
     // Migración: estado_detalle column en campanas (para estado preciso de campañas)
     try {
         db.prepare("SELECT estado_detalle FROM campanas LIMIT 1").get();
@@ -2507,12 +2514,16 @@ function getMetodosPagoActivos() {
     return db.prepare("SELECT * FROM metodos_pago WHERE activo = 1 ORDER BY orden ASC, id ASC").all();
 }
 
-function crearMetodoPago(tipo, nombre, valor, instrucciones) {
-    db.prepare("INSERT INTO metodos_pago (tipo, nombre, valor, instrucciones) VALUES (?, ?, ?, ?)").run(tipo, nombre, valor, instrucciones || '');
+function crearMetodoPago(tipo, nombre, valor, instrucciones, qrImagen) {
+    db.prepare("INSERT INTO metodos_pago (tipo, nombre, valor, instrucciones, qr_imagen) VALUES (?, ?, ?, ?, ?)").run(tipo, nombre, valor, instrucciones || '', qrImagen || null);
 }
 
-function editarMetodoPago(id, nombre, valor, instrucciones, activo) {
-    db.prepare("UPDATE metodos_pago SET nombre = ?, valor = ?, instrucciones = ?, activo = ? WHERE id = ?").run(nombre, valor, instrucciones || '', activo ? 1 : 0, id);
+function editarMetodoPago(id, nombre, valor, instrucciones, activo, qrImagen) {
+    if (qrImagen !== undefined) {
+        db.prepare("UPDATE metodos_pago SET nombre = ?, valor = ?, instrucciones = ?, activo = ?, qr_imagen = ? WHERE id = ?").run(nombre, valor, instrucciones || '', activo ? 1 : 0, qrImagen || null, id);
+    } else {
+        db.prepare("UPDATE metodos_pago SET nombre = ?, valor = ?, instrucciones = ?, activo = ? WHERE id = ?").run(nombre, valor, instrucciones || '', activo ? 1 : 0, id);
+    }
 }
 
 function eliminarMetodoPago(id) {

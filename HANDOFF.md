@@ -1142,3 +1142,31 @@ El sistema de verificacion esta completo y correcto:
 | `config_wsp.js` | MAX_GRUPOS_POR_USUARIO = 999999 |
 | `Dockerfile` | node:18-alpine → node:20-alpine |
 | `.github/workflows/ci.yml` | node-version: 18 → 20 |
+
+---
+
+## Cambios v12.2 — Subir Imagen QR en Metodos de Pago
+
+### Nueva funcionalidad: Imagen QR por metodo de pago
+- **Migracion DB**: Nueva columna `qr_imagen` en tabla `metodos_pago` (TEXT, ruta al archivo)
+- **Backend**:
+  - `crearMetodoPago()` ahora acepta 5to parametro `qrImagen` (ruta)
+  - `editarMetodoPago()` ahora acepta 6to parametro `qrImagen` (ruta o null para eliminar)
+  - Endpoint `POST /api/admin/metodos_pago/crear` acepta `qr_imagen_base64` en body
+  - Endpoint `POST /api/admin/metodos_pago/editar` acepta `qr_imagen_base64` o `qr_imagen_eliminar`
+  - Nuevo endpoint `GET /api/metodo_pago/qr?id=X` sirve la imagen QR (publico, sin auth)
+- **Frontend Admin** (Gestion Pagos > Metodos de Pago):
+  - Formulario "Agregar Metodo" tiene campo "Imagen QR (opcional)" con preview
+  - Formulario "Editar Metodo" muestra QR actual con boton "Eliminar QR" + subir nueva
+  - Tabla de metodos muestra columna "QR" con miniatura de la imagen
+- **Frontend Cliente** (Pagar Membresia > Metodos de Pago Manual):
+  - Cada metodo muestra la imagen QR debajo del nombre/valor
+  - Click en QR abre imagen en tab nueva (tamanio completo)
+- Las imagenes QR se guardan en carpeta `comprobantes/qr_TIMESTAMP.png`
+
+### Archivos Modificados en v12.2
+| Archivo | Cambios |
+|---|---|
+| `db_wsp.js` | Migracion qr_imagen; crearMetodoPago +param; editarMetodoPago +param |
+| `index_wsp.js` | QR base64 en crear/editar metodo; endpoint /api/metodo_pago/qr; PUBLIC_ENDPOINTS |
+| `panel.html` | QR upload en crear/editar; QR column en tabla admin; QR visible para clientes |

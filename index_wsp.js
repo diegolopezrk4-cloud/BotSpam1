@@ -259,7 +259,7 @@ poll();
             "/api/status", "/api/panel_login", "/api/panel_registro",
             "/api/panel_recuperar_solicitar", "/api/panel_recuperar_reset",
             "/api/canjear_codigo", "/api/check_membresia",
-            "/api/pagos/webhook", "/api/metodos_pago",
+            "/api/pagos/webhook", "/api/metodos_pago", "/api/metodo_pago/qr",
             "/api/health", "/api/push/vapid-key"
         ];
         const isPublicEndpoint = PUBLIC_ENDPOINTS.includes(url.pathname) || url.pathname === "/api/status";
@@ -2803,6 +2803,22 @@ poll();
                 } catch (_) { res.writeHead(404); return res.end("Imagen no encontrada"); }
             }
 
+            // GET /api/metodo_pago/qr — Servir imagen QR del metodo de pago
+            if (url.pathname === "/api/metodo_pago/qr" && req.method === "GET") {
+                const id = parseInt(url.searchParams.get("id"));
+                if (!id) { res.writeHead(400); return res.end("Falta id"); }
+                const metodos = db.getMetodosPago();
+                const metodo = metodos.find(m => m.id === id);
+                if (!metodo || !metodo.qr_imagen) { res.writeHead(404); return res.end("No encontrado"); }
+                try {
+                    const imgData = fs.readFileSync(metodo.qr_imagen);
+                    const ext = metodo.qr_imagen.split(".").pop().toLowerCase();
+                    const mimeTypes = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+                    res.writeHead(200, { "Content-Type": mimeTypes[ext] || "image/png" });
+                    return res.end(imgData);
+                } catch (_) { res.writeHead(404); return res.end("Imagen QR no encontrada"); }
+            }
+
             // GET /api/admin/comprobantes — Admin: todos los comprobantes
             if (url.pathname === "/api/admin/comprobantes" && req.method === "GET") {
                 const adminId = url.searchParams.get("u");
@@ -2871,7 +2887,13 @@ poll();
                 const body = await readBody();
                 if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 if (!body.tipo || !body.nombre || !body.valor) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta tipo, nombre o valor" })); }
-                const m = db.crearMetodoPago(body.tipo, body.nombre, body.valor, body.instrucciones || "");
+                let qrPath = null;
+                if (body.qr_imagen_base64) {
+                    const buf = Buffer.from(body.qr_imagen_base64, 'base64');
+                    qrPath = `comprobantes/qr_${Date.now()}.png`;
+                    fs.writeFileSync(qrPath, buf);
+                }
+                const m = db.crearMetodoPago(body.tipo, body.nombre, body.valor, body.instrucciones || "", qrPath);
                 db.registrarAuditoria(body.admin_id, 'metodo_pago_creado', `Tipo: ${body.tipo}, Nombre: ${body.nombre}`, getClientIp());
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, metodo: m }));
@@ -2882,7 +2904,15 @@ poll();
                 const body = await readBody();
                 if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
-                db.editarMetodoPago(parseInt(body.id), body.nombre, body.valor, body.instrucciones || "", body.activo !== false);
+                let qrPath = undefined;
+                if (body.qr_imagen_base64) {
+                    const buf = Buffer.from(body.qr_imagen_base64, 'base64');
+                    qrPath = `comprobantes/qr_${Date.now()}.png`;
+                    fs.writeFileSync(qrPath, buf);
+                } else if (body.qr_imagen_eliminar) {
+                    qrPath = null;
+                }
+                db.editarMetodoPago(parseInt(body.id), body.nombre, body.valor, body.instrucciones || "", body.activo !== false, qrPath);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }

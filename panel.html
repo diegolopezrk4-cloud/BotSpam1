@@ -4888,10 +4888,11 @@ async function loadPagos(){
     h+='<div style="background:var(--card);border-radius:10px;padding:15px;margin-bottom:20px;border:1px solid var(--accent)">';
     h+='<h3 style="margin-bottom:10px">&#x1F4F1; Metodos de Pago Manual</h3>';
     metodos.forEach(m=>{
-      h+=`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--accent)">
+      const qrImg=m.qr_imagen?`<div style="margin-top:8px"><img src="/api/metodo_pago/qr?id=${m.id}" style="max-width:180px;border-radius:8px;border:2px solid var(--accent)" onclick="window.open('/api/metodo_pago/qr?id=${m.id}','_blank')" title="Click para ampliar"></div>`:'';
+      h+=`<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--accent)">
         <span style="font-size:20px">${m.tipo==='yape'?'&#x1F4F2;':m.tipo==='binance'?'&#x1FA99;':'&#x1F4B3;'}</span>
         <div><b>${esc(m.nombre)}</b>: <code style="background:var(--bg);padding:2px 8px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText('${esc(m.valor)}');toast('Copiado!','success')">${esc(m.valor)}</code>
-        ${m.instrucciones?`<div style="font-size:12px;color:var(--text2)">${esc(m.instrucciones)}</div>`:''}</div>
+        ${m.instrucciones?`<div style="font-size:12px;color:var(--text2)">${esc(m.instrucciones)}</div>`:''}${qrImg}</div>
       </div>`;
     });
     h+='</div>';
@@ -5037,11 +5038,12 @@ async function adminPagosTab(tab){
     const metodos=r.ok?r.metodos:[];
     let h='<div class="table-wrap"><div class="table-header"><h3>Metodos de Pago</h3><button class="btn btn-sm btn-success" onclick="showCrearMetodoPago()">+ Agregar Metodo</button></div>';
     if(metodos.length){
-      h+='<table><thead><tr><th>Nombre</th><th>Tipo</th><th>Valor</th><th>Instrucciones</th><th>Activo</th><th>Acciones</th></tr></thead><tbody>';
+      h+='<table><thead><tr><th>Nombre</th><th>Tipo</th><th>Valor</th><th>QR</th><th>Instrucciones</th><th>Activo</th><th>Acciones</th></tr></thead><tbody>';
       metodos.forEach(m=>{
-        h+=`<tr><td>${esc(m.nombre)}</td><td>${esc(m.tipo)}</td><td>${esc(m.valor)}</td><td style="max-width:200px;font-size:12px">${esc(m.instrucciones||'')}</td>
+        const qrCell=m.qr_imagen?'<img src="/api/metodo_pago/qr?id='+m.id+'" style="max-width:60px;border-radius:4px">':'<span style="color:var(--text2);font-size:11px">Sin QR</span>';
+        h+=`<tr><td>${esc(m.nombre)}</td><td>${esc(m.tipo)}</td><td>${esc(m.valor)}</td><td>${qrCell}</td><td style="max-width:200px;font-size:12px">${esc(m.instrucciones||'')}</td>
         <td><span class="badge ${m.activo?'badge-success':'badge-danger'}">${m.activo?'Si':'No'}</span></td>
-        <td style="display:flex;gap:4px"><button class="btn btn-sm btn-primary" onclick="showEditarMetodoPago(${m.id},'${esc(m.nombre)}','${esc(m.valor)}','${esc(m.instrucciones||'')}',${m.activo})">Editar</button>
+        <td style="display:flex;gap:4px"><button class="btn btn-sm btn-primary" onclick="showEditarMetodoPago(${m.id},'${esc(m.nombre)}','${esc(m.valor)}','${esc(m.instrucciones||'')}',${m.activo},${m.qr_imagen?'true':'false'})">Editar</button>
         <button class="btn btn-sm btn-danger" onclick="eliminarMetodoPago(${m.id})">Eliminar</button></td></tr>`;
       });
       h+='</tbody></table>';
@@ -5071,23 +5073,42 @@ function showCrearMetodoPago(){
     <div class="form-group"><label>Nombre</label><input type="text" id="mpNombre" placeholder="Ej: Yape Personal"></div>
     <div class="form-group"><label>Valor (numero/cuenta/email)</label><input type="text" id="mpValor" placeholder="Ej: 976680776"></div>
     <div class="form-group"><label>Instrucciones</label><textarea id="mpInstrucciones" rows="3" placeholder="Instrucciones para el usuario..."></textarea></div>
+    <div class="form-group"><label>Imagen QR (opcional)</label><input type="file" id="mpQrImagen" accept="image/*"><div id="mpQrPreview" style="margin-top:8px"></div></div>
     <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="crearMetodoPago()">Crear</button></div>`);
+  $('mpQrImagen').onchange=function(){const f=this.files[0];if(f){const r=new FileReader();r.onload=()=>{$('mpQrPreview').innerHTML='<img src="'+r.result+'" style="max-width:150px;border-radius:8px">'};r.readAsDataURL(f)}};
 }
 async function crearMetodoPago(){
-  const r=await api('/api/admin/metodos_pago/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,tipo:$('mpTipo').value,nombre:$('mpNombre').value,valor:$('mpValor').value,instrucciones:$('mpInstrucciones').value})});
+  const payload={admin_id:userId,tipo:$('mpTipo').value,nombre:$('mpNombre').value,valor:$('mpValor').value,instrucciones:$('mpInstrucciones').value};
+  const fileInput=$('mpQrImagen');
+  if(fileInput&&fileInput.files[0]){
+    const b64=await new Promise(resolve=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.readAsDataURL(fileInput.files[0])});
+    payload.qr_imagen_base64=b64;
+  }
+  const r=await api('/api/admin/metodos_pago/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   toast(r.ok?'Metodo creado':'Error: '+(r.error||''),r.ok?'success':'error');
   if(r.ok){closeModal();adminPagosTab('metodos')}
 }
-function showEditarMetodoPago(id,nombre,valor,instrucciones,activo){
+function showEditarMetodoPago(id,nombre,valor,instrucciones,activo,qrImagen){
+  const qrHtml=qrImagen?'<div style="margin-bottom:8px"><img src="/api/metodo_pago/qr?id='+id+'" style="max-width:150px;border-radius:8px"><br><button class="btn btn-sm btn-danger" style="margin-top:5px" onclick="document.getElementById(\'mpEditQrEliminar\').value=\'1\';this.parentElement.style.display=\'none\'">Eliminar QR</button></div>':'';
   showModal(`<h3>Editar Metodo de Pago #${id}</h3>
     <div class="form-group"><label>Nombre</label><input type="text" id="mpEditNombre" value="${esc(nombre)}"></div>
     <div class="form-group"><label>Valor</label><input type="text" id="mpEditValor" value="${esc(valor)}"></div>
     <div class="form-group"><label>Instrucciones</label><textarea id="mpEditInstrucciones" rows="3">${esc(instrucciones)}</textarea></div>
     <div class="form-group"><label><input type="checkbox" id="mpEditActivo" ${activo?'checked':''}> Activo</label></div>
+    <div class="form-group"><label>Imagen QR</label>${qrHtml}<input type="file" id="mpEditQrImagen" accept="image/*"><input type="hidden" id="mpEditQrEliminar" value="0"><div id="mpEditQrPreview" style="margin-top:8px"></div></div>
     <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="editarMetodoPagoAdmin(${id})">Guardar</button></div>`);
+  $('mpEditQrImagen').onchange=function(){const f=this.files[0];if(f){const r=new FileReader();r.onload=()=>{$('mpEditQrPreview').innerHTML='<img src="'+r.result+'" style="max-width:150px;border-radius:8px">'};r.readAsDataURL(f)}};
 }
 async function editarMetodoPagoAdmin(id){
-  const r=await api('/api/admin/metodos_pago/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id,nombre:$('mpEditNombre').value,valor:$('mpEditValor').value,instrucciones:$('mpEditInstrucciones').value,activo:$('mpEditActivo').checked?1:0})});
+  const payload={admin_id:userId,id,nombre:$('mpEditNombre').value,valor:$('mpEditValor').value,instrucciones:$('mpEditInstrucciones').value,activo:$('mpEditActivo').checked?1:0};
+  const fileInput=$('mpEditQrImagen');
+  if(fileInput&&fileInput.files[0]){
+    const b64=await new Promise(resolve=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.readAsDataURL(fileInput.files[0])});
+    payload.qr_imagen_base64=b64;
+  } else if($('mpEditQrEliminar').value==='1'){
+    payload.qr_imagen_eliminar=true;
+  }
+  const r=await api('/api/admin/metodos_pago/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   toast(r.ok?'Metodo actualizado':'Error: '+(r.error||''),r.ok?'success':'error');
   if(r.ok){closeModal();adminPagosTab('metodos')}
 }
