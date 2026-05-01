@@ -464,13 +464,21 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <div class="nav-group">General</div>
       <a href="#" data-section="stats"><span class="icon">📈</span><span>Estadisticas y DMs</span></a>
       <a href="#" data-section="actividad"><span class="icon">📝</span><span>Actividad</span></a>
-      <a href="#" data-section="canjear"><span class="icon">🎫</span><span>Canjear Codigo</span></a>
+      <a href="#" data-section="canjear"><span class="icon">🎟️</span><span>Canjear Codigo</span></a>
+      <a href="#" data-section="pagos"><span class="icon">💳</span><span>Pagar Membresia</span></a>
+      <a href="#" data-section="tickets"><span class="icon">🎫</span><span>Soporte</span></a>
+      <a href="#" data-section="analytics"><span class="icon">📊</span><span>Analytics</span></a>
+      <a href="#" data-section="webhooks"><span class="icon">🔗</span><span>Webhooks</span></a>
       <div class="nav-group seller-only" style="display:none">Seller</div>
       <a href="#" data-section="sellerpanel" class="seller-only" style="display:none"><span class="icon">🏪</span><span>Panel Seller</span></a>
       <div class="nav-group admin-only" style="display:none">Admin</div>
       <a href="#" data-section="admin" class="admin-only" style="display:none"><span class="icon">👑</span><span>Admin Panel</span></a>
       <a href="#" data-section="sellers" class="admin-only" style="display:none"><span class="icon">🏪</span><span>Sellers</span></a>
       <a href="#" data-section="adminlogs" class="admin-only" style="display:none"><span class="icon">📋</span><span>Logs Global</span></a>
+      <a href="#" data-section="auditoria" class="admin-only" style="display:none"><span class="icon">🔍</span><span>Auditoria</span></a>
+      <a href="#" data-section="adminpagos" class="admin-only" style="display:none"><span class="icon">💰</span><span>Pagos</span></a>
+      <a href="#" data-section="admintickets" class="admin-only" style="display:none"><span class="icon">🎫</span><span>Tickets Soporte</span></a>
+      <a href="#" data-section="autobackups" class="admin-only" style="display:none"><span class="icon">💾</span><span>Backups Auto</span></a>
     </nav>
     <div class="bottom-actions">
       <button onclick="showCambiarPass()">🔑 <span>Cambiar Contrasena</span></button>
@@ -1619,6 +1627,86 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       </div>
     </div>
 
+    <!-- PAGAR MEMBRESIA -->
+    <div class="section" id="sec-pagos">
+      <h2>💳 Pagar Membresia</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Paga tu membresia con criptomonedas via Binance Pay (USDT) o pago manual.</p>
+      <div id="pagosContent"><div class="loading-dots"><span></span><span></span><span></span></div></div>
+    </div>
+
+    <!-- ADMIN: PAGOS -->
+    <div class="section" id="sec-adminpagos">
+      <h2>💰 Gestion de Pagos</h2>
+      <div id="adminPagosContent"><div class="loading-dots"><span></span><span></span><span></span></div></div>
+    </div>
+
+    <!-- AUDITORIA -->
+    <div class="section" id="sec-auditoria">
+      <h2>🔍 Registro de Auditoria</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Registro de todas las acciones importantes del sistema (solo admin).</p>
+      <div style="margin-bottom:15px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="loadAuditoria()">🔄 Actualizar</button>
+        <input type="text" id="auditoriaFilter" placeholder="Filtrar por Telegram ID..." style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+      </div>
+      <div id="auditoriaContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
+    </div>
+
+    <!-- TICKETS / SOPORTE -->
+    <div class="section" id="sec-tickets">
+      <h2>🎫 Soporte / Tickets</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Envia tus dudas o problemas al admin. Recibiras respuestas aqui mismo.</p>
+      <button class="btn btn-primary" onclick="showCrearTicket()" style="margin-bottom:15px">➕ Nuevo Ticket</button>
+      <div id="ticketsList" class="table-wrap"><div class="table-header"><h3>Mis Tickets</h3></div><div id="ticketsBody" style="padding:10px"><p style="color:var(--text2)">Cargando...</p></div></div>
+    </div>
+
+    <!-- ADMIN TICKETS -->
+    <div class="section" id="sec-admintickets">
+      <h2>🎫 Tickets de Soporte (Admin)</h2>
+      <div style="margin-bottom:15px;display:flex;gap:8px">
+        <button class="btn btn-sm btn-primary" onclick="loadAdminTickets('todos')">Todos</button>
+        <button class="btn btn-sm" onclick="loadAdminTickets('abierto')">Abiertos</button>
+        <button class="btn btn-sm" onclick="loadAdminTickets('cerrado')">Cerrados</button>
+      </div>
+      <div id="adminTicketsList" class="table-wrap"><div id="adminTicketsBody" style="padding:10px"><p style="color:var(--text2)">Cargando...</p></div></div>
+    </div>
+
+    <!-- ANALYTICS AVANZADO -->
+    <div class="section" id="sec-analytics">
+      <h2>📊 Analytics Avanzado</h2>
+      <div class="grid" style="margin-bottom:20px">
+        <div class="table-wrap"><div class="table-header"><h3>📈 Envios por Dia (30d)</h3></div><div style="padding:15px"><canvas id="chartEnviosDia" height="200"></canvas></div></div>
+        <div class="table-wrap"><div class="table-header"><h3>⏰ Envios por Hora (7d)</h3></div><div style="padding:15px"><canvas id="chartEnviosHora" height="200"></canvas></div></div>
+      </div>
+      <div class="grid">
+        <div class="table-wrap"><div class="table-header"><h3>🏆 Top 20 Grupos</h3></div><div id="topGruposBody" style="padding:10px;max-height:400px;overflow-y:auto"><p style="color:var(--text2)">Cargando...</p></div></div>
+        <div class="table-wrap"><div class="table-header"><h3>📱 Rendimiento por Cuenta</h3></div><div id="cuentasHealthBody" style="padding:10px;max-height:400px;overflow-y:auto"><p style="color:var(--text2)">Cargando...</p></div></div>
+      </div>
+      <div class="table-wrap" style="margin-top:15px">
+        <div class="table-header"><h3>📥 Exportar Datos</h3></div>
+        <div style="padding:15px;display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-primary" onclick="exportCSV('grupos')">📋 Grupos CSV</button>
+          <button class="btn btn-sm btn-primary" onclick="exportCSV('historial')">📋 Historial CSV</button>
+          <button class="btn btn-sm btn-primary" onclick="exportCSV('campanas')">📋 Campanas CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- WEBHOOKS -->
+    <div class="section" id="sec-webhooks">
+      <h2>🔗 Webhooks de Eventos</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Recibe notificaciones en tu URL cuando ocurren eventos (envio completado, campana terminada, etc.).</p>
+      <button class="btn btn-primary" onclick="showCrearWebhook()" style="margin-bottom:15px">➕ Nuevo Webhook</button>
+      <div id="webhooksList" class="table-wrap"><div id="webhooksBody" style="padding:10px"><p style="color:var(--text2)">Cargando...</p></div></div>
+    </div>
+
+    <!-- AUTO BACKUPS (admin) -->
+    <div class="section" id="sec-autobackups">
+      <h2>💾 Auto Backups (Admin)</h2>
+      <p style="color:var(--text2);margin-bottom:15px;font-size:14px">El sistema crea backups automaticos cada dia. Mantiene los ultimos 7 dias.</p>
+      <button class="btn btn-primary" onclick="crearBackupManual()" style="margin-bottom:15px">📦 Crear Backup Ahora</button>
+      <div id="autoBackupsList" class="table-wrap"><div id="autoBackupsBody" style="padding:10px"><p style="color:var(--text2)">Cargando...</p></div></div>
+    </div>
+
     <!-- (membresia banner moved to top of main) -->
   </div>
 </div>
@@ -1986,7 +2074,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a=>{
     const sec=a.dataset.section;
     document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
     $('sec-'+sec).classList.add('active');
-    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoMsgSelect');checkPromoEnvioProgreso()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){}};
+    const loaders={dashboard:function(){loadDashboard();loadDashboardExtended()},cuentas:loadCuentas,cuentastg:loadCuentasTg,grupos:loadGrupos,mensajes:function(){loadMensajes();loadPlantillas()},envios:loadEnvios,enviopersonal:loadEnvioPersonal,enviomiembros:loadEnvioMiembros,enviointeractivo:function(){verRespuestasPromo();loadKeywords();loadPromoCuentas();loadPromoPlantillas();refreshPlantillasSelect('promoMsgSelect');checkPromoEnvioProgreso()},programados:loadProgramados,campanas:loadCampanas,config:loadConfig,listanegra:function(){loadListaNegra();loadListaNegraNumeros()},autoresp:loadAutoResp,stats:function(){loadStats();loadDmDashboard()},admin:loadAdminUsuarios,historial:loadHistorial,actividad:loadActividad,adminlogs:loadAdminLogs,auditoria:loadAuditoria,logs:function(){loadLogs();toggleLogsAutoRefresh()},retry:loadRetryStats,tggrupos:loadTgGrupos,tgmensajes:loadTgMensajes,tgcampanas:loadTgCampanas,tgprogramados:loadTgProgramados,tghistorial:loadTgHistorial,tgautoresp:loadTgAutoResp,tgconfig:loadTgConfig,tglistanegra:loadTgListaNegra,tgdetectar:loadTgDetectar,tgstats:loadTgStats,seguridad:function(){load2FAStatus();loadSessions()},backup:function(){},sellers:loadSellersAdmin,sellerpanel:loadSellerPanel,canjear:function(){},pagos:loadPagos,adminpagos:loadAdminPagos,tickets:loadTickets,admintickets:function(){loadAdminTickets('todos')},analytics:loadAnalytics,webhooks:loadWebhooks,autobackups:loadAutoBackups};
     if(loaders[sec])loaders[sec]();
     // Close sidebar on mobile after nav click
     if(window.innerWidth<=768){const sb=$('sidebarEl'),ov=$('sidebarOverlay');sb.classList.remove('open');ov.classList.remove('open');}
@@ -2639,20 +2727,21 @@ async function loadCampanas(){
   const c=r.campanas||[];
   if(!c.length){$('campanasContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>No hay campanas.</p></div>';return}
   _wspCampanasData={};
-  let h='';
+  let h='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">';
   c.forEach(x=>{
     _wspCampanasData[x.id]=x;
     const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
-    h+=`<div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">`;
-    const runBtn=x.activa?`<button class="btn btn-danger btn-sm" onclick="detenerCamp(${x.id})">⏹ Detener</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})">🚀 Iniciar</button>`;
-    h+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${esc(x.nombre||'?')}</h3><div style="display:flex;gap:6px;align-items:center">${estado} ${runBtn} <button class="btn btn-primary btn-sm" onclick="showEditWspCamp(${x.id})">✏ Editar</button> <button class="btn btn-danger btn-sm" onclick="elimCamp(${x.id})">🗑</button></div></div>`;
-    h+=`<p style="font-size:12px;color:var(--text2);margin-bottom:5px">${x.mensaje?esc(x.mensaje.slice(0,100)):'<i style="color:var(--danger)">Sin mensaje</i>'}</p>`;
-    if(x.imagen_path)h+=`<p style="font-size:11px;color:var(--accent);margin-bottom:5px">📷 Foto adjunta</p>`;
-    h+=`<div style="display:flex;gap:15px;font-size:12px;color:var(--text2);flex-wrap:wrap"><span>📤 Enviados: <b style="color:var(--success)">${x.enviados||0}</b></span><span>❌ Errores: <b style="color:var(--danger)">${x.errores||0}</b></span>`;
-    h+=`<span>⏱ Intervalo: ${x.intervalo_min||30}s - ${x.intervalo_max||60}s</span><span>⏸ Pausa entre rondas: ${Math.round((x.espera_ciclo||600)/60)} min</span>`;
-    h+=`<span>🌐 Grupos: ${x.grupos_count||0}</span><span>👤 Cuentas: ${x.sesiones_count||0}</span></div>`;
+    h+=`<div style="background:var(--bg);padding:12px;border-radius:10px;border:1px solid var(--border);display:flex;flex-direction:column;gap:6px">`;
+    h+=`<div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px">${esc(x.nombre||'?')}</h3>${estado}</div>`;
+    h+=`<p style="font-size:11px;color:var(--text2);margin:0;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${x.mensaje?esc(x.mensaje.slice(0,80)):'<i style="color:var(--danger)">Sin mensaje</i>'}</p>`;
+    if(x.imagen_path)h+=`<p style="font-size:10px;color:var(--accent);margin:0">📷 Foto</p>`;
+    h+=`<div style="font-size:11px;color:var(--text2)">📤 ${x.enviados||0} | ❌ ${x.errores||0} | 🌐 ${x.grupos_count||0} | 👤 ${x.sesiones_count||0}</div>`;
+    h+=`<div style="font-size:10px;color:var(--text2)">⏱ ${x.intervalo_min||30}s-${x.intervalo_max||60}s | ⏸ ${Math.round((x.espera_ciclo||600)/60)}min</div>`;
+    const runBtn=x.activa?`<button class="btn btn-danger btn-sm" onclick="detenerCamp(${x.id})" style="font-size:11px">⏹</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})" style="font-size:11px">🚀</button>`;
+    h+=`<div style="display:flex;gap:4px;margin-top:auto">${runBtn}<button class="btn btn-primary btn-sm" onclick="showEditWspCamp(${x.id})" style="font-size:11px">✏</button><button class="btn btn-danger btn-sm" onclick="elimCamp(${x.id})" style="font-size:11px">🗑</button></div>`;
     h+=`</div>`;
   });
+  h+='</div>';
   $('campanasContent').innerHTML=h;
 }
 function showCrearCampana(){showModal(`<h3>➕ Crear Campana WSP</h3><div class="form-group"><label>Nombre</label><input id="cN" placeholder="Nombre"></div><div class="form-group"><label>Mensaje</label><textarea id="cM" rows="4" placeholder="Texto a enviar a los grupos"></textarea></div><div class="form-group"><label>Intervalo entre grupos (seg)</label><input id="cI" type="number" value="20" min="5"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearCamp()">Crear</button></div>`)}
@@ -4730,6 +4819,408 @@ function renderPagination(containerId,currentPage,totalPages,onPageChange){
   if(currentPage<totalPages)h+=`<button class="btn btn-sm btn-outline" onclick="${onPageChange}(${currentPage+1})">▶</button>`;
   h+=`<span style="color:var(--text2);font-size:12px;align-self:center;margin-left:8px">Pag ${currentPage}/${totalPages}</span></div>`;
   return h;
+}
+
+// === NUEVAS SECCIONES (pagos, tickets, analytics, webhooks, auditoria, backups) ===
+
+let _pagosPlanes={};
+
+// --- PAGOS ---
+async function loadPagos(){
+  const el=$('pagosContent');
+  el.innerHTML='<div class="loading-dots"><span></span><span></span><span></span></div>';
+  const [planesR,metodosR,histR]=await Promise.all([
+    api('/api/pagos/planes'),
+    api('/api/metodos_pago'),
+    api('/api/comprobante/historial?u='+userId)
+  ]);
+  const planes=planesR.ok?planesR.planes:{};
+  _pagosPlanes=planes;
+  const metodos=metodosR.ok?metodosR.metodos:[];
+  const comprobantes=histR.ok?histR.comprobantes:[];
+  const binanceEnabled=planesR.binance_enabled;
+  let h='';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:15px;margin-bottom:25px">';
+  for(const[key,p]of Object.entries(planes)){
+    h+=`<div style="background:var(--card);border:2px solid var(--accent);border-radius:12px;padding:20px;text-align:center">
+      <div style="font-size:32px;margin-bottom:8px">${esc(p.emoji||'')}</div>
+      <div style="font-size:18px;font-weight:bold;text-transform:capitalize">${esc(key)}</div>
+      <div style="color:var(--text2);margin:5px 0">${p.dias} dias</div>
+      <div style="font-size:20px;font-weight:bold;color:var(--primary)">${esc(p.precio)}</div>
+      ${p.precio_usdt?`<div style="font-size:14px;color:var(--text2)">${p.precio_usdt} USDT</div>`:''}
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+        ${binanceEnabled?`<button class="btn btn-success btn-sm" onclick="pagarBinance('${esc(key)}')">&#x1F4B3; Pagar con Crypto</button>`:''}
+        ${metodos.length?`<button class="btn btn-primary btn-sm" onclick="pagarManual('${esc(key)}')">&#x1F4F1; Pago Manual</button>`:''}
+      </div>
+    </div>`;
+  }
+  h+='</div>';
+  if(metodos.length){
+    h+='<div style="background:var(--card);border-radius:10px;padding:15px;margin-bottom:20px;border:1px solid var(--accent)">';
+    h+='<h3 style="margin-bottom:10px">&#x1F4F1; Metodos de Pago Manual</h3>';
+    metodos.forEach(m=>{
+      h+=`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--accent)">
+        <span style="font-size:20px">${m.tipo==='yape'?'&#x1F4F2;':m.tipo==='binance'?'&#x1FA99;':'&#x1F4B3;'}</span>
+        <div><b>${esc(m.nombre)}</b>: <code style="background:var(--bg);padding:2px 8px;border-radius:4px;cursor:pointer" onclick="navigator.clipboard.writeText('${esc(m.valor)}');toast('Copiado!','success')">${esc(m.valor)}</code>
+        ${m.instrucciones?`<div style="font-size:12px;color:var(--text2)">${esc(m.instrucciones)}</div>`:''}</div>
+      </div>`;
+    });
+    h+='</div>';
+  }
+  if(comprobantes.length){
+    h+='<div class="table-wrap"><div class="table-header"><h3>&#x1F4CB; Historial de Pagos</h3></div><table><thead><tr><th>#</th><th>Plan</th><th>Metodo</th><th>Estado</th><th>Fecha</th></tr></thead><tbody>';
+    comprobantes.forEach((c,i)=>{
+      const badge=c.estado==='aprobado'?'badge-success':c.estado==='rechazado'?'badge-danger':'badge-warning';
+      h+=`<tr><td>${i+1}</td><td>${esc(c.plan_key)}</td><td>${esc(c.metodo_pago)}</td><td><span class="badge ${badge}">${esc(c.estado)}</span></td><td style="font-size:11px">${c.fecha_creado||'-'}</td></tr>`;
+    });
+    h+='</tbody></table></div>';
+  }
+  el.innerHTML=h;
+}
+
+async function pagarBinance(planKey){
+  const r=await api('/api/pagos/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({plan:planKey,u:userId})});
+  if(r.ok&&r.checkout_url){
+    window.open(r.checkout_url,'_blank');
+    toast('Redirigiendo a Binance Pay...','success');
+    pollPagoStatus(r.merchant_trade_no);
+  }else{
+    toast(r.error||'Error al crear orden','error');
+  }
+}
+
+function pollPagoStatus(merchantTradeNo){
+  let checks=0;
+  const interval=setInterval(async()=>{
+    checks++;
+    if(checks>60){clearInterval(interval);return}
+    const r=await api('/api/pagos/estado?order='+merchantTradeNo);
+    if(r.ok&&r.pago){
+      if(r.pago.estado==='paid'){
+        clearInterval(interval);
+        toast('Pago confirmado! Membresia activada.','success');
+        loadPagos();
+      }else if(r.pago.estado==='expired'||r.pago.estado==='cancelled'){
+        clearInterval(interval);
+        toast('La orden ha expirado o fue cancelada.','error');
+      }
+    }
+  },5000);
+}
+
+async function pagarManual(planKey){
+  const metodosR=await api('/api/metodos_pago');
+  const metodos=metodosR.ok?metodosR.metodos:[];
+  if(!metodos.length){toast('No hay metodos de pago configurados','error');return}
+  const plan=_pagosPlanes?_pagosPlanes[planKey]:null;
+  let mOpts='';
+  metodos.forEach(m=>{mOpts+=`<option value="${esc(m.nombre)}">${esc(m.nombre)} — ${esc(m.valor)}</option>`});
+  showModal(`<h3>&#x1F4F1; Pago Manual — Plan ${esc(planKey)}</h3>
+    <p style="margin-bottom:10px">Precio: <b>${plan?esc(plan.precio):'N/A'}</b></p>
+    <div class="form-group"><label>Metodo de pago</label><select id="pagoMetodoSel">${mOpts}</select></div>
+    <div class="form-group"><label>Monto pagado</label><input type="text" id="pagoMonto" value="${plan?esc(plan.precio):''}" placeholder="Monto"></div>
+    <div class="form-group"><label>Comprobante (imagen)</label><input type="file" id="pagoImagen" accept="image/*"></div>
+    <div class="form-group"><label>Nota (opcional)</label><input type="text" id="pagoNota" placeholder="Ej: Pague desde otro numero"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-success" onclick="enviarComprobante('${esc(planKey)}')">&#x1F4E4; Enviar Comprobante</button>
+    </div>`);
+}
+
+async function enviarComprobante(planKey){
+  const metodo=$('pagoMetodoSel').value;
+  const monto=$('pagoMonto').value;
+  const nota=$('pagoNota').value;
+  const fileInput=$('pagoImagen');
+  const file=fileInput&&fileInput.files[0];
+  if(!file){toast('Sube una imagen del comprobante','error');return}
+  const reader=new FileReader();
+  reader.onload=async function(){
+    const base64=reader.result.split(',')[1];
+    const r=await api('/api/comprobante/subir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({plan:planKey,metodo_pago:metodo,monto:monto,nota:nota,imagen_base64:base64,u:userId})});
+    if(r.ok){
+      closeModal();
+      toast('Comprobante enviado! Sera revisado pronto.','success');
+      loadPagos();
+    }else{
+      toast(r.error||'Error al enviar','error');
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+// --- ADMIN PAGOS ---
+async function loadAdminPagos(){
+  const el=$('adminPagosContent');
+  el.innerHTML='<div class="loading-dots"><span></span><span></span><span></span></div>';
+  const [pagosR,compR,metodosR]=await Promise.all([
+    api('/api/admin/pagos?u='+userId),
+    api('/api/admin/comprobantes?u='+userId),
+    api('/api/admin/metodos_pago?u='+userId)
+  ]);
+  let h='';
+  const pStats=pagosR.ok?pagosR.stats:{};
+  const cStats=compR.ok?compR.stats:{};
+  h+=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px">
+    <div style="background:var(--card);padding:15px;border-radius:10px;text-align:center;border:1px solid var(--accent)">
+      <div style="font-size:24px;font-weight:bold;color:var(--success)">${pStats.total_pagos||0}</div><div style="font-size:12px;color:var(--text2)">Pagos Crypto</div>
+      <div style="font-size:14px;color:var(--primary)">${(pStats.total_usdt||0).toFixed(2)} USDT</div>
+    </div>
+    <div style="background:var(--card);padding:15px;border-radius:10px;text-align:center;border:1px solid var(--accent)">
+      <div style="font-size:24px;font-weight:bold;color:var(--success)">${cStats.total_aprobados||0}</div><div style="font-size:12px;color:var(--text2)">Comprobantes Aprobados</div>
+    </div>
+    <div style="background:var(--card);padding:15px;border-radius:10px;text-align:center;border:1px solid var(--warning)">
+      <div style="font-size:24px;font-weight:bold;color:var(--warning)">${cStats.pendientes||0}</div><div style="font-size:12px;color:var(--text2)">Pendientes</div>
+    </div>
+  </div>`;
+  h+=`<div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap">
+    <button class="btn btn-primary btn-sm" onclick="adminPagosTab('pendientes')">Pendientes (${cStats.pendientes||0})</button>
+    <button class="btn btn-outline btn-sm" onclick="adminPagosTab('todos')">Todos los Comprobantes</button>
+    <button class="btn btn-outline btn-sm" onclick="adminPagosTab('crypto')">Pagos Crypto</button>
+    <button class="btn btn-outline btn-sm" onclick="adminPagosTab('metodos')">Metodos de Pago</button>
+  </div>`;
+  h+='<div id="adminPagosTabContent"></div>';
+  el.innerHTML=h;
+  adminPagosTab('pendientes');
+}
+
+async function adminPagosTab(tab){
+  const el=$('adminPagosTabContent');
+  if(!el)return;
+  el.innerHTML='<div class="loading-dots"><span></span><span></span><span></span></div>';
+  if(tab==='pendientes'||tab==='todos'){
+    const filter=tab==='pendientes'?'pendientes':'all';
+    const r=await api('/api/admin/comprobantes?u='+userId+'&filter='+filter);
+    const comps=r.ok?r.comprobantes:[];
+    if(!comps.length){el.innerHTML='<div class="empty-state"><p>No hay comprobantes '+filter+'</p></div>';return}
+    let h='<div class="table-wrap"><table><thead><tr><th>ID</th><th>Usuario</th><th>Plan</th><th>Metodo</th><th>Monto</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>';
+    comps.forEach(c=>{
+      const badge=c.estado==='aprobado'?'badge-success':c.estado==='rechazado'?'badge-danger':'badge-warning';
+      h+=`<tr><td>${c.id}</td><td>${esc(c.user_id)}</td><td>${esc(c.plan_key)}</td><td>${esc(c.metodo_pago)}</td><td>${esc(c.monto)}</td><td><span class="badge ${badge}">${esc(c.estado)}</span></td><td style="font-size:11px">${c.fecha_creado||'-'}</td>
+      <td>${c.estado==='pendiente'?`<button class="btn btn-sm btn-success" onclick="aprobarComprobante(${c.id})">Aprobar</button> <button class="btn btn-sm btn-danger" onclick="rechazarComprobante(${c.id})">Rechazar</button>`:'-'}</td></tr>`;
+    });
+    h+='</tbody></table></div>';el.innerHTML=h;
+  }else if(tab==='crypto'){
+    const r=await api('/api/admin/pagos?u='+userId);
+    el.innerHTML=r.ok?'<div class="empty-state"><p>Pagos crypto: '+(r.stats?.total_pagos||0)+' total, '+(r.stats?.total_usdt||0).toFixed(2)+' USDT</p></div>':'<p>Error</p>';
+  }else if(tab==='metodos'){
+    const r=await api('/api/admin/metodos_pago?u='+userId);
+    const metodos=r.ok?r.metodos:[];
+    let h='<div class="table-wrap"><div class="table-header"><h3>Metodos de Pago</h3><button class="btn btn-sm btn-success" onclick="showCrearMetodoPago()">+ Agregar Metodo</button></div>';
+    if(metodos.length){
+      h+='<table><thead><tr><th>Nombre</th><th>Tipo</th><th>Valor</th><th>Instrucciones</th><th>Activo</th><th>Acciones</th></tr></thead><tbody>';
+      metodos.forEach(m=>{
+        h+=`<tr><td>${esc(m.nombre)}</td><td>${esc(m.tipo)}</td><td>${esc(m.valor)}</td><td style="max-width:200px;font-size:12px">${esc(m.instrucciones||'')}</td>
+        <td><span class="badge ${m.activo?'badge-success':'badge-danger'}">${m.activo?'Si':'No'}</span></td>
+        <td style="display:flex;gap:4px"><button class="btn btn-sm btn-primary" onclick="showEditarMetodoPago(${m.id},'${esc(m.nombre)}','${esc(m.valor)}','${esc(m.instrucciones||'')}',${m.activo})">Editar</button>
+        <button class="btn btn-sm btn-danger" onclick="eliminarMetodoPago(${m.id})">Eliminar</button></td></tr>`;
+      });
+      h+='</tbody></table>';
+    }else{h+='<p style="padding:15px;color:var(--text2)">No hay metodos configurados. Agrega uno con el boton de arriba.</p>'}
+    h+='</div>';el.innerHTML=h;
+  }
+}
+
+async function aprobarComprobante(id){
+  if(!confirm('Aprobar comprobante #'+id+'?'))return;
+  const r=await api('/api/admin/comprobante/aprobar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,admin_id:userId})});
+  toast(r.ok?'Comprobante aprobado y membresia activada':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadAdminPagos();
+}
+
+async function rechazarComprobante(id){
+  if(!confirm('Rechazar comprobante #'+id+'?'))return;
+  const r=await api('/api/admin/comprobante/rechazar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,admin_id:userId})});
+  toast(r.ok?'Comprobante rechazado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadAdminPagos();
+}
+
+// --- METODOS DE PAGO ADMIN CRUD ---
+function showCrearMetodoPago(){
+  showModal(`<h3>+ Agregar Metodo de Pago</h3>
+    <div class="form-group"><label>Tipo</label><select id="mpTipo"><option value="yape">Yape</option><option value="plin">Plin</option><option value="transferencia">Transferencia Bancaria</option><option value="paypal">PayPal</option><option value="otro">Otro</option></select></div>
+    <div class="form-group"><label>Nombre</label><input type="text" id="mpNombre" placeholder="Ej: Yape Personal"></div>
+    <div class="form-group"><label>Valor (numero/cuenta/email)</label><input type="text" id="mpValor" placeholder="Ej: 976680776"></div>
+    <div class="form-group"><label>Instrucciones</label><textarea id="mpInstrucciones" rows="3" placeholder="Instrucciones para el usuario..."></textarea></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="crearMetodoPago()">Crear</button></div>`);
+}
+async function crearMetodoPago(){
+  const r=await api('/api/admin/metodos_pago/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,tipo:$('mpTipo').value,nombre:$('mpNombre').value,valor:$('mpValor').value,instrucciones:$('mpInstrucciones').value})});
+  toast(r.ok?'Metodo creado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok){closeModal();adminPagosTab('metodos')}
+}
+function showEditarMetodoPago(id,nombre,valor,instrucciones,activo){
+  showModal(`<h3>Editar Metodo de Pago #${id}</h3>
+    <div class="form-group"><label>Nombre</label><input type="text" id="mpEditNombre" value="${esc(nombre)}"></div>
+    <div class="form-group"><label>Valor</label><input type="text" id="mpEditValor" value="${esc(valor)}"></div>
+    <div class="form-group"><label>Instrucciones</label><textarea id="mpEditInstrucciones" rows="3">${esc(instrucciones)}</textarea></div>
+    <div class="form-group"><label><input type="checkbox" id="mpEditActivo" ${activo?'checked':''}> Activo</label></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="editarMetodoPagoAdmin(${id})">Guardar</button></div>`);
+}
+async function editarMetodoPagoAdmin(id){
+  const r=await api('/api/admin/metodos_pago/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id,nombre:$('mpEditNombre').value,valor:$('mpEditValor').value,instrucciones:$('mpEditInstrucciones').value,activo:$('mpEditActivo').checked?1:0})});
+  toast(r.ok?'Metodo actualizado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok){closeModal();adminPagosTab('metodos')}
+}
+async function eliminarMetodoPago(id){
+  if(!confirm('Eliminar metodo de pago #'+id+'?'))return;
+  const r=await api('/api/admin/metodos_pago/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,id})});
+  toast(r.ok?'Metodo eliminado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)adminPagosTab('metodos');
+}
+
+// --- AUDITORIA ---
+async function loadAuditoria(){
+  if(!esAdmin)return;
+  const filter=$('auditoriaFilter')?.value?.trim()||'';
+  const url=filter?'/api/admin/auditoria?u='+userId+'&filter_user='+encodeURIComponent(filter)+'&limit=200':'/api/admin/auditoria?u='+userId+'&limit=200';
+  const r=await api(url);
+  if(!r.ok){$('auditoriaContent').innerHTML='<div class="empty-state"><p>Error: '+esc(r.error||'')+'</p></div>';return}
+  const logs=r.logs||[];
+  if(!logs.length){$('auditoriaContent').innerHTML='<div class="empty-state"><div class="icon">&#x1F50D;</div><p>Sin registros</p></div>';return}
+  let h='<div class="table-wrap"><div class="table-header"><h3>&#x1F50D; '+logs.length+' registros</h3></div>';
+  h+='<table><thead><tr><th>Fecha</th><th>Usuario</th><th>Accion</th><th>Detalle</th><th>IP</th></tr></thead><tbody>';
+  logs.forEach(l=>{
+    h+=`<tr><td style="font-size:11px">${esc(l.fecha||'?')}</td><td style="font-size:11px">${esc(l.user_id||'?')}</td><td><b>${esc(l.accion||'?')}</b></td><td style="font-size:12px;color:var(--text2)">${esc(l.detalle||'')}</td><td style="font-size:11px;color:var(--text2)">${esc(l.ip||'')}</td></tr>`;
+  });
+  h+='</tbody></table></div>';$('auditoriaContent').innerHTML=h;
+}
+
+// --- TICKETS / SOPORTE ---
+async function loadTickets(){
+  const r=await api('/api/tickets');
+  if(!r.ok){$('ticketsBody').innerHTML='<p style="color:var(--text2)">Error cargando tickets</p>';return}
+  if(!r.tickets?.length){$('ticketsBody').innerHTML='<p style="color:var(--text2)">No tienes tickets. Crea uno para contactar soporte.</p>';return}
+  let h='<table><thead><tr><th>ID</th><th>Asunto</th><th>Estado</th><th>Fecha</th><th>Accion</th></tr></thead><tbody>';
+  for(const t of r.tickets){
+    const badge=t.estado==='abierto'?'<span style="color:#4caf50">Abierto</span>':'<span style="color:#999">Cerrado</span>';
+    h+=`<tr><td>#${t.id}</td><td>${esc(t.asunto)}</td><td>${badge}</td><td>${t.created_at||''}</td><td><button class="btn btn-sm btn-primary" onclick="verTicket(${t.id})">Ver</button></td></tr>`;
+  }
+  h+='</tbody></table>';$('ticketsBody').innerHTML=h;
+}
+function showCrearTicket(){
+  showModal(`<h3>Nuevo Ticket de Soporte</h3>
+    <input id="ticketAsunto" placeholder="Asunto" style="width:100%;padding:10px;margin:10px 0;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)">
+    <textarea id="ticketMsg" placeholder="Describe tu problema..." rows="5" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)"></textarea>
+    <div style="display:flex;gap:10px;margin-top:15px"><button class="btn btn-primary" onclick="crearTicket()">Enviar</button><button class="btn" onclick="closeModal()">Cancelar</button></div>`);
+}
+async function crearTicket(){
+  const asunto=$('ticketAsunto').value.trim(),mensaje=$('ticketMsg').value.trim();
+  if(!asunto||!mensaje){toast('Completa todos los campos','error');return}
+  const r=await api('/api/tickets/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({asunto,mensaje})});
+  if(r.ok){toast('Ticket creado!');closeModal();loadTickets()}else toast(r.error||'Error','error');
+}
+async function verTicket(id){
+  const r=await api('/api/tickets/mensajes?ticket_id='+id);
+  if(!r.ok)return;
+  let h=`<h3>Ticket #${id}</h3><div style="max-height:400px;overflow-y:auto;margin:15px 0">`;
+  for(const m of r.mensajes){
+    const align=m.es_admin?'right':'left';const bg=m.es_admin?'var(--accent)':'var(--card2,#333)';
+    h+=`<div style="text-align:${align};margin:5px 0"><div style="display:inline-block;background:${bg};padding:10px 15px;border-radius:12px;max-width:80%;text-align:left"><div style="font-size:11px;color:var(--text2);margin-bottom:4px">${m.es_admin?'Admin':'Tu'} — ${m.created_at||''}</div>${esc(m.mensaje)}</div></div>`;
+  }
+  h+=`</div><div style="display:flex;gap:10px"><input id="ticketReply" placeholder="Escribe tu respuesta..." style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)"><button class="btn btn-primary" onclick="responderTicket(${id})">Enviar</button></div>`;
+  showModal(h);
+}
+async function responderTicket(id){
+  const msg=$('ticketReply').value.trim();if(!msg)return;
+  await api('/api/tickets/responder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket_id:id,mensaje:msg})});
+  verTicket(id);
+}
+async function loadAdminTickets(estado){
+  const r=await api('/api/admin/tickets?u='+userId+'&estado='+estado);
+  if(!r.ok){$('adminTicketsBody').innerHTML='<p style="color:var(--text2)">Error</p>';return}
+  if(!r.tickets?.length){$('adminTicketsBody').innerHTML='<p style="color:var(--text2)">Sin tickets</p>';return}
+  let h='<table><thead><tr><th>ID</th><th>Usuario</th><th>Asunto</th><th>Estado</th><th>Fecha</th><th>Accion</th></tr></thead><tbody>';
+  for(const t of r.tickets){
+    h+=`<tr><td>#${t.id}</td><td>${esc(t.user_id)}</td><td>${esc(t.asunto)}</td><td>${t.estado}</td><td>${t.updated_at||''}</td><td><button class="btn btn-sm btn-primary" onclick="verTicket(${t.id})">Ver</button> <button class="btn btn-sm btn-danger" onclick="cerrarTicketAdmin(${t.id})">Cerrar</button></td></tr>`;
+  }
+  h+='</tbody></table>';$('adminTicketsBody').innerHTML=h;
+}
+async function cerrarTicketAdmin(id){await api('/api/tickets/cerrar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket_id:id})});loadAdminTickets('todos')}
+
+// --- ANALYTICS ---
+async function loadAnalytics(){
+  const [dias,horas,top,cuentas]=await Promise.all([
+    api('/api/analytics/envios_dia?u='+userId+'&dias=30'),
+    api('/api/analytics/envios_hora?u='+userId+'&dias=7'),
+    api('/api/analytics/top_grupos?u='+userId+'&limit=20'),
+    api('/api/analytics/cuentas?u='+userId)
+  ]);
+  if(dias.ok&&dias.data?.length){
+    try{
+      const ctx=$('chartEnviosDia').getContext('2d');
+      if(window._chartDia)window._chartDia.destroy();
+      window._chartDia=new Chart(ctx,{type:'bar',data:{labels:dias.data.map(d=>d.dia?.slice(5)),datasets:[{label:'Exitosos',data:dias.data.map(d=>d.exitosos),backgroundColor:'rgba(76,175,80,0.7)'},{label:'Fallidos',data:dias.data.map(d=>d.fallidos),backgroundColor:'rgba(244,67,54,0.5)'}]},options:{responsive:true,scales:{y:{beginAtZero:true}}}});
+    }catch(e){}
+  }
+  if(horas.ok&&horas.data?.length){
+    try{
+      const ctx=$('chartEnviosHora').getContext('2d');
+      if(window._chartHora)window._chartHora.destroy();
+      const labels=Array.from({length:24},(_,i)=>i+'h');
+      const vals=new Array(24).fill(0);horas.data.forEach(d=>{vals[d.hora]=d.total});
+      window._chartHora=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'Envios',data:vals,borderColor:'var(--accent)',fill:true,backgroundColor:'rgba(110,69,226,0.2)',tension:0.3}]},options:{responsive:true,scales:{y:{beginAtZero:true}}}});
+    }catch(e){}
+  }
+  if(top.ok&&top.data?.length){
+    let h='';for(const g of top.data){
+      h+=`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>${esc(g.grupo_nombre||'Sin nombre')}</span><span><b>${g.total_envios}</b> envios (${g.tasa}%)</span></div>`;
+    }
+    $('topGruposBody').innerHTML=h;
+  }
+  if(cuentas.ok&&cuentas.cuentas?.length){
+    let h='';for(const c of cuentas.cuentas){
+      const color=c.pausada?'#f44336':c.tasa>=80?'#4caf50':c.tasa>=50?'#ff9800':'#f44336';
+      h+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)"><span>${esc(c.nombre||c.telefono||'Cuenta')}</span><div><span style="color:${color};font-weight:bold">${c.tasa}%</span> <span style="color:var(--text2);font-size:12px">(${c.envios_ok}ok/${c.envios_fail}fail)</span>${c.pausada?' <span style="color:#f44336">PAUSADA</span>':''}</div></div>`;
+    }
+    $('cuentasHealthBody').innerHTML=h;
+  }
+}
+function exportCSV(tipo){window.open(API+'/api/export/csv?tipo='+tipo+'&u='+userId+'&token='+localStorage.getItem('panel_token'))}
+
+// --- WEBHOOKS ---
+async function loadWebhooks(){
+  const r=await api('/api/webhooks?u='+userId);
+  if(!r.ok||!r.webhooks?.length){$('webhooksBody').innerHTML='<p style="color:var(--text2)">Sin webhooks configurados.</p>';return}
+  let h='<table><thead><tr><th>URL</th><th>Eventos</th><th>Estado</th><th>Accion</th></tr></thead><tbody>';
+  for(const w of r.webhooks){
+    h+=`<tr><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">${esc(w.url)}</td><td>${esc(w.eventos)}</td><td>${w.activo?'<span style="color:#4caf50">Activo</span>':'Inactivo'}</td><td><button class="btn btn-sm" data-url="${esc(w.url)}" onclick="testWebhook(this.dataset.url)">&#x1F9EA;Test</button> <button class="btn btn-sm btn-danger" onclick="eliminarWebhook(${w.id})">&#x1F5D1;</button></td></tr>`;
+  }
+  h+='</tbody></table>';$('webhooksBody').innerHTML=h;
+}
+function showCrearWebhook(){
+  showModal(`<h3>Nuevo Webhook</h3>
+    <input id="whUrl" placeholder="https://tu-servidor.com/webhook" style="width:100%;padding:10px;margin:8px 0;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)">
+    <p style="font-size:12px;color:var(--text2)">Eventos disponibles: envio_completado, campana_terminada, membresia_activada, nuevo_pago</p>
+    <input id="whEventos" value="envio_completado,campana_terminada" style="width:100%;padding:10px;margin:4px 0;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)">
+    <div style="display:flex;gap:10px;margin-top:10px"><button class="btn btn-primary" onclick="crearWebhook()">Crear</button><button class="btn" onclick="closeModal()">Cancelar</button></div>`);
+}
+async function crearWebhook(){
+  const url=$('whUrl').value.trim(),eventos=$('whEventos').value.trim();
+  if(!url){toast('Falta URL','error');return}
+  const r=await api('/api/webhooks/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,eventos})});
+  if(r.ok){toast('Webhook creado! Secret: '+r.secret);closeModal();loadWebhooks()}else toast(r.error||'Error','error');
+}
+async function testWebhook(url){
+  const r=await api('/api/webhooks/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+  toast(r.ok?'Test enviado! Status: '+(r.status||'ok'):'Error: '+(r.error||'fallo'),r.ok?'success':'error');
+}
+async function eliminarWebhook(id){if(!confirm('Eliminar webhook?'))return;await api('/api/webhooks/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});loadWebhooks()}
+
+// --- AUTO BACKUPS ---
+async function loadAutoBackups(){
+  const r=await api('/api/admin/backups?u='+userId);
+  if(!r.ok||!r.backups?.length){$('autoBackupsBody').innerHTML='<p style="color:var(--text2)">Sin backups automaticos aun.</p>';return}
+  let h='<table><thead><tr><th>Archivo</th><th>Tamano</th><th>Fecha</th></tr></thead><tbody>';
+  for(const b of r.backups){
+    const size=b.size_bytes>1048576?Math.round(b.size_bytes/1048576)+'MB':Math.round(b.size_bytes/1024)+'KB';
+    h+=`<tr><td>${esc(b.filename)}</td><td>${size}</td><td>${b.created_at||''}</td></tr>`;
+  }
+  h+='</tbody></table>';$('autoBackupsBody').innerHTML=h;
+}
+async function crearBackupManual(){
+  const r=await api('/api/admin/backup/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId})});
+  if(r.ok){toast('Backup creado: '+r.filename);loadAutoBackups()}else toast(r.error||'Error','error');
 }
 
 // --- INIT ---
