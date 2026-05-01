@@ -34,9 +34,9 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 ## Archivos Principales
 | Archivo | Descripcion | Lineas aprox |
 |---|---|---|
-| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~4580 |
-| `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~4620 |
-| `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2070 |
+| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~5200 |
+| `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~5770 |
+| `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2780 |
 | `motor_wsp.js` | Motor de envio WhatsApp | ~74000 |
 | `panel_server.js` | Servidor web que sirve panel.html y proxea APIs | ~100 |
 | `bot.py` | Bot de Telegram (comandos + API) | ~178000 |
@@ -200,6 +200,14 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 | 34 | Admin Panel | sec-admin | admin-only | Gestion de usuarios |
 | 35 | **Sellers** | sec-sellers | admin-only | **NUEVO**: Crear/editar/eliminar sellers |
 | 36 | Logs Global | sec-adminlogs | admin-only | Logs de todos los usuarios |
+| 37 | **Pagar Membresia** | sec-pagos | Ambas | **NUEVO**: Pago Binance Pay + manual con comprobante |
+| 38 | **Soporte** | sec-tickets | Ambas | **NUEVO**: Tickets de soporte del usuario |
+| 39 | **Analytics** | sec-analytics | Ambas | **NUEVO**: Graficos Chart.js de actividad |
+| 40 | **Webhooks** | sec-webhooks | Ambas | **NUEVO**: Configurar webhooks de eventos |
+| 41 | **Auditoria** | sec-auditoria | admin-only | **NUEVO**: Log de acciones admin |
+| 42 | **Gestion Pagos** | sec-adminpagos | admin-only | **NUEVO**: Aprobar/rechazar comprobantes |
+| 43 | **Tickets Soporte** | sec-admintickets | admin-only | **NUEVO**: Gestionar tickets de usuarios |
+| 44 | **Backups Auto** | sec-autobackups | admin-only | **NUEVO**: Backups automaticos de la DB |
 
 ## Endpoints API Completos
 ### Sellers (NUEVOS)
@@ -215,6 +223,41 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 | `/api/seller/codigos` | GET | Lista codigos `?u=USER_ID` |
 | `/api/seller/eliminar_codigo` | POST | Eliminar codigo no usado `{u, code_id}` |
 | `/api/canjear_codigo` | POST | Canjear codigo `{codigo, telegram_id}` |
+
+### Nuevas Secciones — Endpoints (PR #36)
+| Endpoint | Metodo | Descripcion |
+|---|---|---|
+| `/api/admin/auditoria` | GET | Log de auditoria `?u=ADMIN_ID&filter_user=X&limit=100` |
+| `/api/pagos/planes` | GET | Planes con precios USDT |
+| `/api/pagos/crear` | POST | Crear orden Binance Pay `{plan, user_id}` |
+| `/api/pagos/status` | GET | Status de pago `?merchant_trade_no=X` |
+| `/api/pagos/mis_pagos` | GET | Pagos del usuario `?u=USER_ID` |
+| `/api/admin/pagos` | GET | Todos los pagos (admin) |
+| `/api/comprobante/enviar` | POST | Subir comprobante manual `{user_id, plan, metodo, monto, imagen}` |
+| `/api/comprobante/mis` | GET | Comprobantes del usuario |
+| `/api/admin/comprobantes` | GET | Comprobantes pendientes (admin) |
+| `/api/admin/comprobantes/aprobar` | POST | Aprobar comprobante `{id, admin_id}` |
+| `/api/admin/comprobantes/rechazar` | POST | Rechazar comprobante `{id, admin_id, motivo}` |
+| `/api/metodos_pago` | GET | Metodos de pago activos |
+| `/api/admin/metodos_pago` | GET | Todos los metodos (admin) |
+| `/api/admin/metodos_pago/crear` | POST | Crear metodo `{tipo, nombre, valor, instrucciones}` |
+| `/api/admin/metodos_pago/editar` | POST | Editar metodo `{id, nombre, valor, instrucciones, activo}` |
+| `/api/admin/metodos_pago/eliminar` | POST | Eliminar metodo `{id}` |
+| `/api/tickets/crear` | POST | Crear ticket `{user_id, asunto, mensaje}` |
+| `/api/tickets/mis` | GET | Tickets del usuario |
+| `/api/tickets/ver` | GET | Ver ticket con mensajes `?id=X` |
+| `/api/tickets/responder` | POST | Responder ticket `{ticket_id, sender_id, mensaje}` |
+| `/api/admin/tickets` | GET | Todos los tickets (admin) `?estado=X` |
+| `/api/admin/tickets/cerrar` | POST | Cerrar ticket `{id}` |
+| `/api/webhooks` | GET | Webhooks del usuario |
+| `/api/webhooks/crear` | POST | Crear webhook `{user_id, url, eventos}` |
+| `/api/webhooks/test` | POST | Test webhook `{id}` |
+| `/api/webhooks/eliminar` | POST | Eliminar webhook `{id}` |
+| `/api/admin/backups` | GET | Lista de backups |
+| `/api/admin/backups/crear` | POST | Crear backup manual |
+| `/api/analytics/resumen` | GET | Resumen analytics `?u=USER_ID` |
+| `/api/export/csv` | GET | Exportar datos a CSV |
+| `/api/health` | GET | Health check del servidor |
 
 ### Endpoints Anteriores (sin cambios)
 - Auth: `/api/panel_login`, `/api/panel_registro`, `/api/check_membresia`, `/api/panel_cambiar_password`, `/api/panel_recuperar_solicitar`, `/api/panel_recuperar_reset`
@@ -256,6 +299,22 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 - **`sellers`** — Revendedores (telegram_id, nombre, max_invites, periodo, plan_dias, plan_tipo, activo)
 - **`seller_invites`** — Invitaciones de sellers (seller_id, invitado_telegram_id, plan_dias, plan_tipo, fecha)
 - **`seller_codes`** — Codigos de activacion (seller_id, codigo, plan_dias, plan_tipo, usado, usado_por, fecha_creado, fecha_usado)
+- **`registration_codes`** — Codigos de verificacion de registro (telegram_id, code, created_at, used)
+- **`login_attempts`** — Rate limiting de login (ip, telegram_id, success, created_at)
+- **`audit_log`** — Log de auditoria admin (user_id, accion, detalle, ip, fecha)
+- **`pagos`** — Pagos Binance Pay (user_id, merchant_trade_no, plan_key, monto_usdt, estado)
+- **`comprobantes`** — Comprobantes de pago manual (user_id, plan_key, metodo_pago, monto, imagen_path, estado)
+- **`metodos_pago`** — Metodos de pago configurables (tipo, nombre, valor, instrucciones, activo)
+- **`tickets`** — Tickets de soporte (user_id, asunto, estado, created_at)
+- **`ticket_messages`** — Mensajes de tickets (ticket_id, sender_id, es_admin, mensaje)
+- **`user_webhooks`** — Webhooks de usuario (user_id, url, eventos, activo, secret)
+- **`auto_backups`** — Registro de backups automaticos (filename, size_bytes, created_at)
+- **`push_subscriptions`** — Suscripciones push (user_id, endpoint, keys)
+- **`account_health`** — Salud de cuentas WSP (user_id, cuenta, envios_ok, envios_fail)
+- **`vacation_mode`** — Modo vacaciones (user_id, activo, campanas_pausadas)
+- **`scheduled_recurrent`** — Programacion recurrente (user_id, nombre, cron_expr, activo)
+- **`ab_tests`** — A/B testing (user_id, nombre, mensaje_a, mensaje_b)
+- **`grupo_actividad`** — Persistencia actividad de grupo (grupo_jid, ultima_actividad)
 
 ## Flujo del Sistema de Sellers
 1. **Admin** crea un seller en Admin > Sellers (Telegram ID, nombre, limite, periodo, plan)
@@ -338,8 +397,59 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 47. **readBody sin limite** — El parser JSON del API no tenia limite de tamaño. Fix: max 10MB.
 48. **Proxy sin X-Forwarded-For** — panel_server.js no pasaba IP del cliente a los backends. Fix: header `x-forwarded-for` en ambos proxies.
 
+#### PR #36 — Secciones Faltantes + Verificacion + Eliminacion Usuarios
+49. **Conflictos de merge resueltos** — Todos los archivos tenian marcadores de conflicto sin resolver (<<<, ===, >>>) en panel.html, index_wsp.js, db_wsp.js, bot.py, db.py, motor_wsp.js, panel_server.js, sw.js, web_panel.py, wsp_bridge.py. Resueltos todos.
+50. **8 secciones faltantes del sidebar agregadas** — Pagar Membresia, Soporte, Analytics, Webhooks, Auditoria, Gestion Pagos, Tickets Soporte, Backups Auto. Cada una incluye: HTML div, funciones JS (loaders/handlers), endpoints API, funciones DB y tablas.
+51. **Eliminacion de usuarios corregida** — Antes solo borraba de `panel_users`. Ahora desactiva FK temporalmente, borra de ~25 tablas en orden correcto (hijos antes que padres), y reactiva FK. Fix del error "FOREIGN KEY constraint failed".
+52. **Usuarios duplicados corregido** — Causado por los conflictos de merge que dejaban funciones definidas 2 veces.
+53. **Verificacion por codigo de registro verificada** — Flujo completo: registro → genera codigo 6 digitos → envia via TG bot → usuario verifica → cuenta marcada verificada. Admin se marca verificado automaticamente.
+54. **14 nuevas tablas creadas** — audit_log, pagos, comprobantes, metodos_pago, tickets, ticket_messages, user_webhooks, auto_backups, push_subscriptions, account_health, vacation_mode, scheduled_recurrent, ab_tests, grupo_actividad, login_attempts.
+55. **Funciones DB faltantes agregadas** — validateSession, getLoginAttempts, registrarLoginAttempt, limpiarLoginAttempts, limpiarRecoveryCodes, limpiarSessionsExpiradas, registrarActividadGrupoDB, getUltimaActividadGrupo, initDefaultMetodosPago, deleteOldBackups, getActiveWebhooksForEvent, updateScheduledRecurrentRun, getActiveRecurrentJobs + 50+ funciones de pagos/tickets/webhooks/analytics/backups.
+
+---
+
+## PENDIENTES PARA LA SIGUIENTE IA (PRIORIDAD ALTA)
+
+### BUG-P01: Metodos de pago admin — falta UI para editar/eliminar
+- La seccion "Gestion Pagos" (sec-adminpagos) muestra los comprobantes pero NO tiene interfaz para que el admin edite/elimine los metodos de pago configurados
+- Los endpoints ya existen: `/api/admin/metodos_pago/crear`, `/api/admin/metodos_pago/editar`, `/api/admin/metodos_pago/eliminar`
+- Falta agregar en panel.html la seccion admin para CRUD de metodos de pago con formulario (tipo, nombre, valor, instrucciones)
+
+### BUG-P02: Pago manual — falta upload de foto del comprobante
+- En "Pagar Membresia" al hacer pago manual, el usuario debe poder subir una foto/captura del comprobante
+- El endpoint `/api/comprobante/enviar` acepta `imagen` pero falta el input file en el frontend
+- Agregar input type="file" en el modal de pago manual y enviar como base64 o multipart
+
+### BUG-P03: Campanas — layout debe ser 4 por fila
+- Las campanas actualmente se muestran en lista vertical
+- Deben mostrarse en grid de 4 columnas: `display: grid; grid-template-columns: repeat(4, 1fr);`
+- Buscar `loadCampanas` en panel.html y cambiar el layout de la tabla/lista a cards en grid
+
+### BUG-P04: Bot se muestra "detenido por actualizacion" despues de iniciar
+- Cuando el usuario inicia el bot, aparece conectado brevemente y luego vuelve a mostrar "detenido por actualizacion"
+- Posible causa: el frontend no actualiza el estado correctamente, o hay un polling que resetea el status
+- Revisar el flujo de `/api/iniciar` y el polling de `/bot-status` en panel.html
+- Puede ser que motor_wsp.js esta reconectando y el status cambia temporalmente
+
+### BUG-P05: Falta contador de tiempo de reposo entre ciclos
+- Cuando una campana termina un ciclo de envio, el usuario no ve cuanto tiempo queda de reposo
+- Agregar un countdown/timer visible en la UI que muestre "Proximo ciclo en: XX:XX"
+- El tiempo de reposo esta configurado en `user_envio_config` como `lote_pausa_seg`
+- Buscar donde se muestra el estado de la campana en panel.html y agregar el timer
+
+### BUG-P06: WhatsApp bloquea al enviar a miembros
+- El envio a miembros necesita mejor anti-ban:
+  - Delays aleatorios entre mensajes (no fijos)
+  - Rotacion de cuentas si hay multiples vinculadas
+  - Pausas largas entre lotes
+  - Limitar mensajes por hora/dia
+- Revisar `enviar_miembros` en motor_wsp.js y `getUserEnvioConfig` para los parametros
+- La config del usuario ya tiene `delay_seg`, `lote_tamano`, `lote_pausa_seg` — verificar que se aplican correctamente con variacion aleatoria
+
+---
+
 ## Notas Importantes para la Siguiente IA
-1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.
+1. **panel.html** es monolitico (~5200 lineas). Todo HTML, CSS y JS en un archivo. No separar.
 2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).
 3. Las tablas y funciones de DB se agregan en `db_wsp.js` **ANTES** del `module.exports`.
 4. Los nuevos exports se agregan al final del objeto `module.exports` en `db_wsp.js`.
@@ -350,6 +460,10 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 9. Sellers usan clase CSS `seller-only`. Se muestran si `esSeller || esAdmin`.
 10. "Canjear Codigo" es visible para TODOS los usuarios (no necesita ser seller ni admin).
 11. **SIEMPRE** actualizar este HANDOFF.md despues de cada mejora o fix.
+12. **NO DESACTUALIZAR NADA** — Al hacer cambios, verificar con `node -c archivo.js` que no hay errores de sintaxis. No eliminar funciones existentes ni endpoints que ya funcionan.
+13. **Verificacion de registro** — El flujo es: registro → genera codigo 6 digitos → envia via TG bot (puerto 3002, `/api/tg/enviar_codigo_verificacion`) → usuario verifica en `/api/verificar_cuenta` → cuenta marcada verificada. Admin se verifica automaticamente.
+14. **Eliminacion de usuarios** — Usa `PRAGMA foreign_keys = OFF` temporalmente para evitar FK errors. Borra de ~25 tablas en orden (hijos antes que padres). Funcion: `eliminarUsuarioPanel()` en db_wsp.js.
+15. **Branch actual**: `devin/1777650317-fix-sidebar-delete-verify` — Hacer los cambios sobre esta branch, NO sobre main.
 
 ## Comando de Actualizacion
 ```bash
