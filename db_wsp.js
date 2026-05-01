@@ -564,6 +564,13 @@ function init() {
         }
         console.log("   Columna 'verificado' agregada a panel_users (existentes = 0, admin = 1)");
     }
+    // Migración: estado_detalle column en campanas (para estado preciso de campañas)
+    try {
+        db.prepare("SELECT estado_detalle FROM campanas LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE campanas ADD COLUMN estado_detalle TEXT DEFAULT NULL");
+        console.log("   Columna 'estado_detalle' agregada a campanas");
+    }
     db.exec(`
         CREATE TABLE IF NOT EXISTS login_attempts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1069,13 +1076,28 @@ function actualizarStatsCampana(campanaId, enviados, errores) {
     db.prepare("UPDATE campanas SET enviados = enviados + ?, errores = errores + ? WHERE id = ?").run(enviados, errores, campanaId);
 }
 
-function setCampanaActiva(campanaId, activa) {
+function setCampanaActiva(campanaId, activa, estadoDetalle) {
     if (activa) {
         const inicio = nowPeru();
-        db.prepare("UPDATE campanas SET activa = 1, inicio = ? WHERE id = ?").run(inicio, campanaId);
+        const detalle = estadoDetalle || 'activa';
+        db.prepare("UPDATE campanas SET activa = 1, inicio = ?, estado_detalle = ? WHERE id = ?").run(inicio, detalle, campanaId);
     } else {
-        db.prepare("UPDATE campanas SET activa = 0 WHERE id = ?").run(campanaId);
+        const detalle = estadoDetalle || 'detenida';
+        db.prepare("UPDATE campanas SET activa = 0, estado_detalle = ? WHERE id = ?").run(detalle, campanaId);
     }
+}
+
+function setCampanaEstadoDetalle(campanaId, estadoDetalle) {
+    db.prepare("UPDATE campanas SET estado_detalle = ? WHERE id = ?").run(estadoDetalle, campanaId);
+}
+
+function marcarCampanasDetenidaPorActualizacion() {
+    const activas = db.prepare("SELECT id FROM campanas WHERE activa = 1").all();
+    if (activas.length) {
+        db.prepare("UPDATE campanas SET activa = 0, estado_detalle = 'detenida_actualizacion' WHERE activa = 1").run();
+        console.log(`   [DB] ${activas.length} campana(s) marcadas como detenida_actualizacion`);
+    }
+    return activas.map(c => c.id);
 }
 
 function actualizarCampanaMensaje(campanaId, mensaje, imagenPath) {
@@ -2702,7 +2724,7 @@ module.exports = {
     getSesiones, agregarSesion, eliminarSesion,
     getGrupos, agregarGrupo, eliminarGrupo, eliminarGrupoPorLink, eliminarTodosGrupos, actualizarGrupoLink,
     getCampanas, crearCampana, getCampanaById, actualizarStatsCampana,
-    setCampanaActiva, actualizarCampanaMensaje, eliminarCampana, clonarCampana, resetearStatsCampana,
+    setCampanaActiva, setCampanaEstadoDetalle, marcarCampanasDetenidaPorActualizacion, actualizarCampanaMensaje, eliminarCampana, clonarCampana, resetearStatsCampana,
     getSesionesCampana, agregarSesionCampana, getGruposCampana, agregarGrupoCampana, eliminarGrupoCampana,
     getCampanaConfig, setCampanaConfig,
     getMaxGrupos, setMaxGrupos,

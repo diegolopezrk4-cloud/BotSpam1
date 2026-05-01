@@ -993,6 +993,66 @@ node -c panel_server.js # OK
 
 ---
 
+## Cambios PR #37 — Fixes de Campanas + Countdown + Anti-Ban (v12)
+
+### BUG-P01: CORREGIDO — Campana se mostraba "detenida por actualizacion" despues de iniciar
+- **Causa raiz**: El sistema de `estado_detalle` estaba documentado en el HANDOFF pero nunca fue implementado en el codigo. La columna no existia, las funciones `setCampanaEstadoDetalle()` y `marcarCampanasDetenidaPorActualizacion()` no existian, y `setCampanaActiva()` no actualizaba el estado detallado.
+- **Fix completo**:
+  - `db_wsp.js`: Migracion automatica para columna `campanas.estado_detalle` (TEXT DEFAULT NULL)
+  - `db_wsp.js`: `setCampanaActiva()` ahora acepta 3er parametro `estadoDetalle` y siempre lo actualiza (default: 'activa' al activar, 'detenida' al desactivar)
+  - `db_wsp.js`: Nueva funcion `setCampanaEstadoDetalle(campanaId, estadoDetalle)` — setter directo
+  - `db_wsp.js`: Nueva funcion `marcarCampanasDetenidaPorActualizacion()` — marca todas las activas como `detenida_actualizacion` y retorna sus IDs
+  - `motor_wsp.js`: Ciclo de campana ahora usa `setCampanaEstadoDetalle('en_reposo')` al entrar en pausa y `setCampanaEstadoDetalle('activa')` al salir
+  - `motor_wsp.js`: `detenerCampana()` y `finally` block usan `setCampanaActiva(id, false, 'detenida')`
+  - `index_wsp.js`: `startBot()` llama `marcarCampanasDetenidaPorActualizacion()` al iniciar
+  - `index_wsp.js`: Auto-restart escalonado — espera 30s para sync WSP, reinicia campanas una por una con 10s de delay, notifica al admin resultados
+  - `panel.html`: `getEstadoCampanaBadge(x)` muestra badges con colores: verde (activa), amarillo (en_reposo), naranja (detenida_actualizacion), rojo (detenida)
+
+### BUG-P02: CORREGIDO — Faltaba contador de tiempo de reposo entre ciclos
+- **Fix**:
+  - `motor_wsp.js`: Nuevo objeto `campanaReposo` (in-memory) que trackea `{ inicio: timestamp, duracion_seg }` por campana
+  - `motor_wsp.js`: Nueva funcion `getCampanaReposo(campanaId)` exportada
+  - `index_wsp.js`: Nuevo endpoint `GET /api/campana_reposo?id=CAMP_ID` retorna `{ en_reposo, restante_seg, duracion_seg }`
+  - `panel.html`: Funcion `iniciarCampCountdown(campId)` que muestra "Proximo ciclo en: MM:SS" con polling cada 5s
+  - `panel.html`: Al cargar campanas, si alguna esta en `en_reposo`, inicia countdown automaticamente
+  - `panel.html`: Cuando countdown llega a 0, recarga campanas automaticamente
+
+### BUG-P03: CORREGIDO — WhatsApp bloqueaba al enviar a miembros (anti-ban mejorado)
+- **Fix en `motor_wsp.js` (`enviarASeleccionados`)**:
+  - **Delay aleatorio mas amplio**: Cambiado de 3-8s a 5-15s base
+  - **Delay progresivo**: Agrega 0.5s extra cada 20 mensajes enviados (envios largos se vuelven mas lentos gradualmente)
+  - **Auto-batch**: Si el usuario no configuro lotes, aplica automaticamente lotes de 15 mensajes con 3 min de pausa
+  - **Jitter en pausa de lote**: La pausa entre lotes ahora tiene ±30% de variacion aleatoria para parecer mas humano
+  - **Limite por hora**: Maximo 60 mensajes por hora. Si se alcanza, pausa automatica hasta la siguiente hora con notificacion al usuario
+
+### Endpoints Nuevos
+| Endpoint | Metodo | Descripcion |
+|---|---|---|
+| `/api/campana_reposo` | GET | Estado de reposo de campana `?id=CAMP_ID` retorna countdown |
+
+### Funciones DB Nuevas
+- `setCampanaEstadoDetalle(campanaId, estadoDetalle)` — Setter directo para estado_detalle
+- `marcarCampanasDetenidaPorActualizacion()` — Marca activas como detenida_actualizacion, retorna IDs
+
+### Archivos Modificados en v12
+| Archivo | Cambios |
+|---|---|
+| `db_wsp.js` | Migracion estado_detalle; setCampanaActiva con 3er param; setCampanaEstadoDetalle; marcarCampanasDetenidaPorActualizacion; exports |
+| `motor_wsp.js` | campanaReposo tracking; estados en ciclo; getCampanaReposo; anti-ban mejorado en enviarASeleccionados |
+| `index_wsp.js` | marcarCampanasDetenidaPorActualizacion en startBot; auto-restart escalonado; endpoint /api/campana_reposo |
+| `panel.html` | getEstadoCampanaBadge; countdown timer; cleanup de intervals |
+
+### Verificacion de Sintaxis v12
+```bash
+node -c index_wsp.js   # OK
+node -c motor_wsp.js   # OK
+node -c db_wsp.js      # OK
+node -c panel_server.js # OK
+python3 -c "import ast; ast.parse(open('bot.py').read())"  # OK
+```
+
+---
+
 ## REGLAS PARA LA SIGUIENTE IA
 
 ### REGLA #1 — NUNCA elimines ninguna mejora existente
@@ -1037,7 +1097,7 @@ Despues de cada mejora o fix, agrega una seccion documentando lo que hiciste SIN
 ### REGLA #7 — Comando de actualizacion
 Cuando termines de hacer cambios, envia al usuario el comando de actualizacion en este formato:
 ```bash
-cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777650317-fix-sidebar-delete-verify && npm install && bash start.sh
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777653699-fix-pending-bugs && npm install && bash start.sh
 ```
 
 ### REGLA #8 — Ver Chats WSP/TG esta ELIMINADO

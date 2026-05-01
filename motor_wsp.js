@@ -14,6 +14,9 @@ const reporteInterval = {};  // { userId: intervalId }
 // Updated by message listeners — used to detect if someone else posted after our spam
 const grupoUltimaActividad = {};
 
+// Track campaign rest state for countdown: { campanaId: { inicio: timestamp_ms, duracion_seg: number } }
+const campanaReposo = {};
+
 // Limite de envios diarios por cuenta (proteccion anti-ban)
 const LIMITE_ENVIOS_DIARIOS = 500;
 
@@ -814,25 +817,30 @@ function iniciarCampana(campanaId, userId, botSock) {
                         ? `\u23F0 Esperando 10 min...`
                         : `\u23F0 Esperando ${conf.espera_ciclo || 600}s...`;
 
+                    // Marcar en_reposo con timestamp para countdown en el panel
+                    const esperaSeg = numCuentas === 1 ? 600 : (conf.espera_ciclo || 600);
+                    campanaReposo[campanaId] = { inicio: Date.now(), duracion_seg: esperaSeg };
+                    db.setCampanaEstadoDetalle(campanaId, 'en_reposo');
+
                     try {
                         await botSock.sendMessage(userId, {
-                            text: `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c.enviados} env | \u274C ${c.errores} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`,
+                            text: `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c ? c.enviados : '?'} env | \u274C ${c ? c.errores : '?'} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`,
                         });
                     } catch (e) {}
 
-                    if (numCuentas === 1) {
-                        await delay(600 * 1000);
-                    } else {
-                        await delay((conf.espera_ciclo || 600) * 1000);
-                    }
+                    await delay(esperaSeg * 1000);
                     delayMultiplier = Math.max(1.0, delayMultiplier - 0.5);
+                    // Restaurar estado activa despues de la pausa (si no fue cancelada)
+                    delete campanaReposo[campanaId];
+                    if (!cancelled) db.setCampanaEstadoDetalle(campanaId, 'activa');
                 }
             }
         } catch (e) {
             console.error(`Error campana ${campanaId}: ${e.message}`);
         } finally {
-            db.setCampanaActiva(campanaId, false);
+            db.setCampanaActiva(campanaId, false, 'detenida');
             delete tareasActivas[campanaId];
+            delete campanaReposo[campanaId];
         }
     })();
 
@@ -845,12 +853,18 @@ function detenerCampana(campanaId) {
         task.cancel();
         task.running = false;
         delete tareasActivas[campanaId];
-        db.setCampanaActiva(campanaId, false);
+        delete campanaReposo[campanaId];
+        db.setCampanaActiva(campanaId, false, 'detenida');
         return true;
     }
     // Aunque no haya tarea activa, asegurar que la DB este limpia
-    db.setCampanaActiva(campanaId, false);
+    delete campanaReposo[campanaId];
+    db.setCampanaActiva(campanaId, false, 'detenida');
     return false;
+}
+
+function getCampanaReposo(campanaId) {
+    return campanaReposo[campanaId] || null;
 }
 
 // ============================================================
@@ -1198,17 +1212,23 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             const total = jids.length;
             let enviados = 0;
             let errores = 0;
-            // Random cooldown between 3-8 seconds (more human-like)
-            const DELAY_MIN = 3000;
-            const DELAY_MAX = 8000;
+            // Anti-ban: wider random delay range (5-15s base, increases after every 20 messages)
+            const DELAY_MIN = 5000;
+            const DELAY_MAX = 15000;
+            // Anti-ban: if no batch config, auto-batch every 15 messages with 3-5 min pause
+            if (!batchSize) { batchSize = 15; delayMinutes = delayMinutes || 3; }
             const DELAY_ENTRE_LOTES = batchSize ? delayMinutes * 60 * 1000 : 0;
             const displayName = grupoNombre || grupoJid || "seleccionados";
+            // Anti-ban: hourly limit (max 60 messages per hour)
+            const HOURLY_LIMIT = 60;
+            let hourlyCount = 0;
+            let hourStart = Date.now();
 
             const batchInfo = batchSize ? `\n📦 Lotes: ${batchSize} por lote, pausa ${delayMinutes} min entre lotes` : "";
             const resumeInfo = startIndex > 0 ? `\n🔄 Reanudando desde #${startIndex + 1}` : "";
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 5.5 / 60)} min`,
+                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 5-15 seg aleatorio entre cada envio${batchInfo}\n\u{1F6E1} Anti-ban: lim ${HOURLY_LIMIT}/hora\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 10 / 60)} min`,
                 });
             } catch (e) {}
 
@@ -1238,7 +1258,9 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                             text: `⏸ Lote de ${batchSize} completado (${i}/${total}). Pausando ${delayMinutes} minutos...`,
                         });
                     } catch (e) {}
-                    await delay(DELAY_ENTRE_LOTES);
+                    // Anti-ban: add random jitter (±30%) to batch pause
+                    const jitter = DELAY_ENTRE_LOTES * (0.7 + Math.random() * 0.6);
+                    await delay(Math.round(jitter));
                     if (cancelled) {
                         if (grupoJid) {
                             db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
@@ -1339,9 +1361,27 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                 }
 
                 if (!cancelled) {
-                    // Random cooldown between 3-8 seconds (human-like)
-                    const cooldown = DELAY_MIN + Math.floor(Math.random() * (DELAY_MAX - DELAY_MIN));
+                    // Anti-ban: progressive delay — add 0.5s per 20 messages sent
+                    const progressiveExtra = Math.floor(enviados / 20) * 500;
+                    const cooldown = DELAY_MIN + Math.floor(Math.random() * (DELAY_MAX - DELAY_MIN)) + progressiveExtra;
                     await delay(cooldown);
+
+                    // Anti-ban: hourly limit check
+                    hourlyCount++;
+                    if (hourlyCount >= HOURLY_LIMIT) {
+                        const elapsed = Date.now() - hourStart;
+                        const remaining = 3600000 - elapsed;
+                        if (remaining > 0) {
+                            try {
+                                await botSock.sendMessage(userId, {
+                                    text: `\u{1F6E1} *Anti-ban*: Limite ${HOURLY_LIMIT}/hora alcanzado. Pausando ${Math.round(remaining/60000)} min...`,
+                                });
+                            } catch (e) {}
+                            await delay(remaining + 60000); // Wait until next hour + 1min buffer
+                        }
+                        hourlyCount = 0;
+                        hourStart = Date.now();
+                    }
                 }
             }
 
@@ -1656,6 +1696,7 @@ module.exports = {
     clearLink,
     iniciarCampana,
     detenerCampana,
+    getCampanaReposo,
     iniciarReporteDiario,
     detenerReporteDiario,
     iniciarResponder,

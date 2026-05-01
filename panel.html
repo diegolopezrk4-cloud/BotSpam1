@@ -2721,7 +2721,18 @@ async function elimProg(id){await api('/api/programados/del',{method:'POST',head
 
 // --- CAMPANAS ---
 let _wspCampanasData={};
+let _campanaCountdownIntervals={};
+function getEstadoCampanaBadge(x){
+  if(x.activa&&x.estado_detalle==='activa')return'<span class="badge badge-success">Activa</span>';
+  if(x.estado_detalle==='en_reposo')return'<span class="badge" style="background:#f39c12;color:#fff">En reposo</span>';
+  if(x.estado_detalle==='detenida_actualizacion')return'<span class="badge" style="background:#e67e22;color:#fff">Detenida (actualizacion)</span>';
+  if(x.activa)return'<span class="badge badge-success">Activa</span>';
+  return'<span class="badge badge-danger">Detenida</span>';
+}
 async function loadCampanas(){
+  // Clear existing countdown intervals
+  Object.values(_campanaCountdownIntervals).forEach(iv=>clearInterval(iv));
+  _campanaCountdownIntervals={};
   const r=await api('/api/campanas?u='+userId);
   if(!r.ok){$('campanasContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
   const c=r.campanas||[];
@@ -2730,19 +2741,37 @@ async function loadCampanas(){
   let h='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">';
   c.forEach(x=>{
     _wspCampanasData[x.id]=x;
-    const estado=x.activa?'<span class="badge badge-success">Activa</span>':'<span class="badge badge-danger">Detenida</span>';
+    const estado=getEstadoCampanaBadge(x);
     h+=`<div style="background:var(--bg);padding:12px;border-radius:10px;border:1px solid var(--border);display:flex;flex-direction:column;gap:6px">`;
     h+=`<div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px">${esc(x.nombre||'?')}</h3>${estado}</div>`;
+    if(x.estado_detalle==='en_reposo')h+=`<div id="camp-countdown-${x.id}" style="font-size:11px;color:#f39c12;font-weight:bold">Proximo ciclo en: --:--</div>`;
     h+=`<p style="font-size:11px;color:var(--text2);margin:0;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${x.mensaje?esc(x.mensaje.slice(0,80)):'<i style="color:var(--danger)">Sin mensaje</i>'}</p>`;
     if(x.imagen_path)h+=`<p style="font-size:10px;color:var(--accent);margin:0">📷 Foto</p>`;
     h+=`<div style="font-size:11px;color:var(--text2)">📤 ${x.enviados||0} | ❌ ${x.errores||0} | 🌐 ${x.grupos_count||0} | 👤 ${x.sesiones_count||0}</div>`;
     h+=`<div style="font-size:10px;color:var(--text2)">⏱ ${x.intervalo_min||30}s-${x.intervalo_max||60}s | ⏸ ${Math.round((x.espera_ciclo||600)/60)}min</div>`;
-    const runBtn=x.activa?`<button class="btn btn-danger btn-sm" onclick="detenerCamp(${x.id})" style="font-size:11px">⏹</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})" style="font-size:11px">🚀</button>`;
+    const runBtn=x.activa||x.estado_detalle==='en_reposo'?`<button class="btn btn-danger btn-sm" onclick="detenerCamp(${x.id})" style="font-size:11px">⏹</button>`:`<button class="btn btn-success btn-sm" onclick="iniciarCamp(${x.id})" style="font-size:11px">🚀</button>`;
     h+=`<div style="display:flex;gap:4px;margin-top:auto">${runBtn}<button class="btn btn-primary btn-sm" onclick="showEditWspCamp(${x.id})" style="font-size:11px">✏</button><button class="btn btn-danger btn-sm" onclick="elimCamp(${x.id})" style="font-size:11px">🗑</button></div>`;
     h+=`</div>`;
   });
   h+='</div>';
   $('campanasContent').innerHTML=h;
+  // Start countdown timers for campaigns in reposo
+  c.filter(x=>x.estado_detalle==='en_reposo').forEach(x=>iniciarCampCountdown(x.id));
+}
+async function iniciarCampCountdown(campId){
+  const el=document.getElementById('camp-countdown-'+campId);
+  if(!el)return;
+  async function tick(){
+    try{
+      const r=await api('/api/campana_reposo?id='+campId);
+      if(!r.ok||!r.en_reposo){el.textContent='';clearInterval(_campanaCountdownIntervals[campId]);delete _campanaCountdownIntervals[campId];loadCampanas();return}
+      const m=Math.floor(r.restante_seg/60),s=r.restante_seg%60;
+      el.textContent='Proximo ciclo en: '+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+      if(r.restante_seg<=0){clearInterval(_campanaCountdownIntervals[campId]);delete _campanaCountdownIntervals[campId];setTimeout(()=>loadCampanas(),2000)}
+    }catch(e){}
+  }
+  tick();
+  _campanaCountdownIntervals[campId]=setInterval(tick,5000);
 }
 function showCrearCampana(){showModal(`<h3>➕ Crear Campana WSP</h3><div class="form-group"><label>Nombre</label><input id="cN" placeholder="Nombre"></div><div class="form-group"><label>Mensaje</label><textarea id="cM" rows="4" placeholder="Texto a enviar a los grupos"></textarea></div><div class="form-group"><label>Intervalo entre grupos (seg)</label><input id="cI" type="number" value="20" min="5"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearCamp()">Crear</button></div>`)}
 async function crearCamp(){const n=$('cN').value.trim(),m=$('cM').value.trim(),iv=parseInt($('cI').value)||60;if(!n||!m){toast('Completa','error');return}closeModal();const r=await api('/api/campanas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,mensaje:m,intervalo:iv})});toast(r.ok?'Creada':'Error',r.ok?'success':'error');loadCampanas()}

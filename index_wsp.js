@@ -455,6 +455,21 @@ poll();
                 return res.end(JSON.stringify({ ok: true }));
             }
 
+            // GET /api/campana_reposo?id=CAMP_ID — Estado de reposo de una campaña (countdown)
+            if (url.pathname === "/api/campana_reposo" && req.method === "GET") {
+                const campId = url.searchParams.get("id");
+                if (!campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                const reposo = motor.getCampanaReposo(parseInt(campId));
+                if (!reposo) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, en_reposo: false }));
+                }
+                const transcurrido = Math.floor((Date.now() - reposo.inicio) / 1000);
+                const restante = Math.max(0, reposo.duracion_seg - transcurrido);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, en_reposo: true, restante_seg: restante, duracion_seg: reposo.duracion_seg }));
+            }
+
             // GET /api/historial?u=USER_ID — Historial de envíos
             if (url.pathname === "/api/historial" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
@@ -3335,6 +3350,8 @@ async function startBot() {
     db.init();
     db.initDefaultMetodosPago();
     db.setAdminJids(adminJids);
+    // Marcar campanas activas como detenidas por actualizacion antes de reconectar
+    const campanasPrevias = db.marcarCampanasDetenidaPorActualizacion();
     fs.mkdirSync("sessions", { recursive: true });
     fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
     fs.mkdirSync("media", { recursive: true });
@@ -3409,6 +3426,42 @@ async function startBot() {
                 }
             } catch (e) {
                 console.log(`   (No se pudo resolver admin JID: ${e.message})`);
+            }
+
+            // Auto-restart escalonado de campanas que estaban activas antes del reinicio
+            if (campanasPrevias && campanasPrevias.length > 0) {
+                console.log(`\u{1F504} Auto-restarting ${campanasPrevias.length} campana(s) en 30s...`);
+                setTimeout(async () => {
+                    let reiniciadas = 0;
+                    let fallidas = 0;
+                    for (const cId of campanasPrevias) {
+                        try {
+                            const camp = db.getCampanaById(cId);
+                            if (!camp) { fallidas++; continue; }
+                            const sesiones = db.getSesionesCampana(cId);
+                            const grupos = db.getGruposCampana(cId);
+                            if (!sesiones.length || !grupos.length) {
+                                db.setCampanaActiva(cId, false, 'detenida');
+                                fallidas++;
+                                continue;
+                            }
+                            motor.iniciarCampana(cId, camp.user_id, botSock);
+                            reiniciadas++;
+                            // 10s delay entre cada campana para evitar code 440
+                            await new Promise(r => setTimeout(r, 10000));
+                        } catch (e) {
+                            console.error(`   Error reiniciando campana ${cId}: ${e.message}`);
+                            fallidas++;
+                        }
+                    }
+                    console.log(`\u2705 Auto-restart: ${reiniciadas} reiniciadas, ${fallidas} fallidas`);
+                    try {
+                        const adminId = config.ADMIN_NUMBER + "@s.whatsapp.net";
+                        await botSock.sendMessage(adminId, {
+                            text: `\u{1F504} *Auto-restart de campanas*\n\u2705 Reiniciadas: ${reiniciadas}\n\u274C Fallidas: ${fallidas}`,
+                        });
+                    } catch (e) {}
+                }, 30000);
             }
         }
 
