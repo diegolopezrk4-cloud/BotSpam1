@@ -73,6 +73,29 @@ async function connectClientAccount(userId, nombre, telefono) {
             retryRequestDelayMs: 2000,
         });
         sock.ev.on("creds.update", saveCreds);
+
+        // Capture synced chats from WhatsApp (recent conversations)
+        sock.ev.on("chats.set", ({ chats: syncedChats }) => {
+            for (const c of syncedChats) {
+                if (!c.id || c.id === "status@broadcast") continue;
+                const isPersonal = c.id.endsWith("@s.whatsapp.net");
+                const isGroup = c.id.endsWith("@g.us");
+                if (!isPersonal && !isGroup) continue;
+                const chatName = c.name || c.subject || c.id.replace(/@.*$/, '');
+                try { db.saveSyncedChat(userId, nombre, c.id, chatName, c.unreadCount || 0); } catch(e){}
+            }
+        });
+        sock.ev.on("chats.upsert", (chats) => {
+            for (const c of chats) {
+                if (!c.id || c.id === "status@broadcast") continue;
+                const isPersonal = c.id.endsWith("@s.whatsapp.net");
+                const isGroup = c.id.endsWith("@g.us");
+                if (!isPersonal && !isGroup) continue;
+                const chatName = c.name || c.subject || c.id.replace(/@.*$/, '');
+                try { db.saveSyncedChat(userId, nombre, c.id, chatName, c.unreadCount || 0); } catch(e){}
+            }
+        });
+
         // Track group activity from other users for anti-duplicate spam
         sock.ev.on("messages.upsert", ({ messages }) => {
             for (const msg of messages) {
@@ -81,8 +104,8 @@ async function connectClientAccount(userId, nombre, telefono) {
                 if (jid.endsWith("@g.us") && !msg.key.fromMe && msg.message) {
                     registrarActividadGrupo(jid);
                 }
-                // Save personal incoming messages to chat history
-                if (jid.endsWith("@s.whatsapp.net") && !msg.key.fromMe && msg.message) {
+                // Save incoming messages to chat history
+                if (!msg.key.fromMe && msg.message) {
                     const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || "";
                     if (text) {
                         try { db.saveChatMessage(userId, nombre, jid, msg.pushName||'', text, 'in'); } catch(e){}

@@ -2675,6 +2675,36 @@ function getChatMessages(userId, cuenta, jid, limit) {
     return db.prepare(`SELECT * FROM chat_history WHERE user_id=? AND cuenta=? AND jid=? ORDER BY timestamp DESC LIMIT ?`).all(String(userId), cuenta, jid, limit||50);
 }
 
+function initSyncedChats() {
+    db.exec(`CREATE TABLE IF NOT EXISTS synced_chats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        cuenta TEXT NOT NULL,
+        jid TEXT NOT NULL,
+        nombre TEXT DEFAULT '',
+        unread INTEGER DEFAULT 0,
+        tipo TEXT DEFAULT 'personal',
+        updated_at TEXT DEFAULT (datetime('now'))
+    )`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_synced_chats ON synced_chats(user_id, cuenta, jid)`);
+}
+
+function saveSyncedChat(userId, cuenta, jid, nombre, unread) {
+    initSyncedChats();
+    const tipo = jid.endsWith("@g.us") ? "grupo" : "personal";
+    db.prepare(`INSERT INTO synced_chats (user_id, cuenta, jid, nombre, unread, tipo, updated_at) VALUES (?,?,?,?,?,?,datetime('now'))
+        ON CONFLICT(user_id, cuenta, jid) DO UPDATE SET nombre=CASE WHEN excluded.nombre!='' THEN excluded.nombre ELSE synced_chats.nombre END, unread=excluded.unread, updated_at=datetime('now')`)
+        .run(String(userId), cuenta, jid, nombre||'', unread||0, tipo);
+}
+
+function getSyncedChats(userId, cuenta, tipo) {
+    initSyncedChats();
+    if (tipo) {
+        return db.prepare(`SELECT * FROM synced_chats WHERE user_id=? AND cuenta=? AND tipo=? ORDER BY updated_at DESC`).all(String(userId), cuenta, tipo);
+    }
+    return db.prepare(`SELECT * FROM synced_chats WHERE user_id=? AND cuenta=? ORDER BY updated_at DESC`).all(String(userId), cuenta);
+}
+
 module.exports = {
     init, getDb, setBotJid, setAdminJids, getUsuario, getUsuarioByCodigo, findUserByNumber, getAllJidsForNumber,
     crearUsuario, generarCodigo, activarMembresia, activarMembresiaByNumber,
@@ -2786,4 +2816,6 @@ module.exports = {
     verificarCuentaExistente, isUsuarioVerificado,
     // Chat history (panel inbox)
     saveChatMessage, getChatContacts, getChatMessages,
+    // Synced chats from WhatsApp
+    saveSyncedChat, getSyncedChats,
 };

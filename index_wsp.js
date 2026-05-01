@@ -739,6 +739,22 @@ poll();
                 }
             }
 
+            // GET /api/chat/synced — Lista de chats sincronizados desde WhatsApp
+            if (url.pathname === "/api/chat/synced" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const cuenta = url.searchParams.get("cuenta");
+                const tipo = url.searchParams.get("tipo") || null;
+                if (!userId || !cuenta) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o cuenta" })); }
+                try {
+                    const chats = db.getSyncedChats(userId, cuenta, tipo);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, chats }));
+                } catch(e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
             // GET /api/chat/mensajes — Historial de mensajes de un chat
             if (url.pathname === "/api/chat/mensajes" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
