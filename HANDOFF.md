@@ -34,10 +34,10 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 ## Archivos Principales
 | Archivo | Descripcion | Lineas aprox |
 |---|---|---|
-| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~5818 |
-| `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~6072 |
-| `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2744 |
-| `motor_wsp.js` | Motor de envio WhatsApp | ~1699 |
+| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~5881 |
+| `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~6121 |
+| `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2821 |
+| `motor_wsp.js` | Motor de envio WhatsApp | ~1730 |
 | `panel_server.js` | Servidor web que sirve panel.html y proxea APIs | ~131 |
 | `bot.py` | Bot de Telegram (comandos + API) | ~4772 |
 | `motor.py` | Motor de envio Telegram | ~1122 |
@@ -218,13 +218,46 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 - **Plantillas de promocion** no tenian boton "Editar" (endpoint `/api/promo/plantillas/editar` existia pero no tenia UI)
 - **`/api/dashboard_extended`** (con underscore) en NO_MEMBRESIA_ENDPOINTS — corregido a `/api/dashboard/extended` (con slash)
 
-### Endpoints nuevos (Ver Chats)
+### Ver Chats WSP/TG — Inbox Integrado en el Panel
+
+**Concepto**: Los usuarios pueden ver sus conversaciones de WhatsApp y Telegram directamente desde el panel web, como un WhatsApp/Telegram embebido. Pueden seleccionar un chat o iniciar uno nuevo escribiendo un numero.
+
+**Arquitectura del sistema de chats:**
+- **Baileys v6.7** no tiene `makeInMemoryStore` ni `fetchAllContacts` funcional. No se puede listar chats con un simple API call.
+- **Solucion**: Se capturan los eventos `chats.set` y `chats.upsert` que Baileys emite al sincronizar la conexion. Estos contienen la lista de conversaciones recientes del telefono.
+- Los chats sincronizados se guardan en tabla `synced_chats` (SQLite)
+- Los mensajes enviados/recibidos se guardan en tabla `chat_history`
+- Los contactos con los que se ha chateado se guardan en tabla `chat_contacts`
+
+**Tablas nuevas (db_wsp.js → wsp_titan.db):**
+- `synced_chats` (user_id, cuenta, jid, nombre, unread, tipo[personal/grupo], updated_at) — chats sincronizados de WhatsApp
+- `chat_history` (user_id, cuenta, jid, nombre, mensaje, direction[in/out], timestamp) — historial de mensajes
+- `chat_contacts` (user_id, cuenta, jid, nombre, ultimo_msg, updated_at) — contactos con historial
+
+**Eventos capturados en motor_wsp.js:**
+- `chats.set` → guarda lista de chats al conectar (evento de sincronizacion inicial)
+- `chats.upsert` → guarda chats nuevos que aparecen despues de conectar
+- `messages.upsert` → guarda mensajes entrantes (direction='in') de chats personales Y grupos
+
+**Funciones JS en panel.html (sec-chatswsp):**
+- `loadChatsWsp()` — Carga dropdown de cuentas, luego trae chats sincronizados + historial local y los mergea
+- `renderChatsWspList(contacts)` — Renderiza lista con nombre, numero, ultimo mensaje, badge de no leidos
+- `filtrarChatsWsp()` — Filtra por nombre o numero
+- `iniciarChatWsp()` — Inicia chat nuevo escribiendo un numero
+- `selectChatWsp(jid,name)` — Selecciona chat, carga historial de mensajes
+- `enviarMsgChatWsp()` — Envia mensaje y lo guarda en historial
+
+**Endpoints nuevos (Ver Chats WSP):**
 | Endpoint | Metodo | Descripcion | Servidor |
 |---|---|---|---|
-| `/api/chats_personales` | GET | Listar chats WSP personales `?u=ID&cuenta=X` | index_wsp.js (3000) |
-| `/api/chat/enviar` | POST | Enviar mensaje WSP `{u, jid, mensaje, cuenta}` | index_wsp.js (3000) |
+| `/api/chat/enviar` | POST | Enviar mensaje WSP `{u, jid, mensaje, cuenta, nombre}` — guarda en chat_history | index_wsp.js (3000) |
+| `/api/chat/contactos` | GET | Lista contactos con historial `?u=ID&cuenta=X` | index_wsp.js (3000) |
+| `/api/chat/mensajes` | GET | Historial de mensajes de un chat `?u=ID&cuenta=X&jid=Y` | index_wsp.js (3000) |
+| `/api/chat/synced` | GET | Chats sincronizados de WhatsApp `?u=ID&cuenta=X&tipo=personal` | index_wsp.js (3000) |
 | `/api/tg/chats` | GET | Listar chats TG personales `?u=ID&cuenta=X` | web_panel.py (3002) |
 | `/api/tg/chat/enviar` | POST | Enviar mensaje TG `{u, chat_id, mensaje, cuenta}` | web_panel.py (3002) |
+
+**Nota importante**: La primera vez que se actualiza, la lista de chats estara vacia. Se puebla cuando la cuenta WSP se conecta/reconecta y Baileys envia los eventos de sincronizacion. Los mensajes nuevos (entrantes y salientes) se van guardando automaticamente desde ese momento.
 
 ## Endpoints API Completos
 ### Sellers (NUEVOS)
