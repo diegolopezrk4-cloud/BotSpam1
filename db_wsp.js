@@ -1738,7 +1738,7 @@ function limpiarCodigosRegistroExpirados() {
 }
 
 function getAllPanelUsers() {
-    return db.prepare("SELECT telegram_id, username, verificado, fecha_registro FROM panel_users ORDER BY fecha_registro DESC").all();
+    return db.prepare("SELECT telegram_id, username, verificado, fecha_registro FROM panel_users WHERE verificado = 1 ORDER BY fecha_registro DESC").all();
 }
 
 function checkMembresia(userId) {
