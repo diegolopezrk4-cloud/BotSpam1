@@ -1170,3 +1170,64 @@ El sistema de verificacion esta completo y correcto:
 | `db_wsp.js` | Migracion qr_imagen; crearMetodoPago +param; editarMetodoPago +param |
 | `index_wsp.js` | QR base64 en crear/editar metodo; endpoint /api/metodo_pago/qr; PUBLIC_ENDPOINTS |
 | `panel.html` | QR upload en crear/editar; QR column en tabla admin; QR visible para clientes |
+
+---
+
+## Cambios v12.3 — Revision Completa de Bugs (7 bugs encontrados y corregidos)
+
+### BUG-1: CORREGIDO — showEditarMetodoPago onclick rompia con comillas simples
+- **Problema**: El boton "Editar" de metodos de pago pasaba nombre, valor e instrucciones directamente en el onclick como strings. Si alguno contenia comillas simples, el JS se rompia.
+- **Fix**: `showEditarMetodoPago` ahora solo recibe el `id` y carga los datos desde la API.
+- **Archivo**: `panel.html`
+
+### BUG-2: CORREGIDO — crearMetodoPago no retornaba el registro creado
+- **Problema**: `crearMetodoPago()` hacia el INSERT pero no retornaba el registro. El endpoint enviaba `{ ok: true, metodo: undefined }`.
+- **Fix**: Ahora retorna el registro recien insertado con `SELECT * WHERE id = lastInsertRowid`.
+- **Archivo**: `db_wsp.js`
+
+### BUG-3: CORREGIDO — Archivos QR huerfanos al editar/eliminar metodo de pago
+- **Problema**: Al subir un nuevo QR o eliminar un metodo, el archivo QR viejo quedaba en disco sin borrarse.
+- **Fix**: Se borra el QR anterior con `fs.unlinkSync()` antes de guardar nuevo o eliminar metodo.
+- **Archivo**: `index_wsp.js`
+
+### BUG-4: CORREGIDO — Directorio comprobantes/ no se creaba antes de guardar QR
+- **Problema**: Si la carpeta `comprobantes/` no existia, `fs.writeFileSync()` lanzaba error ENOENT.
+- **Fix**: Se agrego `fs.mkdirSync('comprobantes', { recursive: true })` antes de escribir.
+- **Archivo**: `index_wsp.js`
+
+### BUG-5: CORREGIDO — eliminarUsuarioPanel no borraba active_sessions (columna incorrecta)
+- **Problema**: `DELETE FROM active_sessions WHERE user_id = ?` usaba columna `user_id` que NO existe (la real es `telegram_id`). Sesiones de usuarios eliminados no se limpiaban.
+- **Impacto**: SEGURIDAD — Usuario eliminado podia seguir con tokens activos.
+- **Fix**: Cambiado a `WHERE telegram_id = ?`.
+- **Archivo**: `db_wsp.js`
+
+### BUG-6: CORREGIDO — eliminarUsuarioPanel no borraba user_2fa (columna incorrecta)
+- **Problema**: Mismo que BUG-5 pero con tabla `user_2fa`. Usaba `WHERE user_id = ?` pero la columna es `telegram_id`.
+- **Fix**: Cambiado a `WHERE telegram_id = ?`.
+- **Archivo**: `db_wsp.js`
+
+### BUG-7: CORREGIDO — No se podia desactivar metodos de pago (toggle activo roto)
+- **Problema**: `body.activo !== false` siempre daba `true` cuando frontend enviaba `activo: 0`. En JS `0 !== false` es `true` (comparacion estricta). El checkbox "Activo" estaba roto.
+- **Fix**: Cambiado a `!!body.activo` que convierte 0->false y 1->true correctamente.
+- **Archivo**: `index_wsp.js`
+
+### Archivos Modificados en v12.3
+| Archivo | Cambios |
+|---|---|
+| `panel.html` | showEditarMetodoPago carga datos via API (BUG-1) |
+| `db_wsp.js` | crearMetodoPago retorna registro (BUG-2); columnas corregidas en eliminarUsuarioPanel (BUG-5, BUG-6) |
+| `index_wsp.js` | QR cleanup (BUG-3); mkdir comprobantes (BUG-4); !!body.activo (BUG-7) |
+
+### Verificacion de Sintaxis v12.3
+```
+node -c index_wsp.js  OK
+node -c db_wsp.js     OK
+node -c motor_wsp.js  OK
+node -c panel_server.js OK
+CI: lint-and-check OK | docker-build OK
+```
+
+---
+
+## REGLA #9 — SIEMPRE ENVIAR HANDOFF
+La IA que trabaje en este proyecto DEBE enviar el HANDOFF.md actualizado al usuario al finalizar su sesion. Sin excepcion.
