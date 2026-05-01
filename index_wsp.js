@@ -438,10 +438,22 @@ poll();
                 const body = await readBody();
                 const campId = body.id || body.campana_id;
                 if (!body.u || !campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
-                if (!botSock || !botSock.user) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Bot WSP no conectado. Vincula una cuenta primero." })); }
                 const camp = db.getCampanaById(campId);
                 if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "campana no encontrada" })); }
-                motor.iniciarCampana(campId, body.u, botSock);
+                // Use user's own account for notifications; campaign connects its own sessions via getOrConnectClient
+                let notifSock = botSock;
+                if (!notifSock || !notifSock.user) {
+                    // Try to get the user's first connected account for notifications
+                    const sesiones = db.getSesionesCampana(campId);
+                    if (sesiones.length) {
+                        try { notifSock = await motor.getOrConnectClient(body.u, sesiones[0]); } catch (e) {}
+                    }
+                }
+                if (!notifSock) {
+                    // Still start the campaign even without a notification socket
+                    console.log(`[iniciar] Sin socket de notificacion para ${body.u}, la campana usara sus propias cuentas`);
+                }
+                motor.iniciarCampana(campId, body.u, notifSock);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campana: camp.nombre }));
             }
@@ -982,13 +994,27 @@ poll();
                 if (!template) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "mensaje no encontrado" })); }
                 const grupos = db.getGrupos(body.u);
                 if (!grupos.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "no tienes grupos" })); }
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                // Use user's account if botSock not available
+                let sock = botSock;
+                if (!sock || !sock.user) {
+                    if (body.cuenta) {
+                        try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (e) {}
+                    }
+                    if (!sock) {
+                        // Try first available account
+                        const cuentas = db.getCuentas(body.u);
+                        for (const c of cuentas) {
+                            try { sock = await motor.getOrConnectClient(body.u, c.nombre); break; } catch (e) {}
+                        }
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP. Vincula una cuenta primero." })); }
                 let exitosos = 0, fallidos = 0;
                 for (const g of grupos) {
                     try {
-                        const groupJid = await motor.resolveGroupJid(botSock, g.link);
+                        const groupJid = await motor.resolveGroupJid(sock, g.link);
                         if (!groupJid) { db.registrarEnvio(body.u, 0, g.link, "error"); fallidos++; continue; }
-                        const result = motor.sendToGroup ? await motor.sendToGroup(botSock, groupJid, template.mensaje, template.imagen_path) : null;
+                        const result = motor.sendToGroup ? await motor.sendToGroup(sock, groupJid, template.mensaje, template.imagen_path) : null;
                         if (result && result.sent) {
                             db.registrarEnvio(body.u, 0, g.link, "enviado");
                             exitosos++;
