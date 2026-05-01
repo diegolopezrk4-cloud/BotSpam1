@@ -28,15 +28,15 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 - **Panel Web** (puerto 3001) — `panel_server.js` sirve `panel.html` y proxea API
 - **TG API** (puerto 3002) — `bot.py` + `motor.py` + `db.py`
 - **Base de datos**: SQLite (`wsp_titan.db` para WSP, `titan.db` para TG)
-- **Bot Token**: 8779002740:AAEGu8ML62y0uFAqpbpSwStm7FJBn3d-KMo
+- **Bot Token**: (ver bot.py linea 34 — NO commitear tokens en documentacion)
 - **Admin ID**: 8001675901
 
 ## Archivos Principales
 | Archivo | Descripcion | Lineas aprox |
 |---|---|---|
-| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~4580 |
-| `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~4620 |
-| `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2070 |
+| `panel.html` | Frontend completo (HTML+CSS+JS en un solo archivo) | ~5000 |
+| `index_wsp.js` | API HTTP del bot WSP (todos los endpoints) | ~5100 |
+| `db_wsp.js` | Base de datos SQLite WSP (tablas + CRUD) | ~2375 |
 | `motor_wsp.js` | Motor de envio WhatsApp | ~74000 |
 | `panel_server.js` | Servidor web que sirve panel.html y proxea APIs | ~100 |
 | `bot.py` | Bot de Telegram (comandos + API) | ~178000 |
@@ -126,7 +126,7 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 - Dropdown de paises detectados por codigo de telefono
 - Filtra miembros por pais al enviar promo/DMs
 
-### Este PR — Mejoras Nuevas
+### PR #23 — Sistema de Sellers
 
 #### 19. Sistema de Sellers (Revendedores) con Codigos
 - **Admin**: Crear/editar/eliminar sellers desde "Admin > Sellers"
@@ -195,14 +195,16 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 | 29 | Backup / Restaurar | sec-backup | Ambas | Export/Import config |
 | 30 | Estadisticas y DMs | sec-stats | Ambas | Estadisticas + DMs |
 | 31 | Actividad | sec-actividad | Ambas | Registro actividad |
-| 32 | **Canjear Codigo** | sec-canjear | Ambas | **NUEVO**: Canjear codigo de membresia (visible para todos) |
-| 33 | **Panel Seller** | sec-sellerpanel | seller-only | **NUEVO**: Generar codigos + activar membresias |
+| 32 | **Canjear Codigo** | sec-canjear | Ambas | Canjear codigo de membresia (visible para todos) |
+| 33 | **Panel Seller** | sec-sellerpanel | seller-only | Generar codigos + activar membresias |
 | 34 | Admin Panel | sec-admin | admin-only | Gestion de usuarios |
-| 35 | **Sellers** | sec-sellers | admin-only | **NUEVO**: Crear/editar/eliminar sellers |
+| 35 | **Sellers** | sec-sellers | admin-only | Crear/editar/eliminar sellers |
 | 36 | Logs Global | sec-adminlogs | admin-only | Logs de todos los usuarios |
+| 37 | **Pagar Membresia** | sec-pagos | Ambas | Pagar con Binance Pay o comprobante manual |
+| 38 | **Gestion de Pagos** | sec-adminpagos | admin-only | Ver/aprobar comprobantes, stats, config metodos de pago |
 
 ## Endpoints API Completos
-### Sellers (NUEVOS)
+### Sellers
 | Endpoint | Metodo | Descripcion |
 |---|---|---|
 | `/api/admin/sellers` | GET | Lista sellers (admin) `?u=ADMIN_ID` |
@@ -216,28 +218,68 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 | `/api/seller/eliminar_codigo` | POST | Eliminar codigo no usado `{u, code_id}` |
 | `/api/canjear_codigo` | POST | Canjear codigo `{codigo, telegram_id}` |
 
+### Pagos
+| Endpoint | Metodo | Descripcion |
+|---|---|---|
+| `/api/pagos/planes` | GET | Lista planes con precios USDT + info si Binance esta habilitado |
+| `/api/pagos/crear` | POST | Crea orden de pago en Binance Pay `{plan, u}` |
+| `/api/pagos/webhook` | POST | Webhook de Binance Pay (publico, sin auth) |
+| `/api/pagos/estado` | GET | Estado de un pago `?order=MERCHANT_TRADE_NO` |
+| `/api/pagos/historial` | GET | Historial de pagos del usuario `?u=USER_ID` |
+| `/api/pagos/consultar` | POST | Consulta estado en Binance API `{merchant_trade_no}` |
+| `/api/admin/pagos` | GET | Admin: todos los pagos crypto + stats `?u=ADMIN_ID` |
+| `/api/metodos_pago` | GET | Lista metodos de pago activos (publico) |
+| `/api/comprobante/subir` | POST | Cliente sube comprobante `{plan, metodo_pago, monto, imagen_base64, nota, u}` |
+| `/api/comprobante/historial` | GET | Historial de comprobantes del usuario `?u=USER_ID` |
+| `/api/comprobante/imagen` | GET | Servir imagen del comprobante `?id=ID&admin=ADMIN_ID` |
+| `/api/admin/comprobantes` | GET | Admin: todos los comprobantes + stats `?u=ADMIN_ID&filter=pendientes` |
+| `/api/admin/comprobante/aprobar` | POST | Admin aprueba comprobante `{admin_id, id}` |
+| `/api/admin/comprobante/rechazar` | POST | Admin rechaza comprobante `{admin_id, id, nota}` |
+| `/api/admin/metodos_pago` | GET | Admin: lista todos los metodos `?u=ADMIN_ID` |
+| `/api/admin/metodos_pago/crear` | POST | Crear metodo `{admin_id, tipo, nombre, valor, instrucciones}` |
+| `/api/admin/metodos_pago/editar` | POST | Editar metodo `{admin_id, id, nombre, valor, instrucciones, activo}` |
+| `/api/admin/metodos_pago/eliminar` | POST | Eliminar metodo `{admin_id, id}` |
+| `/api/admin/metodos_pago/qr` | POST | Subir QR `{admin_id, id, imagen_base64}` |
+| `/api/metodos_pago/qr` | GET | Servir QR `?id=X` |
+| `/api/admin/planes` | GET | Lista planes editables `?u=ADMIN_ID` |
+| `/api/admin/planes/editar` | POST | Editar planes `{admin_id, planes}` |
+
 ### Endpoints Anteriores (sin cambios)
-- Auth: `/api/panel_login`, `/api/panel_registro`, `/api/check_membresia`, `/api/panel_cambiar_password`, `/api/panel_recuperar_solicitar`, `/api/panel_recuperar_reset`
+- Auth: `/api/panel_login`, `/api/panel_registro`, `/api/check_membresia`, `/api/panel_cambiar_password`, `/api/panel_recuperar_solicitar`, `/api/panel_recuperar_reset`, `/api/panel_logout`
 - Grupos: `/api/grupos`, `/api/grupos/add`, `/api/grupos/del`, `/api/grupos/delall`, `/api/grupos/seccion`, `/api/grupos/secciones`
 - Campanas: `/api/campanas`, `/api/campanas/crear`, `/api/campanas/del`, `/api/campanas/editar`, `/api/iniciar`, `/api/detener`
 - Envios: `/api/historial`, `/api/dashboard`, `/api/dashboard/extended`, `/api/reporte_diario`, `/api/tasa_entrega`, `/api/envios_chart`, `/api/limites`
 - 2FA: `/api/2fa/setup`, `/api/2fa/verify`, `/api/2fa/enable`, `/api/2fa/disable`, `/api/2fa/status`
 - Sesiones: `/api/panel_sessions`, `/api/panel_sessions/close`
 - Backup: `/api/config/exportar`, `/api/config/importar`
-- Admin: `/api/admin/usuarios`, `/api/admin/membresia`, `/api/admin/desactivar`, `/api/admin/set_admin`
+- Admin: `/api/admin/usuarios`, `/api/admin/membresia`, `/api/admin/desactivar`, `/api/admin/set_admin`, `/api/admin/auditoria`
 - Promo: `/api/promo/plantillas`, `/api/promo/plantillas/crear`, `/api/promo/plantillas/editar`, `/api/promo/plantillas/eliminar`
+- Analytics: `/api/analytics/envios_dia`, `/api/analytics/horas_activas`, `/api/analytics/tasa_cuenta`, `/api/analytics/clientes_activos`
+- Tickets: `/api/tickets/crear`, `/api/tickets`, `/api/tickets/mensajes`, `/api/tickets/responder`, `/api/tickets/cerrar`, `/api/admin/tickets`
+- Push: `/api/push/vapid_key`, `/api/push/subscribe`, `/api/push/unsubscribe`, `/api/push/test`
+- Templates: `/api/templates/preview`
+- Seller Dashboard: `/api/seller/dashboard`
+- Vacaciones: `/api/vacaciones/activar`, `/api/vacaciones/desactivar`
+- Programados Recurrente: `/api/programados/recurrente`
+- A/B Testing: `/api/ab_test/crear`
+- Grupos Muertos: `/api/grupos/muertos`, `/api/grupos/limpiar_muertos`
+- Backups Admin: `/api/admin/backups`, `/api/admin/backup_ahora`
+- Rate Limit: `/api/rate_limit/status`
+- Webhooks: `/api/webhooks`, `/api/webhooks/crear`, `/api/webhooks/editar`, `/api/webhooks/eliminar`
+- Health: `/api/health`
+- Verificacion: `/api/generar_codigo_registro`, `/api/verificar_cuenta`
 
 ## Tablas de Base de Datos
 ### Tablas WSP (wsp_titan.db)
 - `usuarios` — Usuarios WSP (plan, fecha_expira, activo, es_admin)
 - `sesiones` — Cuentas WSP vinculadas
-- `campanas` — Campanas de envio
+- `campanas` — Campanas de envio (con `estado_detalle`)
 - `grupos` — Grupos (con seccion y tamano)
 - `templates` — Plantillas de mensajes
 - `blacklist` — Lista negra de grupos
 - `blacklist_numeros` — Lista negra de numeros
 - `historial_envios` — Historial de envios
-- `panel_users` — Usuarios del panel web
+- `panel_users` — Usuarios del panel web (con `verificado`)
 - `recovery_codes` — Codigos de recuperacion
 - `user_envio_config` — Config de envio por usuario
 - `auto_respuestas` — Auto respuestas
@@ -253,9 +295,22 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 - `user_2fa` — 2FA TOTP
 - `active_sessions` — Sesiones activas
 - `envios_semanales` — Cache semanal
-- **`sellers`** — Revendedores (telegram_id, nombre, max_invites, periodo, plan_dias, plan_tipo, activo)
-- **`seller_invites`** — Invitaciones de sellers (seller_id, invitado_telegram_id, plan_dias, plan_tipo, fecha)
-- **`seller_codes`** — Codigos de activacion (seller_id, codigo, plan_dias, plan_tipo, usado, usado_por, fecha_creado, fecha_usado)
+- `sellers` — Revendedores
+- `seller_invites` — Invitaciones de sellers
+- `seller_codes` — Codigos de activacion
+- `pagos` — Pagos con Binance Pay
+- `comprobantes` — Comprobantes de pago manual
+- `metodos_pago` — Metodos de pago configurables por admin
+- `login_attempts` — Rate limiting (ip, telegram_id, success, created_at)
+- `audit_log` — Registro de auditoria (user_id, accion, detalle, ip, fecha)
+- `grupo_actividad` — Persistencia anti-duplicado (grupo_jid, ultima_actividad)
+- `push_subscriptions` — Subscripciones push (user_id, endpoint, p256dh, auth)
+- `tickets` — Tickets de soporte (user_id, asunto, estado, prioridad)
+- `ticket_mensajes` — Mensajes de tickets (ticket_id, autor_id, es_admin, mensaje)
+- `user_webhooks` — Webhooks de usuario (user_id, url, eventos, activo, secret)
+- `backup_log` — Log de backups (filename, size_bytes, fecha)
+- `admin_config` — Configuracion admin (clave, valor)
+- `registration_codes` — Codigos de registro (telegram_id, code, created_at, used)
 
 ## Flujo del Sistema de Sellers
 1. **Admin** crea un seller en Admin > Sellers (Telegram ID, nombre, limite, periodo, plan)
@@ -267,91 +322,355 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 5. El limite se descuenta: codigos pendientes + usados en el periodo cuentan contra el limite
 6. El contador se resetea automaticamente cada semana o mes segun configuracion del admin
 
+## Sistema de Roles
+| Rol | Acceso | Detalles |
+|---|---|---|
+| Admin | TODO | Ve y usa todas las secciones incluido Admin Panel, Sellers, Auditoria |
+| Seller | Todo excepto Admin | Ve todas las funciones + Panel Seller. NO ve Admin Panel ni Sellers ni Auditoria |
+| Cliente con membresia | Funciones normales | Usa todas las funciones del bot (campanas, envios, grupos, etc.) |
+| Cliente sin membresia | NADA | Ve el panel pero no puede usar ninguna funcion hasta pagar. Demo 1 dia al registrarse |
+
+## Sistema de Pagos (PR #27)
+
+### Arquitectura de Pagos
+Dos sistemas de pago integrados que comparten la misma UI y auto-activan membresia:
+
+#### 1. Binance Pay (Crypto automatico)
+- **Flujo**: Cliente selecciona plan → se crea orden en Binance Pay API → se abre checkout → Binance envia webhook cuando paga → se activa membresia automaticamente → se sincroniza a TG
+- **Config**: `config_wsp.js` > `BINANCE_PAY` > `API_KEY` + `API_SECRET` (obtener en merchant.binance.com)
+- **Precios USDT**: Cada plan tiene `precio_usdt` en `config_wsp.js` > `PLANES`
+- **Firma**: HMAC-SHA512 segun spec de Binance Pay API v2
+
+#### 2. Pago Manual (Yape, Plin, transferencia)
+- **Flujo**: Cliente ve metodos de pago con numeros/cuentas → hace el pago → sube foto del comprobante desde el panel → admin ve notificacion → aprueba o rechaza → si aprueba, se activa membresia automaticamente → se sincroniza a TG
+- **Imagenes**: Se guardan en carpeta `comprobantes/` con formato `{userId}_{timestamp}.{ext}`
+- **Numero para comprobantes**: +51976680776 (configurable desde panel admin)
+
+### Panel del Cliente ("Pagar Membresia")
+- Cards con planes disponibles (diario/semanal/mensual) con precios en Soles y USDT
+- Boton "Pagar con Crypto" (si Binance configurado) → abre checkout de Binance en nueva pestaña, polling cada 5s para detectar pago
+- Boton "Pago Manual" → modal con seleccion de metodo, monto, subida de imagen de comprobante, nota
+- Numeros/cuentas con click para copiar al portapapeles
+- Historial de pagos del usuario con estado (pendiente/aprobado/rechazado)
+
+### Panel Admin ("Gestion de Pagos")
+- **Stats**: Pagos crypto totales (USDT), comprobantes aprobados, pendientes, aprobados hoy
+- **Tab Pendientes**: Tabla con comprobantes esperando revision, botones aprobar/rechazar, ver imagen
+- **Tab Todos**: Historial completo de comprobantes
+- **Tab Crypto**: Historial de pagos Binance Pay con estado
+- **Tab Metodos de Pago**: CRUD completo — crear, editar, eliminar, activar/desactivar metodos de pago
+  - Tipos: Yape, Plin, Transferencia, Binance P2P, Otro
+  - Cada metodo tiene: nombre, valor (numero/wallet), instrucciones, activo/inactivo
+  - Se crea Yape por defecto al iniciar
+
+### Configuracion de Binance Pay
+1. Registrarse como merchant en [merchant.binance.com](https://merchant.binance.com)
+2. Crear API Key en Developer → API Keys
+3. Editar `config_wsp.js`:
+```javascript
+BINANCE_PAY: {
+    API_KEY: "tu-api-key-aqui",
+    API_SECRET: "tu-secret-aqui",
+    ...
+}
+```
+4. Configurar webhook URL en Binance Merchant Admin: `https://tu-dominio.com/api/pagos/webhook`
+5. Reiniciar el bot
+
+### Sync de Pagos a Telegram
+Cuando un pago es confirmado (automatico por Binance webhook o manual por admin), se sincroniza la activacion de membresia al bot de Telegram via `POST /api/tg/sync_membresia` en puerto 3002.
+
+## Sistema de Verificacion de Registro
+
+### Flujo para Nuevos Usuarios
+1. Usuario abre el bot de Telegram → envia `/registro`
+2. Bot genera codigo unico (ej: `REG-A3K9X2`, expira en 30 min)
+3. Usuario va al panel web → Registrarse → ingresa el codigo + contrasena
+4. Sistema verifica codigo, extrae el Telegram ID automaticamente → crea la cuenta
+5. Un Telegram ID solo puede tener 1 cuenta (enforced por unique constraint)
+
+### Flujo para Usuarios Existentes (No Verificados)
+1. Al hacer login, ven pantalla bloqueante "Verifica tu Cuenta" con instrucciones
+2. Van al bot TG → `/registro` → obtienen codigo
+3. Ingresan codigo en el panel → se marca como verificado
+4. A partir de ahi pueden usar todas las funciones normalmente
+
+### Reglas
+- **Admin**: Siempre verificado automaticamente
+- **Codigo**: Formato `REG-XXXXXX`, expira en 30 minutos, 1 uso
+- **1 cuenta por ID**: No se puede crear segunda cuenta con mismo Telegram ID
+- **Server-side enforcement**: API retorna 403 si usuario no verificado
+
+## Sistema de Estado de Campanas
+
+### Estados
+| Valor | Badge | Color | Significado |
+|---|---|---|---|
+| `activa` | Activa | Verde | Enviando mensajes activamente |
+| `en_reposo` | En reposo | Amarillo (#f39c12) | Termino un ciclo, esperando pausa entre rondas |
+| `detenida_actualizacion` | Detenida (actualizacion) | Naranja (#e67e22) | Se detuvo porque el servidor se reinicio/actualizo |
+| `detenida` / null | Detenida | Rojo | Detenida manualmente |
+
+### Comportamiento
+1. **Al iniciar servidor** (`startBot()`): `marcarCampanasDetenidaPorActualizacion()` marca todas las campanas activas como `detenida_actualizacion` (activa=0)
+2. **Al iniciar campana**: `setCampanaActiva(id, true)` pone estado_detalle = `activa`
+3. **Al terminar un ciclo**: `setCampanaEstadoDetalle(id, 'en_reposo')`
+4. **Al terminar la pausa**: `setCampanaEstadoDetalle(id, 'activa')` (si no fue cancelada)
+5. **Al detener manualmente**: `setCampanaActiva(id, false)` pone estado_detalle = `detenida`
+
+### Columna DB
+- `campanas.estado_detalle` (TEXT DEFAULT NULL — agregada por migracion automatica)
+
+### Funciones DB
+- `setCampanaActiva(campanaId, activa, estado_detalle)` — Acepta 3er parametro opcional
+- `setCampanaEstadoDetalle(campanaId, estado_detalle)` — Setter directo
+- `marcarCampanasDetenidaPorActualizacion()` — Marca todas las activas como detenidas por actualizacion
+
+### UI
+- `getEstadoCampanaBadge(x)` en panel.html — Retorna badge HTML correcto segun estado
+
+---
+
 ## Bugs Corregidos (Escaneo Profundo)
 1. **Code gen excedia limite**: Si seller pedia 5 codigos con 8/10 usados, generaba 5 (total 13). Fix: se capea `cantidad` a `disponibles = max - (usados + pendientes)`.
 2. **Invitar directo no contaba codigos pendientes**: El endpoint `/api/seller/invitar` solo contaba invites directos, no codigos pendientes. Fix: ahora cuenta ambos.
 3. **eliminarSeller no borraba codigos**: Al eliminar un seller, se borraban invites pero no seller_codes (quedaban huerfanos). Fix: se agrego `DELETE FROM seller_codes`.
 4. **generarSellerCode podia fallar silenciosamente**: Si los 20 intentos de generar codigo unico fallaban, insertaba un duplicado y crasheaba. Fix: 50 intentos + throw Error explicito si falla.
-5. **importFullConfig usaba columnas INCORRECTAS (backup import 100% roto)**: La funcion `importFullConfig()` en `db_wsp.js` tenia TODOS los INSERT con nombres de columnas que NO existian en las tablas reales. El `catch(_){}` ocultaba todos los errores, asi que al importar un backup parecia funcionar pero no se importaba NADA. Columnas corregidas:
-   - `grupos`: `grupo_jid` → `link`, se quito `nombre` duplicado, se corrigio a `seccion, size`
-   - `templates`: `imagen_b64` → `imagen_path`
-   - `blacklist`: `grupo_jid, nombre` → `grupo_link, razon`
-   - `auto_respuestas`: `keyword` → `palabra`
-   - `user_envio_config`: `intervalo_min, intervalo_max, espera_ciclo, envio_imagen, caption_mode` → `delay_seg, lote_tamano, lote_pausa_seg, hora_inicio, hora_fin`
-6. **getSellerInvitesCount formato de fecha incorrecto**: Usaba `toISOString()` que genera `2026-04-23T02:41:28.000Z` pero SQLite `datetime('now')` genera `2026-04-23 02:41:28`. La `T` vs espacio causaba que la comparación lexicográfica fallara y no contara invites recientes. Fix: se formatea a `YYYY-MM-DD HH:MM:SS`.
-7. **invites_usados no incluia codigos pendientes en dashboard**: Los endpoints `/api/seller/info` y `/api/admin/sellers` solo mostraban invites directos en `invites_usados`, no codigos pendientes. El seller veia "2/10" pero el sistema enforceaba "7/10". Fix: ahora `invites_usados = usados + pendientes` en ambos endpoints.
+5. **importFullConfig usaba columnas INCORRECTAS (backup import 100% roto)**: La funcion `importFullConfig()` en `db_wsp.js` tenia TODOS los INSERT con nombres de columnas que NO existian en las tablas reales. El `catch(_){}` ocultaba todos los errores. Columnas corregidas: grupos, templates, blacklist, auto_respuestas, user_envio_config.
+6. **getSellerInvitesCount formato de fecha incorrecto**: Usaba `toISOString()` que genera `2026-04-23T02:41:28.000Z` pero SQLite `datetime('now')` genera `2026-04-23 02:41:28`. Fix: se formatea a `YYYY-MM-DD HH:MM:SS`.
+7. **invites_usados no incluia codigos pendientes en dashboard**: Los endpoints `/api/seller/info` y `/api/admin/sellers` solo mostraban invites directos en `invites_usados`. Fix: ahora `invites_usados = usados + pendientes`.
 
-#### Este PR — Bugfixes y Mejoras
-8. **Mensajes guardados no cargaban en promo Todo en Uno**: Habia dos elementos con `id="promoPlantillaSelect"` — el segundo (en Todo en Uno) era ignorado por el DOM. Fix: renombrado a `promoMsgSelect`.
-9. **Pregunta del handoff ahora es random/graciosa**: Cambiada la pregunta estatica del handoff por preguntas random de programacion.
-10. **Preguntas random para promo**: Boton "Pregunta Random" en la seccion Todo en Uno que llena el textarea con preguntas graciosas aleatorias.
-11. **not_member eliminaba grupos agresivamente**: `sendToGroup` trataba CUALQUIER error de metadata como "not_member" y eliminaba el grupo. Ahora: reintenta 1 vez, solo elimina si el error es explicitamente "not-authorized/forbidden/404", errores temporales se registran como "error_temporal" sin eliminar.
-12. **Pausa/Reanudar en promo Todo en Uno**: Boton "Pausar" y barra de reanudacion en la seccion de promo. Usa la misma infraestructura de progreso que envio a miembros.
-13. **Promo usa config de envio del usuario**: El envio de promo a miembros ahora respeta `lote_tamano` y `lote_pausa_seg` de la config del usuario en vez de enviar sin lotes.
-14. **Fix scanning loop**: `linkAccount` ahora limpia sockets viejos (`.end()`) antes de reintentar, evitando multiples QR activos simultaneamente.
-15. **enviarAPersonales ahora soporta lotes**: La funcion `enviarAPersonales` ahora lee `getUserEnvioConfig()` para batch/delay. Si el usuario tiene configurado "10 mensajes y 5 min pausa", se aplica tambien a envios personales. Guarda progreso durante pausas de lote.
-16. **Fix promoResumeBar CSS duplicado**: El div tenia `display:none` dos veces en el style, la segunda pisaba `align-items:center`. Corregido.
-17. **Anti-duplicado mejorado entre campanas**: `grupoTieneActividadNueva` ahora tiene ventana de 30 min — si la misma campana envio al grupo en los ultimos 30 min, no reenvia (incluso despues de restart). Campanas diferentes con mensajes distintos SI envian al mismo grupo sin problemas.
+#### Bugfixes y Mejoras
+8. **Mensajes guardados no cargaban en promo Todo en Uno**: Habia dos elementos con `id="promoPlantillaSelect"`. Fix: renombrado a `promoMsgSelect`.
+9. **Pregunta del handoff ahora es random/graciosa**
+10. **Preguntas random para promo**: Boton "Pregunta Random" en seccion Todo en Uno.
+11. **not_member eliminaba grupos agresivamente**: `sendToGroup` trataba CUALQUIER error de metadata como "not_member". Ahora: reintenta 1 vez, solo elimina si error es "not-authorized/forbidden/404".
+12. **Pausa/Reanudar en promo Todo en Uno**: Boton "Pausar" y barra de reanudacion.
+13. **Promo usa config de envio del usuario**: Respeta `lote_tamano` y `lote_pausa_seg`.
+14. **Fix scanning loop**: `linkAccount` limpia sockets viejos antes de reintentar.
+15. **enviarAPersonales ahora soporta lotes**: Lee `getUserEnvioConfig()` para batch/delay.
+16. **Fix promoResumeBar CSS duplicado**: `display:none` duplicado pisaba `align-items:center`.
+17. **Anti-duplicado mejorado entre campanas**: Ventana de 30 min. Campanas diferentes con mensajes distintos SI envian al mismo grupo.
 
-#### Escaneo Exhaustivo Linea por Linea (Bugfixes adicionales)
-18. **Socket leak en connectClientAccount timeout**: El timeout de 60s en `connectClientAccount` disparaba reject sin cerrar el socket, dejando conexiones fantasma. Fix: se agrego `sock.end()` antes del reject. (`motor_wsp.js:121`)
-19. **esGrupoReal filtraba announce groups**: Filtraba grupos de solo-admin (announce) impidiendo que admins los vean en la lista. Fix: se quito el filtro ya que `sendToGroup` verifica permisos al enviar. (`motor_wsp.js:466`)
-20. **Scheduler hardcodeaba "America/Lima"**: Dos funciones en el scheduler usaban `"America/Lima"` en vez de `config.TIMEZONE`, rompiendo para usuarios con timezone diferente. Fix: se cambio a `config.TIMEZONE`. (`motor_wsp.js:1379,1396`)
-21. **Delivery handler leak en sendToGroup**: El handler de `messages.update` no se removia del socket en la rama exitosa (solo en timeout). Fix: se reordeno para hacer `off()` en ambas ramas. (`motor_wsp.js:418-422`)
-22. **enviar_miembros ignoraba config de lotes del usuario**: Endpoint usaba defaults hardcodeados (batch=0, delay=5min) en vez de leer `getUserEnvioConfig()`. Fix: ahora lee config del usuario. (`index_wsp.js:1213-1215`)
-23. **enviar_miembros_reanudar ignoraba config de lotes**: Igual que #22 pero en el endpoint de reanudar. Fix: ahora lee `getUserEnvioConfig()`. (`index_wsp.js:1414-1416`)
-24. **Promo enviar_y_escuchar no procesaba JIDs correctamente**: A diferencia de `enviar_miembros`, el endpoint promo no filtraba @lid, no quitaba sufijos de dispositivo, no deduplicaba, no checkeaba blacklist ni se saltaba el propio JID del sender. Fix: se agrego procesamiento completo de JIDs con blacklist, dedup, LID filter, self-skip. (`index_wsp.js:1838-1863`)
-25. **XSS en 4 secciones de innerHTML sin esc()**: Nombres de sesion (`s.nombre`, `s.telefono`) se insertaban sin escapar en `<option>` tags, permitiendo XSS si un nombre contenia HTML. Fix: se agrego `esc()` en loadTgDetectar, loadEnvioPersonal, loadEnvioMiembros, loadPromoCuentas. (`panel.html:2273,2787,2881,3517`)
+#### Escaneo Exhaustivo Linea por Linea
+18. **Socket leak en connectClientAccount timeout**: Fix: `sock.end()` antes del reject. (`motor_wsp.js:121`)
+19. **esGrupoReal filtraba announce groups**: Fix: se quito el filtro. (`motor_wsp.js:466`)
+20. **Scheduler hardcodeaba "America/Lima"**: Fix: `config.TIMEZONE`. (`motor_wsp.js:1379,1396`)
+21. **Delivery handler leak en sendToGroup**: Fix: `off()` en ambas ramas. (`motor_wsp.js:418-422`)
+22. **enviar_miembros ignoraba config de lotes**: Fix: lee `getUserEnvioConfig()`. (`index_wsp.js:1213-1215`)
+23. **enviar_miembros_reanudar ignoraba config de lotes**: Fix: lee `getUserEnvioConfig()`. (`index_wsp.js:1414-1416`)
+24. **Promo enviar_y_escuchar no procesaba JIDs correctamente**: Fix: procesamiento completo con blacklist, dedup, LID filter. (`index_wsp.js:1838-1863`)
+25. **XSS en 4 secciones de innerHTML sin esc()**: Fix: `esc()` en loadTgDetectar, loadEnvioPersonal, loadEnvioMiembros, loadPromoCuentas. (`panel.html:2273,2787,2881,3517`)
 
-#### Fixes de Seguridad y Bugs del REPORTE_BUGS_COMPLETO (28 bugs)
+#### Escaneo de Seguridad Profundo
+26. **SIN AUTENTICACION EN API (CRITICO)**: Fix: Middleware `Authorization: Bearer <token>`. (`index_wsp.js:797-809`)
+27. **Rate limiting en login (CRITICO)**: Fix: max 5 intentos por IP en 15min. (`index_wsp.js:685-691`)
+28. **readBody sin limite de tamano (DoS)**: Fix: limite 10MB. (`index_wsp.js:240-256`)
+29. **2FA se desactivaba sin codigo TOTP**: Fix: requiere contrasena + codigo 2FA. (`index_wsp.js:2103-2115`)
+30. **Timezone inconsistente en seller invites**: Fix: usa `config.TIMEZONE`. (`db_wsp.js:2023-2041`)
+31. **Memory leak en messages.update handler**: Fix: `cleanup()` en ambas ramas. (`motor_wsp.js:423-442`)
+32. **Race condition envioPersonalActivo silenciosa**: Fix: retorna `{ blocked: true, error }`. (`motor_wsp.js:1056,1188`)
+33. **grupoUltimaActividad se perdia al reiniciar**: Fix: persiste a tabla `grupo_actividad`. (`motor_wsp.js:335-371`, `db_wsp.js:1905-1911`)
+34. **Seller invites ventana deslizante vs calendario**: Fix: cuenta desde inicio de semana/mes. (`db_wsp.js:2023-2041`)
+35. **Recursion infinita en reconexion**: Fix: `reconnectLocks`. (`motor_wsp.js:38-47,108-121`)
+36. **Recovery codes sin cleanup**: Fix: limpieza automatica cada 30 min. (`index_wsp.js:2426-2433`)
+37. **SW cacheaba panel.html indefinidamente**: Fix: SW v3 nunca cachea navegacion. (`sw.js`)
+38. **XSS en canjear codigo y 2FA secret**: Fix: `esc()` en resultados. (`panel.html:3926,3930,4530`)
 
-**CRITICOS (Security):**
-26. **BUG-C01: API TG sin autenticacion** — web_panel.py tenia 30+ endpoints sin ningun auth check. Fix: middleware `auth_middleware` que bloquea requests que no vienen de localhost (solo acepta requests del proxy panel_server.js).
-27. **BUG-C02: Credenciales hardcodeadas** — BOT_TOKEN, API_ID, API_HASH, ADMIN_ID estaban en texto plano en bot.py, motor.py, web_panel.py. Fix: ahora usan `os.environ.get()` con fallback al valor actual.
-28. **BUG-C03: Path traversal en sesiones TG** — `get_session_path()` permitia nombres como `../../etc/passwd`. Fix: sanitiza nombre removiendo `/\..`, valida que la ruta resultante este dentro de `sessions/`.
-29. **BUG-C04: Upload sin limite de tamaño** — Multipart upload de fotos de campana no tenia limite. Fix: max 10MB con respuesta 413 si se excede.
-30. **BUG-C05: Race condition en pago** — Double-click en boton "Activar" duplicaba la membresia. Fix: set `_processed_payments` que previene doble procesamiento del mismo callback.
+### Mejoras de Seguridad y Roles
+39. **Sistema de Roles**: Admin > Seller > Cliente con membresia > Cliente sin membresia. (`panel.html:1654`)
+40. **Registro de Auditoria**: Tabla `audit_log`. Endpoint `GET /api/admin/auditoria`. (`db_wsp.js:558-567`, `index_wsp.js:2336-2345`)
+41. **Panel envia token en cada request**: `api()` incluye `Authorization: Bearer <token>`. (`panel.html:1616-1632`)
+42. **panel_cambiar_password publico sin auth**: Fix: valida token antes de procesar.
+43. **Sin validacion de membresia en servidor**: Fix: middleware retorna 403. (`index_wsp.js:829-851`)
+44. **Logout no invalidaba sesion**: Fix: endpoint `/api/panel_logout`. (`index_wsp.js:802-814`)
+45. **Proxy no enviaba X-Forwarded-For**: Fix: proxy envia IP real. (`panel_server.js:22-23,32,61`)
+46. **Bug double-read en api() con 403**: Fix: retorna despues del primer parse. (`panel.html:1640-1646`)
 
-**ALTOS (Auth/Memory):**
-31. **BUG-H01: Memory leak web_login_sessions** — Sesiones de login TG nunca se limpiaban. Fix: tarea de fondo cada 10 min que elimina sesiones > 15 min de antiguedad.
-32. **BUG-H03: /api/usuarios/todos sin admin** — Cualquier usuario veia todos los usuarios. Fix: requiere checkAdmin() o ser request local.
-33. **BUG-H04: /api/activar y /api/desactivar sin admin** — Cualquier usuario podia activar/desactivar membresias. Fix: checkAdmin() + localhost check.
-34. **BUG-H05: /api/activas exponia todas las campanas** — Sin filtro por usuario. Fix: no-admin solo ve sus propias campanas.
-35. **BUG-H06: Debug endpoints expuestos** — `/api/debug_miembros` y `/api/debug_test_send` sin auth. Fix: requiere checkAdmin().
-36. **BUG-H07: Lista negra TG era stub** — Los endpoints retornaban siempre vacio. Fix: tabla `lista_negra_tg` en db.py + CRUD real implementado.
-37. **BUG-H08: Campana TG sin verificar membresia** — Usuarios expirados podian lanzar campanas. Fix: verifica `activo` y `fecha_expira` antes de iniciar.
+### Sync TG <-> WSP (PR #27)
+47. **Bot TG no podia eliminar cuentas WSP**: Fix: wsp_desvincular en wsp_bridge.py
+48. **/desactivar y /ban en TG no sincronizaban a WSP**: Fix: sync via wsp_admin_desactivar/wsp_admin_ban
+49. **Llamadas del TG bot al WSP API fallaban 401**: Fix: excepcion para requests localhost
+50. **POST endpoints no verificaban privilegios**: Fix: verifyPostUser() en POST endpoints
+51. **XSS en admin panel, sellers, codigos**: Fix: esc() aplicado sistematicamente
 
-**MEDIOS:**
-38. **BUG-M01: parseInt sin validacion** — NaN podia romper SQL. Fix: fallbacks `|| defaultValue` en todos los parseInt criticos.
-39. **BUG-M02: Reconexion sin backoff** — Inundaba Telegram con reconexiones. Fix: backoff exponencial (2s, 4s, 8s, 16s) con max 4 intentos.
-40. **BUG-M03: mensajes_respondidos crecia infinitamente** — Set que nunca se limpiaba. Fix: al llegar a 5000, elimina los 3000 mas antiguos (mantiene los 2000 mas recientes).
-41. **BUG-M04: delete campana_sesiones sin filtro** — `eliminar_sesion` borraba sesiones de TODOS los usuarios. Fix: subquery filtra por user_id.
-42. **BUG-M07: Recovery codes sin expiracion** — Codigos viejos nunca se limpiaban. Fix: cleanup de codigos > 10 min al crear nuevos.
-43. **BUG-M08: Fotos de campana no se eliminan** — Al borrar campana, la imagen quedaba en disco. Fix: `fs.unlinkSync()` de la imagen antes de borrar de DB.
+### Mejoras Implementadas (Todas las futuras completadas)
+52. **Notificaciones Push Reales (Web Push API + VAPID)**: Endpoints push, tabla push_subscriptions, dependencia web-push
+53. **Panel de Analytics Avanzado**: Chart.js envios/dia, horas activas, tasa por cuenta. Seccion sec-analytics
+54. **Sistema de Tickets/Soporte**: Bandeja admin + historial conversacion + push. Secciones sec-tickets, sec-admintickets
+55. **Rotacion Inteligente de Cuentas + Deteccion Ban**: `/api/rate_limit/status` analiza tasa por cuenta
+56. **Templates con Variables**: {nombre}, {fecha}, {hora}, {random}, {numero}, {grupo} + preview
+57. **Dashboard de Sellers Avanzado**: Stats codigos, clientes activos, tasa conversion. `/api/seller/dashboard`
+58. **Modo Vacaciones**: Pausar/reanudar TODAS las campanas con 1 click
+59. **Programacion Recurrente (cron-like)**: Dias de semana + hora
+60. **A/B Testing de Mensajes**: Divide grupos 50/50 entre variante A y B
+61. **Auto-limpieza de Grupos Muertos**: Detectar + eliminar en batch
+62. **Respaldo Automatico Diario**: Copia DB cada 3am, mantiene 7 dias
+63. **Rate Limiting Adaptativo**: Analiza tasa y recomienda ajustes
+64. **Webhook de Eventos**: CRUD completo + firma HMAC-SHA256
+65. **Docker Compose**: Dockerfile + docker-compose.yml con volumes y healthcheck
+66. **CI/CD GitHub Actions**: Syntax check JS/Python + Docker build
+67. **Monitoreo/Health Check**: `GET /api/health` publico, compatible con UptimeRobot
+68. **QR en Metodos de Pago**: Admin sube foto QR de Yape/Plin
+69. **2 opciones de comprobante**: Subir directo en panel O enviar por WhatsApp
+70. **Planes editables por admin**: Solo Semanal y Mensual por defecto, admin edita desde panel
+71. **Header precios dinamicos**: Precios en banner se actualizan desde API
 
-**BAJOS:**
-44. **BUG-L04: Stack traces expuestos** — panel_server.js enviaba `e.message` al cliente. Fix: log a console, mensaje generico al cliente.
-45. **BUG-L05: ReporteDiario sin cleanup** — Al banear usuario, el setInterval seguia corriendo. Fix: `detenerReporteDiario()` al desactivar usuario.
+### Bugs Conocidos Corregidos (BUG-001 a BUG-008)
+- **BUG-001**: Comprobante/QR imagen no carga — Corregido (auth en img tags, directorio, rutas, planes custom)
+- **BUG-002**: Reconnect handler no reintenta — Corregido (attachConnectionHandler recursivo)
+- **BUG-003**: detenerEnvioPersonal no libera slot — Corregido (delete envioPersonalActivo inmediato)
+- **BUG-004**: enviarASeleccionados sin await — Corregido (await + check .blocked)
+- **BUG-005**: Bot token en documentacion — Corregido (referencia a bot.py)
+- **BUG-006**: Registro aceptaba numeros de telefono — Corregido (validacion front y backend)
+- **BUG-007**: Usuarios con sesion previa saltaban verificacion — Corregido (check === '1')
+- **BUG-008**: API no verificaba cuenta en servidor — Corregido (middleware 403)
 
-**EXTRAS:**
-46. **enviarAPersonales sin guardar progreso** — El for-of no guardaba progreso al cancelar. Fix: convertido a for indexado con `guardarProgresoEnvio()` antes del break.
-47. **readBody sin limite** — El parser JSON del API no tenia limite de tamaño. Fix: max 10MB.
-48. **Proxy sin X-Forwarded-For** — panel_server.js no pasaba IP del cliente a los backends. Fix: header `x-forwarded-for` en ambos proxies.
+### PR #30 — Fixes de Campanas (Session 4-5)
+
+72. **Campanas zombie tras reinicio** — Cuando el bot se reinicia, las campanas activas en BD quedaban con `activa=1` pero sin tarea en memoria. Fix: `db.resetZombieCampanas()` detecta y resetea + notifica al usuario via WhatsApp. (`index_wsp.js:2467-2495`, `db_wsp.js:870-880`)
+
+73. **botSock null crasheaba campanas silenciosamente** — `iniciarCampana()` usaba `botSock.sendMessage()` directamente. Si botSock era null, crasheaba silenciosamente. Fix: helper `notificarUsuario()` que maneja null gracefully. (`motor_wsp.js:494-512`)
+
+74. **Iniciar campana sin validacion previa** — `/api/iniciar` no verificaba si la campana tenia cuentas o grupos antes de iniciar. Fix: valida `sesiones.length` y `grupos.length`, devuelve error descriptivo. (`index_wsp.js:421-431`, `panel.html:2558`)
+
+75. **Boton Detener siempre mostraba "Detenida"** — `detenerCamp()` ignoraba la respuesta del API. Fix: verifica `r.ok` y muestra error si falla. (`panel.html:2570`)
+
+76. **Dropdown "Cargar mensaje guardado" vacio + mensajes sin texto** — Usaba `m.texto` pero la columna en BD es `mensaje`. Fix: cambiado `m.texto` a `m.mensaje` en todas las instancias. (`panel.html:2504,2509,2520,2759-2768`)
+
+77. **Campana iniciaba pero no mostraba errores** — Si la campana fallaba internamente, el catch solo hacia `console.error()`. Fix: (a) Error fatal envia notificacion WhatsApp. (b) Cada paso critico escribe a `bot_logs` via `db.agregarLog()`. (c) Errores de conexion notifican via WhatsApp. (`motor_wsp.js:526-571,815-817`)
+
+78. **Notificacion zombie: delay de 5s** — Deteccion zombie se ejecutaba inmediatamente al abrir conexion. Fix: `await delay(5000)` antes de detectar zombies. (`index_wsp.js:2479-2482`)
+
+---
+
+## ERRORES PENDIENTES POR CORREGIR (PRIORIDAD ALTA)
+
+### ERROR 1: Campana conecta cuentas pero NO envia mensajes a grupos
+- **Estado**: Las campanas inician correctamente, las cuentas se conectan OK (visible en Logs del Bot), pero los mensajes NO se envian a los grupos
+- **Evidencia**: Los logs muestran `Cuenta '907' conectada OK` pero despues NO aparecen logs de envio a grupos. La Cola de Reintentos muestra 84 mensajes pendientes
+- **Donde investigar**:
+  - `motor_wsp.js` lineas 598-770 — El bucle de envio (`while (!cancelled)`) que itera sobre grupos
+  - `motor_wsp.js` linea 654 — `grupoTieneActividadNueva()` puede estar bloqueando TODOS los grupos (anti-duplicado demasiado agresivo)
+  - `motor_wsp.js` linea 665 — `sendToGroup()` puede estar fallando silenciosamente
+  - `motor_wsp.js` linea 641 — `resolveGroupJid()` puede retornar null si los links de grupos son invalidos
+- **Solucion sugerida**: Agregar `db.agregarLog()` dentro del bucle de envio para ver donde se corta. Revisar si `grupoTieneActividadNueva` salta todos los grupos despues de un reinicio
+- **Archivos**: `motor_wsp.js` (lineas 598-770)
+
+### ERROR 2: Cola de Reintentos tiene 84 mensajes pendientes sin procesarse
+- **Estado**: La cola muestra 84 Pendientes, 0 Reenviados, 0 Fallidos
+- **Donde investigar**:
+  - `motor_wsp.js` funcion `iniciarRetryProcessor()` — Verificar que este corriendo
+  - `db_wsp.js` funcion `getRetryPendientesGlobal()` — `proximo_intento <= datetime('now')` puede tener problema de timezone
+  - Los reintentos solo se agregan en `enviarAPersonales` y `enviarAMiembros`, NO en campanas
+- **Archivos**: `motor_wsp.js`, `db_wsp.js`
+
+### ERROR 3: Bot no notifica al usuario cuando se detiene por actualizacion
+- **Estado**: El codigo de deteccion zombie existe (index_wsp.js:2477-2504) con delay de 5s, pero el usuario no recibe la notificacion WhatsApp
+- **Posibles causas**:
+  - Las campanas ya estaban en `activa=0` al momento del reinicio
+  - `botSock.onWhatsApp()` o `botSock.sendMessage()` falla silenciosamente
+  - El `resetZombieCampanas()` no encuentra campanas activas
+- **Archivos**: `index_wsp.js`
+
+---
+
+## QUE NO TOCAR (NO CAMBIAR NADA DE ESTO)
+
+### Funcionalidades que YA funcionan correctamente:
+1. **Sistema de Sellers/Revendedores** — NO tocar endpoints `/api/admin/sellers/*`, `/api/seller/*`, `/api/canjear_codigo`
+2. **Login/Registro/2FA/Verificacion** — NO tocar `/api/panel_login`, `/api/2fa/*`, `/api/verificar_cuenta`
+3. **Sesiones activas** — NO tocar `/api/panel_sessions`
+4. **PWA** — manifest.json, sw.js, install prompt. NO tocar
+5. **Dashboard** — Graficos, estadisticas. NO tocar
+6. **Grupos WSP/TG** — Busqueda, orden, secciones. NO tocar
+7. **Mensajes y Plantillas** — CRUD de mensajes (ya corregido `m.texto` → `m.mensaje`). NO tocar
+8. **Envio Unico** — NO tocar
+9. **Envio Personal** — Ya soporta lotes. NO tocar
+10. **Envio a Miembros** — Pausa/reanudar, lotes. NO tocar
+11. **Envio Interactivo/Promo** — Plantillas, filtro pais, Todo en Uno. NO tocar
+12. **Programados** — NO tocar
+13. **Auto-Responder** — NO tocar
+14. **Backup/Restaurar** — Ya corregido importFullConfig. NO tocar
+15. **Lista Negra** — NO tocar
+16. **Logs del Bot** — Funciona, muestra logs de campana. NO tocar
+17. **Multi-idioma** — ES/EN/PT. NO tocar
+18. **Modo Oscuro/Claro** — NO tocar
+19. **Sistema de Pagos** — Binance Pay + manual. NO tocar
+20. **Analytics Avanzado** — NO tocar
+21. **Tickets/Soporte** — NO tocar
+22. **Push Notifications** — NO tocar
+23. **Templates con Variables** — NO tocar
+24. **A/B Testing** — NO tocar
+25. **Webhooks** — NO tocar
+26. **Docker/CI-CD/Health** — NO tocar
+
+### Archivos que NO se deben modificar (a menos que sea para corregir los errores de arriba):
+- `panel_server.js` — Funciona perfecto
+- `sw.js` — Service Worker OK
+- `manifest.json` — PWA OK
+- `start.sh` — Script de inicio OK
+- `config_wsp.js` — Config OK
+- `bot.py` — Bot TG (solo si hay bug TG)
+- `motor.py` — Motor TG (solo si hay bug TG)
+- `db.py` — DB TG (solo si hay bug TG)
+
+### Reglas estrictas:
+- **NO refactorizar** — Solo corregir los 3 errores pendientes
+- **NO separar panel.html** — Es monolitico y asi se queda
+- **NO cambiar nombres de funciones** existentes
+- **NO eliminar** ningun endpoint existente
+- **NO cambiar** la estructura de tablas existentes
+- **Si agregas un endpoint**, va ANTES de `// Endpoint no encontrado` en index_wsp.js
+- **Despues de CADA fix**, actualizar este HANDOFF.md
+
+---
+
+## Mejoras Futuras (Pendientes)
+1. **Exportar/Importar configuracion completa** — Un solo archivo JSON con toda la config
+2. **Integracion con Google Sheets** — Requiere OAuth de Google + API de Sheets
+3. **Multi-idioma para el bot TG** — Detectar locale de Telegram y traducir respuestas
+4. **Panel mobile nativo (React Native)** — PWA actual funciona bien en mobile
+5. **Separar panel.html en componentes** — Panel tiene 5300+ lineas
+6. **Migrar SQLite a PostgreSQL** — Para alta concurrencia futura
+
+---
 
 ## Notas Importantes para la Siguiente IA
-1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.
-2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).
+1. **panel.html** es monolitico (~5000 lineas). Todo HTML, CSS y JS en un archivo. No separar.
+2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado`.
 3. Las tablas y funciones de DB se agregan en `db_wsp.js` **ANTES** del `module.exports`.
 4. Los nuevos exports se agregan al final del objeto `module.exports` en `db_wsp.js`.
-5. `panel_server.js` proxea `/api/*` al puerto 3000 (WSP) y `/api/tg*` al puerto 3002 (TG). NO necesitas modificarlo.
-6. Para agregar una nueva seccion al panel: (a) nav en sidebar, (b) `div.section` con `id="sec-NOMBRE"`, (c) funcion de carga JS, (d) agregar al objeto `loaders`.
+5. `panel_server.js` proxea `/api/*` al puerto 3000 (WSP) y `/api/tg*` al puerto 3002 (TG). NO modificar.
+6. Para agregar nueva seccion: (a) nav en sidebar, (b) `div.section` con `id="sec-NOMBRE"`, (c) funcion de carga JS, (d) agregar al objeto `loaders`.
 7. El tema oscuro/claro usa CSS variables: `var(--bg)`, `var(--text)`, etc.
 8. Multi-idioma usa `LANG` object. Agregar traducciones para ES, EN y PT.
 9. Sellers usan clase CSS `seller-only`. Se muestran si `esSeller || esAdmin`.
-10. "Canjear Codigo" es visible para TODOS los usuarios (no necesita ser seller ni admin).
+10. "Canjear Codigo" es visible para TODOS los usuarios.
 11. **SIEMPRE** actualizar este HANDOFF.md despues de cada mejora o fix.
+12. **AUTENTICACION**: Todos los endpoints (excepto publicos) requieren `Authorization: Bearer <token>`.
+13. **AUDITORIA**: Usar `db.registrarAuditoria(userId, 'accion', 'detalle', ip)`.
+14. **RATE LIMIT**: Login tiene max 5 intentos/15min por IP.
+15. **Tablas nuevas**: `login_attempts`, `audit_log`, `grupo_actividad`. Se crean automaticamente.
 
-## Comando de Actualizacion
+## Historial de Comandos de Actualizacion
+
+### PR #23 — Sistema de Sellers
 ```bash
-cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777523595-fix-bugs-features && npm install && bash start.sh
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777514912-country-filter-mejoras && npm install && bash start.sh
+```
+
+### PR #27 — Sync + Seguridad + Pagos + Mejoras Completas
+```bash
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777531999-all-improvements-sync && npm install && bash start.sh
+```
+
+### PR #30 — Fix Campanas + Bugs #72-78 (ACTUAL)
+```bash
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777583803-fix-campaign-bugs && npm install && bash start.sh
+```
+
+### Comando general para volver a main (si algo se rompe)
+```bash
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/main && npm install && bash start.sh
 ```
