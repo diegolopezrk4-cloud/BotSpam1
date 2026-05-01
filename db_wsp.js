@@ -178,6 +178,12 @@ function init() {
             code TEXT NOT NULL,
             created_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS registration_codes (
+            telegram_id TEXT NOT NULL,
+            code TEXT UNIQUE NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            used INTEGER DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS user_envio_config (
             user_id TEXT PRIMARY KEY,
             delay_seg INTEGER DEFAULT 10,
@@ -1306,19 +1312,33 @@ function panelLogin(telegramId, password) {
     return { ok: true, telegram_id: user.telegram_id, username: user.username, es_admin: esAdmin };
 }
 
-function panelRegistro(telegramId, password, username) {
+function panelRegistro(telegramId, password, username, codigo) {
     const bcrypt = require("bcryptjs");
-    const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
-    if (existing) return { ok: false, error: "ya_registrado" };
-    const hashed = bcrypt.hashSync(password, 10);
-    db.prepare("INSERT INTO panel_users (telegram_id, username, password) VALUES (?, ?, ?)").run(String(telegramId), username || '', hashed);
-    // Crear usuario principal si no existe y darle 1 dia demo
-    const user = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(String(telegramId));
-    if (!user) {
-        crearUsuario(String(telegramId), username || '');
-        activarMembresia(String(telegramId), 1);
+    const tid = String(telegramId).trim();
+    // Admin no necesita codigo de verificacion
+    const esAdmin = config.ADMIN_TELEGRAM_IDS && config.ADMIN_TELEGRAM_IDS.includes(tid);
+    if (!esAdmin) {
+        if (!codigo) return { ok: false, error: "codigo_requerido" };
+        const v = validarCodigoRegistro(codigo);
+        if (!v.ok) return { ok: false, error: v.error };
+        // El codigo debe pertenecer al mismo Telegram ID
+        if (v.telegram_id !== tid) return { ok: false, error: "El codigo no corresponde a tu ID de Telegram" };
     }
-    return { ok: true };
+    const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(tid);
+    if (existing) return { ok: false, error: "ya_registrado" };
+    // Validar que telegram_id sea numerico (solo digitos, 5-15 chars)
+    if (!/^\d{5,15}$/.test(tid)) return { ok: false, error: "El ID de Telegram debe ser un numero de 5-15 digitos" };
+    const hashed = bcrypt.hashSync(password, 10);
+    db.prepare("INSERT INTO panel_users (telegram_id, username, password) VALUES (?, ?, ?)").run(tid, username || '', hashed);
+    // Marcar codigo como usado
+    if (!esAdmin && codigo) marcarCodigoRegistroUsado(codigo);
+    // Crear usuario principal si no existe y darle 1 dia demo
+    const user = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(tid);
+    if (!user) {
+        crearUsuario(tid, username || '');
+        activarMembresia(tid, 1);
+    }
+    return { ok: true, telegram_id: tid };
 }
 
 function panelCambiarPassword(telegramId, oldPass, newPass) {
@@ -1374,6 +1394,47 @@ function panelResetPassword(telegramId, code, newPass) {
     db.prepare("UPDATE panel_users SET password = ? WHERE telegram_id = ?").run(hashed, String(telegramId));
     db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(String(telegramId));
     return { ok: true };
+}
+
+// --- REGISTRATION CODES (Verificacion de registro) ---
+function generarCodigoRegistro(telegramId) {
+    const crypto = require("crypto");
+    const tid = String(telegramId).trim();
+    // Invalidar codigos previos no usados de este usuario
+    db.prepare("DELETE FROM registration_codes WHERE telegram_id = ? AND used = 0").run(tid);
+    // Generar codigo unico REG-XXXXXX
+    let code;
+    for (let i = 0; i < 50; i++) {
+        code = "REG-" + crypto.randomBytes(3).toString("hex").toUpperCase().slice(0, 6);
+        const exists = db.prepare("SELECT 1 FROM registration_codes WHERE code = ?").get(code);
+        if (!exists) break;
+        if (i === 49) throw new Error("No se pudo generar codigo unico de registro");
+    }
+    db.prepare("INSERT INTO registration_codes (telegram_id, code) VALUES (?, ?)").run(tid, code);
+    return code;
+}
+
+function validarCodigoRegistro(code) {
+    const row = db.prepare("SELECT * FROM registration_codes WHERE code = ? AND used = 0").get(String(code).trim());
+    if (!row) return { ok: false, error: "Codigo invalido o ya usado" };
+    // Verificar que no haya expirado (30 minutos)
+    const created = new Date(row.created_at + "Z");
+    const now = new Date();
+    const diffMin = (now - created) / 60000;
+    if (diffMin > 30) {
+        db.prepare("DELETE FROM registration_codes WHERE code = ?").run(row.code);
+        return { ok: false, error: "Codigo expirado. Genera uno nuevo con /me en el bot." };
+    }
+    return { ok: true, telegram_id: row.telegram_id, code: row.code };
+}
+
+function marcarCodigoRegistroUsado(code) {
+    db.prepare("UPDATE registration_codes SET used = 1 WHERE code = ?").run(String(code).trim());
+}
+
+function limpiarCodigosRegistroExpirados() {
+    db.prepare("DELETE FROM registration_codes WHERE used = 0 AND created_at < datetime('now', '-30 minutes')").run();
+    db.prepare("DELETE FROM registration_codes WHERE used = 1 AND created_at < datetime('now', '-1 day')").run();
 }
 
 function checkMembresia(userId) {
@@ -2069,4 +2130,6 @@ module.exports = {
     getSellerInvitesCount, getSellerInvites, registrarSellerInvite, isSellerUser,
     // Seller codes
     generarSellerCode, getSellerCodes, getSellerCodesPendientes, canjearSellerCode, eliminarSellerCode,
+    // Registration codes (verificacion de registro)
+    generarCodigoRegistro, validarCodigoRegistro, marcarCodigoRegistroUsado, limpiarCodigosRegistroExpirados,
 };

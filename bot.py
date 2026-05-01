@@ -258,6 +258,69 @@ async def cb_main_menu(call: types.CallbackQuery, state: FSMContext):
     await safe_answer(call)
 
 # ╔══════════════════════════════════════╗
+# ║    /me — ID + CODIGO VERIFICACION   ║
+# ╚══════════════════════════════════════╝
+@dp.message(Command("me"))
+async def cmd_me(msg: types.Message):
+    uid = msg.from_user.id
+    nombre = msg.from_user.first_name or ""
+    # Generar codigo de verificacion para registro via API WSP
+    code = None
+    try:
+        async with aiohttp.ClientSession() as session:
+            r = await session.post(
+                "http://127.0.0.1:3000/api/generar_codigo_registro",
+                json={"telegram_id": str(uid)},
+                headers={"x-internal-service": "telegram-bot"},
+                timeout=aiohttp.ClientTimeout(total=10)
+            )
+            data = await r.json()
+            if data.get("ok"):
+                code = data["code"]
+            elif data.get("error") == "ya_registrado":
+                await msg.answer(
+                    f"📋 *Tu informacion:*\n\n"
+                    f"🆔 *Tu ID de Telegram:* `{uid}`\n"
+                    f"👤 *Nombre:* {nombre}\n\n"
+                    f"✅ Ya tienes cuenta registrada en el panel.\n"
+                    f"Usa tu ID y contrasena para iniciar sesion.",
+                    parse_mode="Markdown"
+                )
+                return
+    except Exception as e:
+        logger.error(f"Error generando codigo de registro: {e}")
+
+    if code:
+        await msg.answer(
+            f"📋 *Tu informacion:*\n\n"
+            f"🆔 *Tu ID de Telegram:* `{uid}`\n"
+            f"👤 *Nombre:* {nombre}\n\n"
+            f"🔑 *Tu codigo de verificacion:* `{code}`\n\n"
+            f"📝 *Para registrarte en el panel:*\n"
+            f"1. Ve al panel web\n"
+            f"2. Click en 'Crear cuenta'\n"
+            f"3. Ingresa tu ID: `{uid}`\n"
+            f"4. Ingresa el codigo: `{code}`\n"
+            f"5. Elige un nombre de usuario y contrasena\n\n"
+            f"⏰ El codigo expira en 30 minutos.",
+            parse_mode="Markdown"
+        )
+    else:
+        await msg.answer(
+            f"📋 *Tu informacion:*\n\n"
+            f"🆔 *Tu ID de Telegram:* `{uid}`\n"
+            f"👤 *Nombre:* {nombre}\n\n"
+            f"⚠️ No se pudo generar codigo de verificacion.\n"
+            f"Intenta de nuevo en unos segundos.",
+            parse_mode="Markdown"
+        )
+
+@dp.message(Command("miid"))
+async def cmd_miid(msg: types.Message):
+    """Alias de /me para compatibilidad"""
+    await cmd_me(msg)
+
+# ╔══════════════════════════════════════╗
 # ║    SECCION: CUENTAS                 ║
 # ╚══════════════════════════════════════╝
 async def build_cuentas_view(user_id):

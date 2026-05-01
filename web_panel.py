@@ -1034,6 +1034,37 @@ async def api_tg_send_recovery(request):
 
 
 # ─────────────────────────────────────────
+#   NOTIFICAR REGISTRO NUEVO AL ADMIN
+# ─────────────────────────────────────────
+
+async def api_tg_notificar_registro(request):
+    body = await request.json()
+    telegram_id = body.get("telegram_id", "")
+    username = body.get("username", "")
+    if not telegram_id:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    if not aiogram_bot:
+        return web.json_response({"ok": False, "error": "Bot no disponible"}, status=503)
+    try:
+        from datetime import datetime, timezone, timedelta
+        peru_tz = timezone(timedelta(hours=-5))
+        ahora = datetime.now(peru_tz).strftime("%d/%m/%Y %H:%M")
+        await aiogram_bot.send_message(
+            ADMIN_ID,
+            f"🆕 <b>Nuevo registro en el panel</b>\n\n"
+            f"🆔 ID: <code>{telegram_id}</code>\n"
+            f"👤 Usuario: {username or '(sin nombre)'}\n"
+            f"📅 Fecha: {ahora}\n"
+            f"📋 Plan: Demo 1 dia",
+            parse_mode="HTML"
+        )
+        return web.json_response({"ok": True})
+    except Exception as e:
+        logger.error(f"Error notificando registro al admin: {e}")
+        return web.json_response({"ok": False, "error": str(e)})
+
+
+# ─────────────────────────────────────────
 #   SERVIDOR WEB
 # ─────────────────────────────────────────
 
@@ -1118,6 +1149,9 @@ def create_app():
 
     # Recovery
     app.router.add_post("/api/tg/send_recovery", api_tg_send_recovery)
+
+    # Notificar registro
+    app.router.add_post("/api/tg/notificar_registro", api_tg_notificar_registro)
 
     # Detectar
     app.router.add_get("/api/tg/detectar", api_tg_detectar)
