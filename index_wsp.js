@@ -726,24 +726,17 @@ poll();
                 }
             }
 
-||||||| parent of 95dffc5 (fix: remove WSP chat feature, fix campaign reposo timer, add iniciar todas, order campaigns)
-            // GET /api/chats_personales?u=USER_ID&cuenta=X — Listar chats personales
+            // GET /api/chats_personales — List personal chats for Envio Personal
             if (url.pathname === "/api/chats_personales" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 const cuenta = url.searchParams.get("cuenta");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 try {
                     let sock;
-                    if (cuenta) {
-                        sock = await motor.getOrConnectClient(userId, cuenta);
-                    } else if (botSock) {
-                        sock = botSock;
-                    }
+                    if (cuenta) { sock = await motor.getOrConnectClient(userId, cuenta); }
+                    else if (botSock) { sock = botSock; }
                     let chats = [];
-                    if (sock) {
-                        chats = await motor.listarChatsPersonales(sock);
-                    }
-                    // Also include manually added numbers
+                    if (sock) { chats = await motor.listarChatsPersonales(sock); }
                     if (cuenta) {
                         const manuales = db.getNumerosManuales(userId, cuenta);
                         const existingJids = new Set(chats.map(c => c.jid));
@@ -755,37 +748,7 @@ poll();
                     }
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, total: chats.length, chats, cuenta }));
-                } catch (e) {
-                    res.writeHead(500);
-                    return res.end(JSON.stringify({ ok: false, error: e.message }));
-                }
-            }
-
-            // POST /api/chat/enviar — Enviar mensaje a un chat especifico (JID)
-            if (url.pathname === "/api/chat/enviar" && req.method === "POST") {
-                const body = await readBody();
-                if (!body.u || !body.jid || !body.mensaje) {
-                    res.writeHead(400);
-                    return res.end(JSON.stringify({ ok: false, error: "falta u, jid o mensaje" }));
-                }
-                try {
-                    let sock;
-                    if (body.cuenta) {
-                        sock = await motor.getOrConnectClient(body.u, body.cuenta);
-                    } else if (botSock) {
-                        sock = botSock;
-                    }
-                    if (!sock || !sock.user) {
-                        res.writeHead(503);
-                        return res.end(JSON.stringify({ ok: false, error: "Cuenta no conectada" }));
-                    }
-                    const result = await sock.sendMessage(body.jid, { text: body.mensaje });
-                    res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, msgId: result?.key?.id }));
-                } catch (e) {
-                    res.writeHead(500);
-                    return res.end(JSON.stringify({ ok: false, error: e.message }));
-                }
+                } catch (e) { res.writeHead(500); return res.end(JSON.stringify({ ok: false, error: e.message })); }
             }
 
             // POST /api/enviar_personal — Enviar mensaje a chats personales

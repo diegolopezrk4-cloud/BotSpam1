@@ -1094,6 +1094,30 @@ function getCampanasActivas() {
 // ============================================================
 const envioPersonalActivo = {}; // { userId: { running, cancel } }
 
+// Minimal contact lister for envio personal (uses store.contacts if available)
+async function listarChatsPersonales(sock) {
+    const chats = [];
+    try {
+        const contacts = sock?.store?.contacts || {};
+        for (const [id, c] of Object.entries(contacts)) {
+            if (id && id.endsWith("@s.whatsapp.net") && id !== "status@broadcast") {
+                const num = id.replace(/@s\.whatsapp\.net$/, "");
+                chats.push({ jid: id, nombre: c.name || c.notify || num, numero: num });
+            }
+        }
+        if (!chats.length && sock?.fetchAllContacts) {
+            const fc = await sock.fetchAllContacts().catch(() => []);
+            for (const c of fc) {
+                if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                    const num = c.id.replace(/@s\.whatsapp\.net$/, "");
+                    chats.push({ jid: c.id, nombre: c.name || c.notify || num, numero: num });
+                }
+            }
+        }
+    } catch (e) { console.error(`Error listando chats: ${e.message}`); }
+    return chats;
+}
+
 async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, batchSize, delayMinutes) {
     if (envioPersonalActivo[userId]) return false;
     if (!batchSize) {
@@ -1715,6 +1739,7 @@ module.exports = {
     detenerReporteDiario,
     iniciarResponder,
     detenerResponder,
+    listarChatsPersonales,
     enviarAPersonales,
     enviarASeleccionados,
     detenerEnvioPersonal,
