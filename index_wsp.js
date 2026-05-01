@@ -705,12 +705,11 @@ poll();
             if (url.pathname === "/api/panel_registro" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta password" })); }
-                // Si no trae codigo, necesita telegram_id manualmente (registro sin verificar)
-                if (!body.codigo && !body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta codigo de registro o telegram_id" })); }
-                const r = db.panelRegistro(body.telegram_id || '', body.password, body.username || '', body.codigo || '');
-                // Sync 1-day demo to TG database
+                if (!body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                const r = db.panelRegistro(body.telegram_id, body.password, body.username || '');
                 if (r.ok) {
-                    const regTid = r.telegram_id || body.telegram_id;
+                    const regTid = r.telegram_id;
+                    // Sync 1-day demo to TG database
                     try {
                         const http = require("http");
                         const syncData = JSON.stringify({ telegram_id: regTid, dias: 1, plan: "demo", username: body.username || "" });
@@ -719,21 +718,20 @@ poll();
                         syncReq.write(syncData);
                         syncReq.end();
                     } catch (_) {}
-                    // Notify admin about new registration
-                    if (r.verificado) {
+                    // Send verification code to user via TG bot
+                    if (r.code) {
                         try {
-                            const config = require("./config_wsp");
-                            const adminId = config.ADMIN_TELEGRAM_IDS[0];
-                            if (adminId && botSock) {
-                                botSock.sendMessage(adminId + "@s.whatsapp.net", {
-                                    text: `🆕 *Nuevo registro verificado*\n\n👤 ${body.username || 'Sin nombre'}\n🆔 ${regTid}\n\nUsuario verificado y con demo de 1 dia.`,
-                                }).catch(() => {});
-                            }
+                            const http = require("http");
+                            const tgData = JSON.stringify({ admin_id: regTid, message: `🔐 *Codigo de verificacion*\n\nTu codigo: *${r.code}*\n\n⏰ Expira en 5 minutos.\nIngresalo en la pagina para completar tu registro.` });
+                            const tgReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/notify_admin", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(tgData) } });
+                            tgReq.on("error", () => {});
+                            tgReq.write(tgData);
+                            tgReq.end();
                         } catch (_) {}
                     }
                 }
                 res.writeHead(200);
-                return res.end(JSON.stringify(r));
+                return res.end(JSON.stringify({ ok: r.ok, error: r.error, verificado: r.verificado }));
             }
             if (url.pathname === "/api/panel_cambiar_password" && req.method === "POST") {
                 const body = await readBody();
@@ -2384,6 +2382,25 @@ poll();
                 } catch (_) {}
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, msg: "Cuenta verificada exitosamente" }));
+            }
+
+            // POST /api/reenviar_codigo_registro — Generar nuevo codigo y enviar al TG del usuario
+            if (url.pathname === "/api/reenviar_codigo_registro" && req.method === "POST") {
+                const body = await readBody();
+                const tid = String(body.telegram_id || "").trim();
+                if (!tid || !/^\d{5,15}$/.test(tid)) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Telegram ID invalido" })); }
+                const code = db.generarCodigoRegistro(tid);
+                // Send code via TG bot
+                try {
+                    const http = require("http");
+                    const tgData = JSON.stringify({ admin_id: tid, message: `🔐 *Codigo de verificacion*\n\nTu codigo: *${code}*\n\n⏰ Expira en 5 minutos.\nIngresalo en la pagina para verificar tu cuenta.` });
+                    const tgReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/notify_admin", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(tgData) } });
+                    tgReq.on("error", () => {});
+                    tgReq.write(tgData);
+                    tgReq.end();
+                } catch (_) {}
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
             }
 
             // Endpoint no encontrado

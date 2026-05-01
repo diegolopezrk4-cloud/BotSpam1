@@ -1330,31 +1330,22 @@ function panelLogin(telegramId, password) {
     return { ok: true, telegram_id: user.telegram_id, username: user.username, es_admin: esAdmin, verificado };
 }
 
-function panelRegistro(telegramId, password, username, codigo) {
+function panelRegistro(telegramId, password, username) {
     const bcrypt = require("bcryptjs");
-    // Si se proporciona codigo de registro, verificar primero
-    if (codigo) {
-        const v = verificarCodigoRegistro(codigo);
-        if (!v.ok) return v;
-        telegramId = v.telegram_id; // Usar el ID del codigo
-    }
     const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
     if (existing) return { ok: false, error: "ya_registrado" };
-    // Validar que sea un ID numerico valido
     if (!/^\d{5,15}$/.test(String(telegramId))) return { ok: false, error: "Telegram ID invalido (solo digitos, 5-15 caracteres)" };
     const hashed = bcrypt.hashSync(password, 10);
-    const verificado = codigo ? 1 : 0; // Si viene con codigo, ya esta verificado
-    db.prepare("INSERT INTO panel_users (telegram_id, username, password, verificado) VALUES (?, ?, ?, ?)").run(String(telegramId), username || '', hashed, verificado);
-    if (codigo) {
-        usarCodigoRegistro(codigo);
-    }
+    db.prepare("INSERT INTO panel_users (telegram_id, username, password, verificado) VALUES (?, ?, ?, 0)").run(String(telegramId), username || '', hashed);
     // Crear usuario principal si no existe y darle 1 dia demo
     const user = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(String(telegramId));
     if (!user) {
         crearUsuario(String(telegramId), username || '');
         activarMembresia(String(telegramId), 1);
     }
-    return { ok: true, verificado: verificado === 1, telegram_id: String(telegramId) };
+    // Generate verification code and return it (to be sent to TG)
+    const code = generarCodigoRegistro(String(telegramId));
+    return { ok: true, verificado: false, telegram_id: String(telegramId), code };
 }
 
 function panelCambiarPassword(telegramId, oldPass, newPass) {
@@ -2040,8 +2031,8 @@ function generarCodigoRegistro(telegramId) {
     const tid = String(telegramId);
     // Invalidar codigos previos no usados de este usuario
     db.prepare("DELETE FROM registration_codes WHERE telegram_id = ? AND used = 0").run(tid);
-    // Cleanup codigos expirados globalmente (>30 min)
-    try { db.prepare("DELETE FROM registration_codes WHERE datetime(created_at) < datetime('now', '-30 minutes') AND used = 0").run(); } catch (e) {}
+    // Cleanup codigos expirados globalmente (>5 min)
+    try { db.prepare("DELETE FROM registration_codes WHERE datetime(created_at) < datetime('now', '-5 minutes') AND used = 0").run(); } catch (e) {}
     const code = "REG-" + crypto.randomBytes(3).toString("hex").toUpperCase().slice(0, 6);
     db.prepare("INSERT INTO registration_codes (telegram_id, code) VALUES (?, ?)").run(tid, code);
     return code;
@@ -2051,9 +2042,9 @@ function verificarCodigoRegistro(code) {
     const row = db.prepare("SELECT * FROM registration_codes WHERE code = ? AND used = 0").get(String(code));
     if (!row) return { ok: false, error: "Codigo invalido o ya usado" };
     const created = new Date(row.created_at + "Z");
-    if (Date.now() - created.getTime() > 30 * 60 * 1000) {
+    if (Date.now() - created.getTime() > 5 * 60 * 1000) {
         db.prepare("DELETE FROM registration_codes WHERE code = ?").run(String(code));
-        return { ok: false, error: "Codigo expirado (max 30 min)" };
+        return { ok: false, error: "Codigo expirado (max 5 min)" };
     }
     return { ok: true, telegram_id: row.telegram_id };
 }

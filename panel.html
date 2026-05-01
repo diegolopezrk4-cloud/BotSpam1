@@ -318,25 +318,35 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="logo">📝</div>
     <h1>Crear Cuenta</h1>
     <p class="subtitle">Registrate para acceder al panel — Demo 1 dia gratis</p>
-    <div class="tg-id-help" id="tgIdHelp">
-      <h4>📌 Como registrarse</h4>
-      <ol>
-        <li>Abre Telegram y busca el bot: <a href="https://t.me/BotSpamJM_bot" target="_blank">@BotSpamJM_bot</a></li>
-        <li>Envia el comando <b>/registro</b> para obtener tu codigo de registro</li>
-        <li>Copia el codigo (ej: REG-A3K9X2) y pegalo aqui abajo</li>
-      </ol>
-      <p style="margin-top:10px;font-size:12px;color:var(--text2)">Tambien puedes contactar al creador para ayuda: <a href="https://t.me/JhonnyVip05" target="_blank">@JhonnyVip05</a></p>
+    <!-- Step 1: ID + username + password -->
+    <div id="regStep1">
+      <div class="tg-id-help" id="tgIdHelp">
+        <h4>📌 Como obtener tu ID de Telegram</h4>
+        <ol>
+          <li>Abre Telegram y busca el bot: <a href="https://t.me/BotSpamJM_bot" target="_blank">@BotSpamJM_bot</a></li>
+          <li>Inicia el bot con <b>/start</b> y usa <b>/miid</b> para obtener tu ID numerico</li>
+        </ol>
+        <p style="margin-top:10px;font-size:12px;color:var(--text2)">Tambien puedes contactar al creador para ayuda: <a href="https://t.me/JhonnyVip05" target="_blank">@JhonnyVip05</a></p>
+      </div>
+      <input type="text" id="regTelegramId" placeholder="Tu ID de Telegram (numerico)" autocomplete="off">
+      <input type="text" id="regUsername" placeholder="Nombre de usuario" autocomplete="off">
+      <input type="password" id="regPass" placeholder="Crear contrasena">
+      <input type="password" id="regPass2" placeholder="Confirmar contrasena">
+      <ul class="password-rules">
+        <li>Minimo 4 caracteres</li>
+        <li>Obtendras 1 dia de demo gratis al registrarte</li>
+      </ul>
+      <button class="btn-main" onclick="doRegisterStep1()" id="btnRegister">Registrarse</button>
     </div>
-    <input type="text" id="regCode" placeholder="Codigo de registro (REG-XXXXXX)" autocomplete="off" style="text-transform:uppercase">
-    <input type="text" id="regUsername" placeholder="Nombre de usuario" autocomplete="off">
-    <input type="password" id="regPass" placeholder="Crear contrasena">
-    <input type="password" id="regPass2" placeholder="Confirmar contrasena">
-    <ul class="password-rules">
-      <li>Minimo 4 caracteres</li>
-      <li>Obtendras 1 dia de demo gratis al registrarte</li>
-      <li>El codigo expira en 30 minutos</li>
-    </ul>
-    <button class="btn-main" onclick="doRegister()" id="btnRegister">Registrarse</button>
+    <!-- Step 2: Enter verification code -->
+    <div id="regStep2" style="display:none">
+      <p style="color:var(--accent2);font-size:13px;margin-bottom:12px">📨 Codigo de verificacion enviado a tu Telegram: <b id="regIdDisplay"></b></p>
+      <p style="color:var(--text2);font-size:12px;margin-bottom:12px">El codigo expira en 5 minutos. Si no lo recibes, verifica que iniciaste el bot @BotSpamJM_bot en Telegram.</p>
+      <input type="text" id="regCode" placeholder="Codigo de verificacion (REG-XXXXXX)" autocomplete="off" style="text-transform:uppercase;text-align:center;font-size:18px;letter-spacing:4px">
+      <button class="btn-main" onclick="doRegisterStep2()" id="btnRegVerify">Verificar y Entrar</button>
+      <div class="divider"></div>
+      <button class="link-btn" onclick="doResendRegCode()" id="btnResendCode">Reenviar codigo</button>
+    </div>
     <div class="divider"></div>
     <button class="link-btn" onclick="showLogin()">Ya tengo cuenta — Iniciar Sesion</button>
     <div style="margin-top:12px"><button class="link-btn" onclick="showPlatformSelector()" style="font-size:12px">⬅ Cambiar plataforma</button></div>
@@ -391,17 +401,12 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="logo">🔐</div>
     <h1>Verifica tu Cuenta</h1>
     <p class="subtitle">Tu cuenta necesita verificacion para poder usar el panel.</p>
-    <div class="tg-id-help">
-      <h4>📌 Como verificar</h4>
-      <ol>
-        <li>Abre Telegram y busca el bot: <a href="https://t.me/BotSpamJM_bot" target="_blank">@BotSpamJM_bot</a></li>
-        <li>Envia el comando <b>/registro</b> para obtener tu codigo de verificacion</li>
-        <li>Copia el codigo (ej: REG-A3K9X2) y pegalo aqui abajo</li>
-      </ol>
-    </div>
-    <input type="text" id="verifyCode" placeholder="Codigo de verificacion (REG-XXXXXX)" autocomplete="off" style="text-transform:uppercase">
+    <p style="color:var(--accent2);font-size:13px;margin-bottom:12px">📨 Se envio un codigo de verificacion a tu Telegram.</p>
+    <p style="color:var(--text2);font-size:12px;margin-bottom:12px">El codigo expira en 5 minutos. Si no lo recibes, haz clic en "Reenviar codigo".</p>
+    <input type="text" id="verifyCode" placeholder="Codigo de verificacion (REG-XXXXXX)" autocomplete="off" style="text-transform:uppercase;text-align:center;font-size:18px;letter-spacing:4px">
     <button class="btn-main" onclick="doVerify()" id="btnVerify">Verificar Cuenta</button>
     <div class="divider"></div>
+    <button class="link-btn" onclick="doResendVerifyCode()" id="btnResendVerify">Reenviar codigo</button>
     <button class="link-btn" onclick="doLogout()">Cerrar Sesion</button>
     <div class="auth-error" id="verifyError"></div>
     <div class="auth-success" id="verifySuccess"></div>
@@ -1832,26 +1837,74 @@ async function doLogin(){
   showApp();
 }
 
-async function doRegister(){
-  const codigo=$('regCode').value.trim().toUpperCase(),username=$('regUsername').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
+let _regTid='',_regUser='',_regPass='';
+async function doRegisterStep1(){
+  const tid=$('regTelegramId').value.trim(),username=$('regUsername').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
   hideMsg('regError');hideMsg('regSuccess');
-  if(!codigo||!username||!pass){showErr('regError','Completa todos los campos (codigo, nombre, contrasena)');return}
+  if(!tid||!username||!pass){showErr('regError','Completa todos los campos (ID, nombre, contrasena)');return}
+  if(!/^\d{5,15}$/.test(tid)){showErr('regError','El ID de Telegram debe ser numerico (5-15 digitos)');return}
   if(pass.length<4){showErr('regError','La contrasena debe tener minimo 4 caracteres');return}
   if(pass!==pass2){showErr('regError','Las contrasenas no coinciden');return}
   $('btnRegister').disabled=true;$('btnRegister').textContent='Registrando...';
-  const r=await api('/api/panel_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codigo,password:pass,username})});
+  const r=await api('/api/panel_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:tid,password:pass,username})});
   $('btnRegister').disabled=false;$('btnRegister').textContent='Registrarse';
   if(!r.ok){
-    const msgs={'ya_registrado':'Ya tienes cuenta. Inicia sesion.','Codigo invalido o ya usado':'Codigo invalido o ya usado. Genera uno nuevo con /registro en el bot.','Codigo expirado (max 30 min)':'Codigo expirado. Genera uno nuevo con /registro en el bot.'};
+    const msgs={'ya_registrado':'Ya tienes cuenta. Inicia sesion.'};
     showErr('regError',msgs[r.error]||r.error||'Error');return;
   }
-  showMsg('regSuccess','Registro exitoso! Cuenta verificada y demo de 1 dia activado. Inicia sesion.');
-  setTimeout(()=>{showLogin()},2000);
+  _regTid=tid;_regUser=username;_regPass=pass;
+  $('regIdDisplay').textContent=tid;
+  $('regStep1').style.display='none';$('regStep2').style.display='block';
+  hideMsg('regError');
+  showMsg('regSuccess','Cuenta creada! Revisa tu Telegram para el codigo de verificacion.');
+}
+async function doRegisterStep2(){
+  hideMsg('regError');hideMsg('regSuccess');
+  const code=$('regCode').value.trim().toUpperCase();
+  if(!code){showErr('regError','Ingresa el codigo de verificacion que recibiste en Telegram');return}
+  $('btnRegVerify').disabled=true;$('btnRegVerify').textContent='Verificando...';
+  const r=await api('/api/verificar_cuenta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codigo:code,telegram_id:_regTid})});
+  $('btnRegVerify').disabled=false;$('btnRegVerify').textContent='Verificar y Entrar';
+  if(!r.ok){showErr('regError',r.error||'Codigo invalido o expirado');return}
+  showMsg('regSuccess','Cuenta verificada! Entrando al panel...');
+  const lr=await api('/api/panel_login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:_regTid,password:_regPass})});
+  if(lr.ok){
+    userId=_regTid;esAdmin=lr.es_admin||false;esSeller=lr.es_seller||false;
+    localStorage.setItem('panel_uid',_regTid);localStorage.setItem('panel_token',lr.token);
+    localStorage.setItem('panel_admin',esAdmin?'1':'0');localStorage.setItem('panel_seller',esSeller?'1':'0');
+    localStorage.setItem('panel_verificado','1');
+    setTimeout(()=>{showApp()},1500);
+  } else {
+    showMsg('regSuccess','Cuenta verificada! Ahora inicia sesion.');
+    setTimeout(()=>{showLogin();$('loginId').value=_regTid},2000);
+  }
+}
+async function doResendRegCode(){
+  hideMsg('regError');hideMsg('regSuccess');
+  if(!_regTid){showErr('regError','Error: no hay ID registrado');return}
+  $('btnResendCode').disabled=true;$('btnResendCode').textContent='Enviando...';
+  const r=await api('/api/reenviar_codigo_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:_regTid})});
+  $('btnResendCode').disabled=false;$('btnResendCode').textContent='Reenviar codigo';
+  if(!r.ok){showErr('regError',r.error||'Error al reenviar');return}
+  showMsg('regSuccess','Nuevo codigo enviado a tu Telegram. El anterior fue desactivado.');
 }
 
 function showVerificationScreen(){
   document.querySelectorAll('.auth-container').forEach(el=>el.style.display='none');
   $('authVerify').style.display='flex';$('app').style.display='none';
+  _sendVerifyCodeAuto();
+}
+async function _sendVerifyCodeAuto(){
+  if(!userId)return;
+  try{await api('/api/reenviar_codigo_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId})})}catch(_){}
+}
+async function doResendVerifyCode(){
+  hideMsg('verifyError');hideMsg('verifySuccess');
+  $('btnResendVerify').disabled=true;$('btnResendVerify').textContent='Enviando...';
+  const r=await api('/api/reenviar_codigo_registro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId})});
+  $('btnResendVerify').disabled=false;$('btnResendVerify').textContent='Reenviar codigo';
+  if(!r.ok){showErr('verifyError',r.error||'Error al reenviar');return}
+  showMsg('verifySuccess','Nuevo codigo enviado a tu Telegram.');
 }
 async function doVerify(){
   hideMsg('verifyError');hideMsg('verifySuccess');
