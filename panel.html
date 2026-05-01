@@ -5005,6 +5005,13 @@ async function loadAdminPagos(){
   let h='';
   const pStats=pagosR.ok?pagosR.stats:{};
   const cStats=compR.ok?compR.stats:{};
+  // Fallback: count from actual data if stats report 0 but data exists
+  if(compR.ok&&compR.comprobantes&&compR.comprobantes.length){
+    const realPend=compR.comprobantes.filter(c=>c.estado==='pendiente').length;
+    const realAprob=compR.comprobantes.filter(c=>c.estado==='aprobado').length;
+    if(!cStats.pendientes&&realPend)cStats.pendientes=realPend;
+    if(!cStats.total_aprobados&&realAprob)cStats.total_aprobados=realAprob;
+  }
   h+=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px">
     <div style="background:var(--card);padding:15px;border-radius:10px;text-align:center;border:1px solid var(--accent)">
       <div style="font-size:24px;font-weight:bold;color:var(--success)">${pStats.total_pagos||0}</div><div style="font-size:12px;color:var(--text2)">Pagos Crypto</div>
@@ -5084,7 +5091,7 @@ async function rechazarComprobante(id){
 
 function verComprobante(id){
   showModal(`<h3>🖼 Comprobante #${id}</h3>
-    <div style="text-align:center;padding:10px"><img src="/api/comprobante/imagen?id=${id}" style="max-width:100%;max-height:70vh;border-radius:8px;border:1px solid var(--border)" onerror="this.parentElement.innerHTML='<p style=color:var(--danger)>No se pudo cargar la imagen</p>'"></div>
+    <div style="text-align:center;padding:10px"><img src="/api/comprobante/imagen?id=${id}&u=${userId}" style="max-width:100%;max-height:70vh;border-radius:8px;border:1px solid var(--border)" onerror="this.parentElement.innerHTML='<p style=color:var(--danger)>No se pudo cargar la imagen. Posiblemente el archivo no existe en el servidor.</p>'"></div>
     <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
 }
 

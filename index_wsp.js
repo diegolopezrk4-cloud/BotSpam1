@@ -2793,16 +2793,17 @@ poll();
                 if (!id) { res.writeHead(400); return res.end("Falta id"); }
                 const comp = db.getComprobante(id);
                 if (!comp || !comp.imagen_path) { res.writeHead(404); return res.end("No encontrado"); }
-                // Admin or owner can view
-                const isAdmin = checkAdmin(url.searchParams.get("admin") || req._authUser);
-                if (!isAdmin && String(comp.user_id) !== String(req._authUser)) { res.writeHead(403); return res.end("No autorizado"); }
+                // Admin or owner can view (accept u param for img tag requests that don't send auth header)
+                const requesterId = url.searchParams.get("u") || req._authUser;
+                const isAdmin = checkAdmin(requesterId);
+                if (!isAdmin && String(comp.user_id) !== String(requesterId)) { res.writeHead(403); return res.end("No autorizado"); }
                 try {
                     const imgData = fs.readFileSync(comp.imagen_path);
                     const ext = comp.imagen_path.split(".").pop().toLowerCase();
                     const mimeTypes = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
                     res.writeHead(200, { "Content-Type": mimeTypes[ext] || "image/jpeg" });
                     return res.end(imgData);
-                } catch (_) { res.writeHead(404); return res.end("Imagen no encontrada"); }
+                } catch (_) { res.writeHead(404); return res.end("Imagen no encontrada en disco"); }
             }
 
             // GET /api/metodo_pago/qr — Servir imagen QR del metodo de pago
