@@ -870,6 +870,10 @@ function actualizarStatsCampana(campanaId, enviados, errores) {
     db.prepare("UPDATE campanas SET enviados = enviados + ?, errores = errores + ? WHERE id = ?").run(enviados, errores, campanaId);
 }
 
+function getCampanasActivas() {
+    return db.prepare("SELECT c.*, u.wsp_id FROM campanas c JOIN usuarios u ON c.user_id = u.wsp_id WHERE c.activa = 1").all();
+}
+
 function setCampanaActiva(campanaId, activa) {
     if (activa) {
         const inicio = nowPeru();
@@ -2049,7 +2053,7 @@ module.exports = {
     tieneMembresia, getTodosUsuarios,
     getSesiones, agregarSesion, eliminarSesion,
     getGrupos, agregarGrupo, eliminarGrupo, eliminarGrupoPorLink, eliminarTodosGrupos, actualizarGrupoLink,
-    getCampanas, crearCampana, getCampanaById, actualizarStatsCampana,
+    getCampanas, getCampanasActivas, crearCampana, getCampanaById, actualizarStatsCampana,
     setCampanaActiva, actualizarCampanaMensaje, eliminarCampana, clonarCampana, resetearStatsCampana,
     getSesionesCampana, agregarSesionCampana, getGruposCampana, agregarGrupoCampana, eliminarGrupoCampana,
     getCampanaConfig, setCampanaConfig,

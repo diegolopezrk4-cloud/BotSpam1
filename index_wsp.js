@@ -2510,6 +2510,22 @@ async function startBot() {
             } catch (e) {
                 console.log(`   (No se pudo resolver admin JID: ${e.message})`);
             }
+
+            // Notify users about campaigns that were active before restart
+            try {
+                const orphaned = db.getCampanasActivas();
+                for (const c of orphaned) {
+                    db.setCampanaActiva(c.id, false);
+                    try {
+                        await botSock.sendMessage(c.wsp_id, {
+                            text: `⚠️ *Campana '${c.nombre}'* fue detenida por reinicio del servidor.\n\nPuedes reactivarla desde el panel o con /iniciar.`,
+                        });
+                    } catch (e) {}
+                }
+                if (orphaned.length) {
+                    console.log(`[WSP] Notified ${orphaned.length} orphaned campaign(s) stopped by restart`);
+                }
+            } catch (e) {}
         }
 
         if (connection === "close") {

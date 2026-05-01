@@ -723,6 +723,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                     let consecutiveErrors = 0;
                     const MAX_CONSECUTIVE_ERRORS = 5;
 
+                    let skippedAntiDup = 0;
                     for (const grupoLink of gruposActuales) {
                         if (cancelled) break;
 
@@ -748,7 +749,7 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                         // Skip group if no new activity since our last send (avoid duplicate spam)
                         if (!grupoTieneActividadNueva(campanaId, groupJid)) {
-                            console.log(`   [Anti-dup] Grupo ${grupoLink}: sin actividad nueva, saltando`);
+                            skippedAntiDup++;
                             continue;
                         }
 
@@ -874,6 +875,18 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 consecutiveErrors = 0;
                             }
                             await delay(5000);
+                        }
+                    }
+
+                    // Notify if anti-dup skipped groups
+                    if (skippedAntiDup > 0 && !cancelled) {
+                        console.log(`   [Anti-dup] ${skippedAntiDup}/${gruposActuales.length} grupos saltados (sin actividad nueva en 30 min)`);
+                        if (skippedAntiDup === gruposActuales.length) {
+                            try {
+                                await botSock.sendMessage(userId, {
+                                    text: `⏭ *${campana.nombre}* (${currentSock.nombre}): Todos los ${skippedAntiDup} grupos saltados — ya se envio a todos en los ultimos 30 min.\n⏳ Esperando proximo ciclo...`,
+                                });
+                            } catch (e) {}
                         }
                     }
 
