@@ -15,7 +15,15 @@ const reporteInterval = {};  // { userId: intervalId }
 const grupoUltimaActividad = {};
 
 // Limite de envios diarios por cuenta (proteccion anti-ban)
-const LIMITE_ENVIOS_DIARIOS = 500;
+const LIMITE_ENVIOS_DIARIOS_DEFAULT = 500;
+
+function getLimiteEnviosDiarios(userId) {
+    try {
+        const membresia = db.checkMembresia(userId);
+        if (membresia && (membresia.es_admin || membresia.activa)) return Infinity;
+    } catch (e) {}
+    return LIMITE_ENVIOS_DIARIOS_DEFAULT;
+}
 
 // Whole-word matching to avoid partial matches (e.g. 'no' in 'noches')
 function matchWholeWord(text, word) {
@@ -35,9 +43,16 @@ function getSessionDir(userId, nombre) {
     return path.join(config.SESSIONS_DIR, safe);
 }
 
+// Lock to prevent simultaneous reconnection attempts per account
+const reconnectLocks = {};
+
 async function connectClientAccount(userId, nombre, telefono) {
     const sessionDir = getSessionDir(userId, nombre);
     const key = `${userId}_${nombre}`;
+    // Prevent parallel reconnection attempts for the same account
+    if (reconnectLocks[key]) {
+        throw new Error("Ya se esta reconectando esta cuenta. Espera un momento.");
+    }
     fs.mkdirSync(sessionDir, { recursive: true });
 
     async function createSocket() {
@@ -58,12 +73,69 @@ async function connectClientAccount(userId, nombre, telefono) {
             retryRequestDelayMs: 2000,
         });
         sock.ev.on("creds.update", saveCreds);
+
+        // Capture synced chats from WhatsApp via messaging-history.set (Baileys v6.7+)
+        sock.ev.on("messaging-history.set", ({ chats: syncedChats, messages: syncedMsgs }) => {
+            console.log(`[SYNC] ${nombre}: messaging-history.set recibido — ${syncedChats?.length||0} chats, ${syncedMsgs?.length||0} msgs`);
+            if (syncedChats && syncedChats.length) {
+                for (const c of syncedChats) {
+                    if (!c.id || c.id === "status@broadcast") continue;
+                    const isPersonal = c.id.endsWith("@s.whatsapp.net");
+                    const isGroup = c.id.endsWith("@g.us");
+                    if (!isPersonal && !isGroup) continue;
+                    const chatName = c.name || c.subject || c.id.replace(/@.*$/, '');
+                    try { db.saveSyncedChat(userId, nombre, c.id, chatName, c.unreadCount || 0); } catch(e){ console.error('[SYNC] Error guardando chat:', e.message); }
+                }
+            }
+            // Also save messages from history sync
+            if (syncedMsgs && syncedMsgs.length) {
+                for (const msg of syncedMsgs) {
+                    const jid = msg.key?.remoteJid;
+                    if (!jid || jid === "status@broadcast" || !jid.endsWith("@s.whatsapp.net")) continue;
+                    const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+                    if (text) {
+                        const dir = msg.key.fromMe ? 'out' : 'in';
+                        try { db.saveChatMessage(userId, nombre, jid, msg.pushName||'', text, dir); } catch(e){}
+                    }
+                }
+            }
+        });
+        sock.ev.on("chats.upsert", (chats) => {
+            console.log(`[SYNC] ${nombre}: chats.upsert recibido — ${chats?.length||0} chats`);
+            for (const c of chats) {
+                if (!c.id || c.id === "status@broadcast") continue;
+                const isPersonal = c.id.endsWith("@s.whatsapp.net");
+                const isGroup = c.id.endsWith("@g.us");
+                if (!isPersonal && !isGroup) continue;
+                const chatName = c.name || c.subject || c.id.replace(/@.*$/, '');
+                try { db.saveSyncedChat(userId, nombre, c.id, chatName, c.unreadCount || 0); } catch(e){}
+            }
+        });
+        sock.ev.on("chats.update", (chats) => {
+            for (const c of chats) {
+                if (!c.id || c.id === "status@broadcast") continue;
+                const isPersonal = c.id.endsWith("@s.whatsapp.net");
+                const isGroup = c.id.endsWith("@g.us");
+                if (!isPersonal && !isGroup) continue;
+                const chatName = c.name || c.subject || c.id.replace(/@.*$/, '');
+                try { db.saveSyncedChat(userId, nombre, c.id, chatName, c.unreadCount || 0); } catch(e){}
+            }
+        });
+
         // Track group activity from other users for anti-duplicate spam
         sock.ev.on("messages.upsert", ({ messages }) => {
             for (const msg of messages) {
                 const jid = msg.key?.remoteJid;
-                if (jid && jid.endsWith("@g.us") && !msg.key.fromMe && msg.message) {
+                if (!jid || jid === "status@broadcast") continue;
+                if (jid.endsWith("@g.us") && !msg.key.fromMe && msg.message) {
                     registrarActividadGrupo(jid);
+                }
+                // Save incoming personal messages to chat history (not groups)
+                if (jid.endsWith("@s.whatsapp.net") && !msg.key.fromMe && msg.message) {
+                    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || "";
+                    if (text) {
+                        try { db.saveChatMessage(userId, nombre, jid, msg.pushName||'', text, 'in'); } catch(e){}
+                    }
                 }
             }
         });
@@ -343,15 +415,17 @@ function registrarEnvioCampana(campanaId, grupoJid) {
 }
 
 // Check if group had activity from others since our last campaign send
-function grupoTieneActividadNueva(campanaId, grupoJid) {
+// campanaStartTime: timestamp when current campaign run started (to skip stale DB records)
+function grupoTieneActividadNueva(campanaId, grupoJid, campanaStartTime) {
     const row = db.getUltimoEnvioCampana(campanaId, grupoJid);
     if (!row) return true; // never sent = treat as new
     const envioTime = new Date(row.ultimo_envio + "Z").getTime();
+    // If the DB record is from a PREVIOUS run (before this campaign started), allow send
+    if (campanaStartTime && envioTime < campanaStartTime) return true;
     const ultimaActividad = grupoUltimaActividad[grupoJid];
-    // If we sent recently (last 30 min) from THIS campaign, skip even without activity data
     const minutesSinceSend = (Date.now() - envioTime) / 60000;
     if (minutesSinceSend < 30) return false;
-    if (ultimaActividad === undefined) return true; // no data (e.g. after restart) — allow send
+    if (ultimaActividad === undefined) return true;
     return ultimaActividad > envioTime;
 }
 
@@ -491,21 +565,15 @@ function dentroDeHorario(campanaId) {
 // CAMPANA ENGINE con las 10 mejoras
 // ============================================================
 
-// Safe notification helper — handles null botSock and resolves userId to JID
+// Safe notification helper — sends WhatsApp notification with timeout
 async function notificarUsuario(botSock, userId, text) {
     if (!botSock) return;
     try {
-        // If userId looks like a JID already, use it directly
-        let jid = userId;
-        if (!userId.includes("@")) {
-            const results = await botSock.onWhatsApp(userId + "@s.whatsapp.net");
-            if (results && results.length > 0) {
-                jid = results[0].jid;
-            } else {
-                jid = userId + "@s.whatsapp.net";
-            }
-        }
-        await botSock.sendMessage(jid, { text });
+        const jid = userId.includes("@") ? userId : userId + "@s.whatsapp.net";
+        await Promise.race([
+            botSock.sendMessage(jid, { text }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout 10s")), 10000))
+        ]);
     } catch (e) {
         console.log(`[Notif] No se pudo notificar a ${userId}: ${e.message}`);
     }
@@ -515,6 +583,7 @@ function iniciarCampana(campanaId, userId, botSock) {
     if (tareasActivas[campanaId]) return false;
 
     let cancelled = false;
+    const campanaStartTime = Date.now();
     const task = {
         running: true,
         cancel: () => { cancelled = true; },
@@ -533,6 +602,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             let gruposLinks = db.getGruposCampana(campanaId);
             const conf = db.getCampanaConfig(campanaId);
             const horario = db.getCampanaHorario(campanaId);
+            const LIMITE_ENVIOS_DIARIOS = getLimiteEnviosDiarios(userId);
 
             console.log(`[Campana ${campana.nombre}] Sesiones: ${sesionesNombres.length}, Grupos: ${gruposLinks.length}`);
             db.agregarLog(userId, 'campana', `${campana.nombre}: ${sesionesNombres.length} cuenta(s), ${gruposLinks.length} grupo(s)`);
@@ -592,20 +662,23 @@ function iniciarCampana(campanaId, userId, botSock) {
                     horarioMsg = `\n\u{1F553} Horario: ${horario.hora_inicio}:00 - ${horario.hora_fin}:00`;
                 }
                 await notificarUsuario(botSock, userId,
-                    `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS} envios/cuenta`
+                    `\u{1F680} Campana '${campana.nombre}' iniciada!\n\u{1F464} ${socks.length} cuenta(s)\n\u{1F310} ${gruposLinks.length} grupo(s)\n${tiempoMsg}${horarioMsg}\n\n\u{1F4A1} Limite diario: ${LIMITE_ENVIOS_DIARIOS === Infinity ? 'Ilimitado' : LIMITE_ENVIOS_DIARIOS + ' envios/cuenta'}`
                 );
             }
 
+            db.agregarLog(userId, 'campana', `${campana.nombre}: Entrando al bucle de envio...`);
+
             while (!cancelled) {
                 ciclo++;
-                console.log(`[Campana ${campana.nombre}] Ciclo #${ciclo}`);
+                db.agregarLog(userId, 'campana', `${campana.nombre}: Ciclo #${ciclo} iniciando`);
 
                 // MEJORA 3: Verificar horario programado
-                if (!dentroDeHorario(campanaId)) {
+                const enHorario = dentroDeHorario(campanaId);
+                db.agregarLog(userId, 'campana', `${campana.nombre}: Horario OK=${enHorario}`);
+                if (!enHorario) {
                     const hor = db.getCampanaHorario(campanaId);
-                    console.log(`   [Horario] Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00). Esperando...`);
+                    db.agregarLog(userId, 'campana', `${campana.nombre}: Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00). Esperando...`);
                     await notificarUsuario(botSock, userId, `\u{1F553} *${campana.nombre}*: Fuera de horario (${hor.hora_inicio}:00-${hor.hora_fin}:00).\n\u23F3 Esperando hasta la proxima ventana...`);
-                    // Revisar cada 5 minutos
                     while (!dentroDeHorario(campanaId) && !cancelled) {
                         await delay(300 * 1000);
                     }
@@ -614,7 +687,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                 }
 
                 gruposLinks = db.getGruposCampana(campanaId);
+                db.agregarLog(userId, 'campana', `${campana.nombre}: Grupos obtenidos=${gruposLinks.length}`);
                 if (!gruposLinks.length) {
+                    db.agregarLog(userId, 'campana', `${campana.nombre}: Sin grupos, deteniendo`);
                     await notificarUsuario(botSock, userId, `\u26A0 *${campana.nombre}*: No quedan grupos validos. Campana detenida.` + (gruposEliminados.length ? `\n\u{1F5D1} Se eliminaron ${gruposEliminados.length} grupo(s).` : ""));
                     break;
                 }
@@ -623,6 +698,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                 const blacklist = db.getBlacklist(userId);
                 const blLinks = new Set(blacklist.map(b => b.grupo_link));
                 gruposLinks = gruposLinks.filter(gl => !blLinks.has(gl));
+                db.agregarLog(userId, 'campana', `${campana.nombre}: Grupos despues de blacklist=${gruposLinks.length}`);
 
                 for (let si = 0; si < socks.length; si++) {
                     if (cancelled) break;
@@ -630,8 +706,9 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                     // MEJORA 9: Verificar limite diario
                     const enviosHoy = db.getEnviosDiarios(userId, currentSock.nombre);
+                    db.agregarLog(userId, 'campana', `${campana.nombre}: Limite diario ${currentSock.nombre}: ${enviosHoy}/${LIMITE_ENVIOS_DIARIOS}`);
                     if (enviosHoy >= LIMITE_ENVIOS_DIARIOS) {
-                        console.log(`   [Limite] Cuenta '${currentSock.nombre}' alcanzo limite diario (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS})`);
+                        db.agregarLog(userId, 'campana', `${campana.nombre}: Cuenta '${currentSock.nombre}' alcanzo limite diario`);
                         await notificarUsuario(botSock, userId, `\u26A0 *${currentSock.nombre}*: Limite diario alcanzado (${enviosHoy}/${LIMITE_ENVIOS_DIARIOS}). Saltando cuenta.`);
                         continue;
                     }
@@ -640,6 +717,9 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                     let consecutiveErrors = 0;
                     const MAX_CONSECUTIVE_ERRORS = 5;
+
+                    console.log(`[Campana ${campana.nombre}] Cuenta '${currentSock.nombre}' enviando a ${gruposActuales.length} grupo(s)...`);
+                    db.agregarLog(userId, 'campana', `${campana.nombre}: Cuenta '${currentSock.nombre}' enviando a ${gruposActuales.length} grupo(s)...`);
 
                     for (const grupoLink of gruposActuales) {
                         if (cancelled) break;
@@ -652,21 +732,13 @@ function iniciarCampana(campanaId, userId, botSock) {
                             break;
                         }
 
+                        console.log(`   [Campana ${campana.nombre}] Resolviendo JID para: ${grupoLink}`);
                         const groupJid = await resolveGroupJid(currentSock.sock, grupoLink);
                         if (!groupJid) {
-                            db.eliminarGrupoPorLink(userId, grupoLink);
-                            db.eliminarGrupoCampana(campanaId, grupoLink);
+                            console.log(`   [Campana ${campana.nombre}] ERROR: No se pudo resolver JID para ${grupoLink}`);
+                            db.agregarLog(userId, 'campana', `${campana.nombre}: No se pudo resolver JID para ${grupoLink}`);
                             db.actualizarStatsCampana(campanaId, 0, 1);
-                            db.registrarEnvio(userId, campanaId, grupoLink, "error_jid_eliminado");
-                            gruposEliminados.push(grupoLink);
-                            const idx = gruposLinks.indexOf(grupoLink);
-                            if (idx !== -1) gruposLinks.splice(idx, 1);
-                            continue;
-                        }
-
-                        // Skip group if no new activity since our last send (avoid duplicate spam)
-                        if (!grupoTieneActividadNueva(campanaId, groupJid)) {
-                            console.log(`   [Anti-dup] Grupo ${grupoLink}: sin actividad nueva, saltando`);
+                            db.registrarEnvio(userId, campanaId, grupoLink, "error_jid");
                             continue;
                         }
 
@@ -674,9 +746,17 @@ function iniciarCampana(campanaId, userId, botSock) {
                         let mensajeAEnviar = campana.mensaje;
                         let imagenAEnviar = campana.imagen_path;
 
+                        if (!mensajeAEnviar || !mensajeAEnviar.trim()) {
+                            console.log(`   [Campana ${campana.nombre}] ERROR: Mensaje vacio, saltando grupo`);
+                            db.agregarLog(userId, 'campana', `${campana.nombre}: Mensaje vacio`);
+                            continue;
+                        }
+
                         mensajeAEnviar = variarMensaje(mensajeAEnviar, userId);
 
+                        console.log(`   [Campana ${campana.nombre}] Enviando a grupo ${groupJid.slice(0,15)}...`);
                         const result = await sendToGroup(currentSock.sock, groupJid, mensajeAEnviar, imagenAEnviar);
+                        console.log(`   [Campana ${campana.nombre}] Resultado: sent=${result.sent}, delivered=${result.delivered}, reason=${result.reason||'ok'}`);
 
                         if (result.sent && (result.delivered || result.reason === "pending" || result.reason === "no_id")) {
                             registrarEnvioCampana(campanaId, groupJid);
@@ -721,7 +801,13 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 }
                             }
 
-                            if (result.reason === "readonly" || result.reason === "not_member" || result.reason === "forbidden") {
+                            if (result.reason === "readonly") {
+                                console.log(`   [Campana ${campana.nombre}] Grupo ${grupoLink}: solo lectura, saltando (no eliminado)`);
+                                db.agregarLog(userId, 'campana', `${campana.nombre}: Grupo solo-lectura, saltando`);
+                                db.registrarEnvio(userId, campanaId, grupoLink, "readonly_skip");
+                            } else if (result.reason === "not_member" || result.reason === "forbidden") {
+                                console.log(`   [Campana ${campana.nombre}] Grupo ${grupoLink}: ${result.reason}, eliminando`);
+                                db.agregarLog(userId, 'campana', `${campana.nombre}: Grupo ${result.reason}, eliminado`);
                                 db.eliminarGrupoPorLink(userId, grupoLink);
                                 db.eliminarGrupoCampana(campanaId, grupoLink);
                                 db.registrarEnvio(userId, campanaId, grupoLink, `eliminado_${result.reason}`);
@@ -804,23 +890,25 @@ function iniciarCampana(campanaId, userId, botSock) {
                         enviosDiaMsg = "\n\u{1F4CA} Envios hoy: " + enviosDia.map(e => `${e.cuenta_nombre}=${e.total}`).join(", ");
                     }
 
-                    let esperaMsg = numCuentas === 1
-                        ? `\u23F0 Esperando 10 min...`
-                        : `\u23F0 Esperando ${conf.espera_ciclo || 600}s...`;
+                    const esperaSeg = numCuentas === 1 ? 600 : (conf.espera_ciclo || 600);
+                    const esperaMin = Math.round(esperaSeg / 60);
 
-                    await notificarUsuario(botSock, userId, `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c.enviados} env | \u274C ${c.errores} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`);
+                    await notificarUsuario(botSock, userId, `\u23F8 *${campana.nombre}* — Ciclo #${ciclo} completado\n\u2705 ${c.enviados} enviados | \u274C ${c.errores} errores\n\u{1F310} ${gruposLinks.length} grupo(s) activos\n\n\u{1F6D1} *Estado: EN REPOSO*\n\u23F0 Reanuda en ${esperaMin} minuto(s)${reporteExtra}${enviosDiaMsg}`);
 
-                    if (numCuentas === 1) {
-                        await delay(600 * 1000);
-                    } else {
-                        await delay((conf.espera_ciclo || 600) * 1000);
+                    db.setCampanaEstadoDetalle(campanaId, `en_reposo|${Math.floor(Date.now()/1000)}|${esperaSeg}`);
+
+                    await delay(esperaSeg * 1000);
+
+                    if (!cancelled) {
+                        db.setCampanaEstadoDetalle(campanaId, 'activa');
+                        await notificarUsuario(botSock, userId, `\u25B6 *${campana.nombre}* — Reanudando ciclo #${ciclo + 1}...`);
                     }
                     delayMultiplier = Math.max(1.0, delayMultiplier - 0.5);
                 }
             }
         } catch (e) {
             console.error(`[Campana ${campanaId}] ERROR FATAL: ${e.message}\n${e.stack}`);
-            db.agregarLog(userId, 'error', `Campana ${campanaId} ERROR FATAL: ${e.message}`);
+            db.agregarLog(userId, 'error', `Campana ${campanaId} ERROR FATAL: ${e.message} | Stack: ${(e.stack||'').split('\n').slice(0,3).join(' | ')}`);
             await notificarUsuario(botSock, userId, `\u274C *ERROR en campana*: ${e.message}\n\nLa campana se detuvo. Revisa los logs del bot para mas detalles.`);
         } finally {
             db.setCampanaActiva(campanaId, false);
@@ -1006,29 +1094,27 @@ function getCampanasActivas() {
 // ============================================================
 const envioPersonalActivo = {}; // { userId: { running, cancel } }
 
-async function listarChatsPersonales(botSock) {
+// Minimal contact lister for envio personal (uses store.contacts if available)
+async function listarChatsPersonales(sock) {
     const chats = [];
     try {
-        const store = botSock.store || null;
-        // Obtener todos los chats usando fetchAllContacts o store
-        // Baileys no tiene un "getChats" directo, pero podemos listar contactos
-        // y chats recientes usando las conversaciones
-        const contacts = await botSock.fetchAllContacts?.() || [];
-        const contactJids = new Set();
-        for (const c of contacts) {
-            if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
-                contactJids.add(c.id);
-                const num = c.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
-                chats.push({
-                    jid: c.id,
-                    nombre: c.name || c.notify || num,
-                    numero: num,
-                });
+        const contacts = sock?.store?.contacts || {};
+        for (const [id, c] of Object.entries(contacts)) {
+            if (id && id.endsWith("@s.whatsapp.net") && id !== "status@broadcast") {
+                const num = id.replace(/@s\.whatsapp\.net$/, "");
+                chats.push({ jid: id, nombre: c.name || c.notify || num, numero: num });
             }
         }
-    } catch (e) {
-        console.error(`Error listando chats personales: ${e.message}`);
-    }
+        if (!chats.length && sock?.fetchAllContacts) {
+            const fc = await sock.fetchAllContacts().catch(() => []);
+            for (const c of fc) {
+                if (c.id && c.id.endsWith("@s.whatsapp.net") && c.id !== "status@broadcast") {
+                    const num = c.id.replace(/@s\.whatsapp\.net$/, "");
+                    chats.push({ jid: c.id, nombre: c.name || c.notify || num, numero: num });
+                }
+            }
+        }
+    } catch (e) { console.error(`Error listando chats: ${e.message}`); }
     return chats;
 }
 
@@ -1634,7 +1720,8 @@ module.exports = {
     clientSessions,
     pendingLinks,
     reporteInterval,
-    LIMITE_ENVIOS_DIARIOS,
+    LIMITE_ENVIOS_DIARIOS: LIMITE_ENVIOS_DIARIOS_DEFAULT,
+    getLimiteEnviosDiarios,
     getSessionDir,
     setBotSocket,
     BOT_NOMBRE: _botNombre,

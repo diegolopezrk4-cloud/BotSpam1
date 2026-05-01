@@ -1,0 +1,12 @@
+node_modules
+.git
+*.db
+sessions/
+client_sessions/
+media/
+comprobantes/
+backups/
+vapid_keys.json
+admin_group.txt
+__pycache__/
+*.pyc

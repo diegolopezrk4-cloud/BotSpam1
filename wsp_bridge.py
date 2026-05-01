@@ -7,10 +7,12 @@ logger = logging.getLogger(__name__)
 
 WSP_API_URL = "http://localhost:3000"
 
+INTERNAL_HEADERS = {"x-internal-service": "telegram-bot"}
+
 async def _get(path, params=None, timeout=15):
     try:
         async with aiohttp.ClientSession() as s:
-            async with s.get(f"{WSP_API_URL}{path}", params=params, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+            async with s.get(f"{WSP_API_URL}{path}", params=params, headers=INTERNAL_HEADERS, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
                 return await r.json()
     except asyncio.TimeoutError:
         logger.error(f"WSP API GET {path} timeout ({timeout}s)")
@@ -25,7 +27,7 @@ async def _get(path, params=None, timeout=15):
 async def _post(path, data=None, timeout=15):
     try:
         async with aiohttp.ClientSession() as s:
-            async with s.post(f"{WSP_API_URL}{path}", json=data, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+            async with s.post(f"{WSP_API_URL}{path}", json=data, headers=INTERNAL_HEADERS, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
                 return await r.json()
     except asyncio.TimeoutError:
         logger.error(f"WSP API POST {path} timeout ({timeout}s)")
@@ -60,6 +62,16 @@ async def wsp_sesiones(user_id):
 
 async def wsp_vincular(user_id, nombre):
     return await _post("/api/vincular", {"u": str(user_id), "nombre": nombre})
+
+async def wsp_desvincular(user_id, nombre):
+    return await _post("/api/desvincular", {"u": str(user_id), "nombre": nombre})
+
+# --- MEMBRESIA SYNC ---
+async def wsp_admin_desactivar(telegram_id):
+    return await _post("/api/admin/desactivar", {"admin_id": str(8001675901), "telegram_id": str(telegram_id)})
+
+async def wsp_admin_ban(telegram_id):
+    return await _post("/api/admin/ban", {"admin_id": str(8001675901), "telegram_id": str(telegram_id)})
 
 # --- CAMPANAS ---
 async def wsp_campanas(user_id):
@@ -108,8 +120,11 @@ async def wsp_desactivar(wsp_id):
     return await _post("/api/desactivar", {"wsp_id": str(wsp_id)})
 
 # --- ENVIO PERSONAL ---
-async def wsp_chats_personales(user_id):
-    return await _get("/api/chats_personales", {"u": str(user_id)})
+async def wsp_chats_personales(user_id, cuenta=None):
+    params = {"u": str(user_id)}
+    if cuenta:
+        params["cuenta"] = cuenta
+    return await _get("/api/chats_personales", params)
 
 async def wsp_enviar_personal(user_id, mensaje):
     return await _post("/api/enviar_personal", {"u": str(user_id), "mensaje": mensaje})
@@ -184,3 +199,22 @@ async def wsp_enviar_miembros(user_id, grupo, mensaje):
 # --- DETECTAR GRUPOS CLIENTE ---
 async def wsp_detectar_cliente(user_id):
     return await _get("/api/detectar_cliente", {"u": str(user_id)})
+
+# --- DASHBOARD EXTENDED ---
+async def wsp_dashboard_extended(user_id):
+    return await _get("/api/dashboard/extended", {"u": str(user_id)})
+
+# --- BACKUP / RESTORE ---
+async def wsp_config_exportar(user_id):
+    return await _get("/api/config/exportar", {"u": str(user_id)})
+
+async def wsp_config_importar(user_id, data):
+    return await _post("/api/config/importar", {"u": str(user_id), "data": data})
+
+# --- 2FA STATUS ---
+async def wsp_2fa_status(user_id):
+    return await _get("/api/2fa/status", {"u": str(user_id)})
+
+# --- SESSIONS ---
+async def wsp_panel_sessions(user_id):
+    return await _get("/api/panel_sessions", {"u": str(user_id)})

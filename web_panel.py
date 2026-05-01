@@ -29,29 +29,13 @@ def ahora_peru():
 
 logger = logging.getLogger("JDWebPanel")
 
-API_ID = int(os.environ.get("API_ID", "35451933"))
-API_HASH = os.environ.get("API_HASH", "2070761744260118720b34e6bf20f2eb")
+API_ID = 35451933
+API_HASH = "2070761744260118720b34e6bf20f2eb"
 WEB_PORT = int(os.environ.get("TG_API_PORT", 3002))
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "8001675901"))
+ADMIN_ID = 8001675901
 
 web_login_sessions = {}
 aiogram_bot = None
-
-# Cleanup stale login sessions every 10 minutes (BUG-H01 fix)
-async def _cleanup_stale_sessions():
-    while True:
-        await asyncio.sleep(600)  # 10 minutes
-        now = datetime.now(PERU_TZ).timestamp()
-        stale = [t for t, s in web_login_sessions.items()
-                 if now - s.get("created_at", now) > 900]  # 15 min timeout
-        for token in stale:
-            try:
-                await web_login_sessions[token]["client"].disconnect()
-            except Exception:
-                pass
-            del web_login_sessions[token]
-        if stale:
-            logger.info(f"Limpieza: {len(stale)} sesiones de login abandonadas")
 
 
 def set_bot_reference(bot_instance):
@@ -61,19 +45,6 @@ def set_bot_reference(bot_instance):
 
 def es_admin(user_id):
     return int(user_id) == ADMIN_ID
-
-
-# Middleware: Only allow requests from localhost (panel proxy) or check valid user_id
-@web.middleware
-async def auth_middleware(request, handler):
-    # Allow requests from localhost (panel_server.js proxy)
-    peername = request.transport.get_extra_info('peername')
-    remote_ip = peername[0] if peername else None
-    forwarded = request.headers.get('x-forwarded-for', '')
-    is_local = remote_ip in ('127.0.0.1', '::1', '::ffff:127.0.0.1')
-    if not is_local:
-        return web.json_response({"ok": False, "error": "Acceso no autorizado"}, status=403)
-    return await handler(request)
 
 
 # ─────────────────────────────────────────
@@ -127,7 +98,6 @@ async def api_tg_auth_send_code(request):
             "nombre": nombre,
             "phone_code_hash": result.phone_code_hash,
             "user_id": user_id,
-            "created_at": datetime.now(PERU_TZ).timestamp(),
         }
         return web.json_response({"ok": True, "status": "code_sent", "token": token})
     except Exception as e:
@@ -525,15 +495,10 @@ async def api_tg_campanas_editar(request):
             if part.name == "foto" and part.filename:
                 foto_filename = part.filename
                 chunks = []
-                total_size = 0
-                max_upload_size = 10 * 1024 * 1024  # 10MB limit
                 while True:
                     chunk = await part.read_chunk()
                     if not chunk:
                         break
-                    total_size += len(chunk)
-                    if total_size > max_upload_size:
-                        return web.json_response({"ok": False, "error": "Archivo muy grande (max 10MB)"}, status=413)
                     chunks.append(chunk)
                 foto_data = b"".join(chunks)
             else:
@@ -625,21 +590,6 @@ async def api_tg_iniciar(request):
     campana = await db.get_campana_by_id(campana_id)
     if not campana or int(campana["user_id"]) != user_id:
         return web.json_response({"ok": False, "error": "Sin permiso"}, status=403)
-
-    # Verify membership before allowing campaign launch
-    if not es_admin(user_id):
-        usuario = await db.get_usuario(user_id)
-        if not usuario or not usuario.get("activo"):
-            return web.json_response({"ok": False, "error": "Membresia inactiva o expirada. Renueva tu plan."}, status=403)
-        fecha_exp = usuario.get("fecha_expira")
-        if fecha_exp:
-            from datetime import datetime as dt
-            try:
-                exp = dt.fromisoformat(fecha_exp.replace("Z", "+00:00")) if "Z" in str(fecha_exp) else dt.strptime(str(fecha_exp), "%Y-%m-%d %H:%M:%S")
-                if exp < dt.utcnow():
-                    return web.json_response({"ok": False, "error": "Membresia expirada. Renueva tu plan."}, status=403)
-            except Exception:
-                pass
 
     grupos_campana = await db.get_grupos_campana(campana_id)
     if not grupos_campana:
@@ -844,36 +794,21 @@ async def api_tg_listanegra(request):
     user_id = int(request.query.get("u", 0))
     if not user_id:
         return web.json_response({"ok": False, "error": "falta u"}, status=400)
-    grupos = await db.get_lista_negra_tg(user_id)
-    return web.json_response({"ok": True, "grupos": grupos})
+    return web.json_response({"ok": True, "grupos": []})
 
 
 async def api_tg_listanegra_add(request):
     body = await request.json()
-    user_id = int(body.get("u", 0))
-    grupo = body.get("grupo", "").strip()
-    if not user_id or not grupo:
-        return web.json_response({"ok": False, "error": "falta u o grupo"}, status=400)
-    await db.agregar_lista_negra_tg(user_id, grupo)
     return web.json_response({"ok": True})
 
 
 async def api_tg_listanegra_del(request):
     body = await request.json()
-    user_id = int(body.get("u", 0))
-    grupo = body.get("grupo", "").strip()
-    if not user_id or not grupo:
-        return web.json_response({"ok": False, "error": "falta u o grupo"}, status=400)
-    await db.eliminar_lista_negra_tg(user_id, grupo)
     return web.json_response({"ok": True})
 
 
 async def api_tg_listanegra_limpiar(request):
     body = await request.json()
-    user_id = int(body.get("u", 0))
-    if not user_id:
-        return web.json_response({"ok": False, "error": "falta u"}, status=400)
-    await db.limpiar_lista_negra_tg(user_id)
     return web.json_response({"ok": True})
 
 
@@ -1034,20 +969,78 @@ async def api_tg_send_recovery(request):
 
 
 # ─────────────────────────────────────────
+#   CHATS TG: /api/tg/chats, /api/tg/chat/enviar
+# ─────────────────────────────────────────
+
+async def api_tg_chats(request):
+    user_id = int(request.query.get("u", 0))
+    cuenta = request.query.get("cuenta", "").strip()
+    if not user_id or not cuenta:
+        return web.json_response({"ok": False, "error": "falta u o cuenta"}, status=400)
+    path = get_session_path(user_id, cuenta)
+    client = TelegramClient(path, API_ID, API_HASH)
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            return web.json_response({"ok": False, "error": "Cuenta no autorizada. Vincula primero."})
+        from telethon.tl.types import User
+        dialogs = await client.get_dialogs(limit=50)
+        chats = []
+        for d in dialogs:
+            if not isinstance(d.entity, User):
+                continue
+            if d.entity.bot:
+                continue
+            name = ""
+            if d.entity.first_name:
+                name = d.entity.first_name
+            if d.entity.last_name:
+                name += " " + d.entity.last_name
+            name = name.strip() or d.entity.username or str(d.entity.id)
+            chats.append({
+                "id": d.entity.id,
+                "nombre": name,
+                "username": d.entity.username or "",
+                "unread": d.unread_count or 0,
+                "last_message": d.message.text[:100] if d.message and d.message.text else ""
+            })
+        return web.json_response({"ok": True, "chats": chats, "total": len(chats)})
+    except Exception as e:
+        logger.error(f"Error listing TG chats: {e}")
+        return web.json_response({"ok": False, "error": str(e)})
+    finally:
+        await client.disconnect()
+
+
+async def api_tg_chat_enviar(request):
+    body = await request.json()
+    user_id = int(body.get("u", 0))
+    chat_id = body.get("chat_id")
+    mensaje = body.get("mensaje", "").strip()
+    cuenta = body.get("cuenta", "").strip()
+    if not user_id or not chat_id or not mensaje or not cuenta:
+        return web.json_response({"ok": False, "error": "falta u, chat_id, mensaje o cuenta"}, status=400)
+    path = get_session_path(user_id, cuenta)
+    client = TelegramClient(path, API_ID, API_HASH)
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            return web.json_response({"ok": False, "error": "Cuenta no autorizada"})
+        await client.send_message(int(chat_id), mensaje)
+        return web.json_response({"ok": True})
+    except Exception as e:
+        logger.error(f"Error sending TG chat: {e}")
+        return web.json_response({"ok": False, "error": str(e)})
+    finally:
+        await client.disconnect()
+
+
+# ─────────────────────────────────────────
 #   SERVIDOR WEB
 # ─────────────────────────────────────────
 
 def create_app():
-    app = web.Application(client_max_size=10 * 1024 * 1024, middlewares=[auth_middleware])
-
-    # Start background cleanup task for stale login sessions
-    async def on_startup(app):
-        app['cleanup_task'] = asyncio.create_task(_cleanup_stale_sessions())
-    async def on_cleanup(app):
-        if 'cleanup_task' in app:
-            app['cleanup_task'].cancel()
-    app.on_startup.append(on_startup)
-    app.on_cleanup.append(on_cleanup)
+    app = web.Application(client_max_size=10 * 1024 * 1024)
 
     # Auth
     app.router.add_post("/api/tg-auth/send-code", api_tg_auth_send_code)
@@ -1123,6 +1116,10 @@ def create_app():
     app.router.add_get("/api/tg/detectar", api_tg_detectar)
     app.router.add_get("/api/tg/detectar_carpetas", api_tg_detectar_carpetas)
     app.router.add_get("/api/tg/detectar_carpeta_grupos", api_tg_detectar_carpeta_grupos)
+
+    # Chats TG
+    app.router.add_get("/api/tg/chats", api_tg_chats)
+    app.router.add_post("/api/tg/chat/enviar", api_tg_chat_enviar)
 
     return app
 
