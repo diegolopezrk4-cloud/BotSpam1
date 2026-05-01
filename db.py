@@ -180,6 +180,16 @@ async def activar_membresia(telegram_id, dias):
         )
         await db.commit()
 
+async def desactivar_membresia(telegram_id):
+    async with _connect() as d:
+        await d.execute("UPDATE usuarios SET activo=0 WHERE telegram_id=?", (telegram_id,))
+        await d.commit()
+
+async def ban_usuario(telegram_id):
+    async with _connect() as d:
+        await d.execute("UPDATE usuarios SET activo=0, plan='baneado' WHERE telegram_id=?", (telegram_id,))
+        await d.commit()
+
 async def tiene_membresia_activa(telegram_id):
     user = await get_usuario(telegram_id)
     if not user or not user["activo"]:
@@ -558,7 +568,7 @@ async def agregar_keywords(user_id, palabras, respuesta=""):
             p = p.strip().lower()
             if p:
                 await db.execute(
-                    "INSERT INTO responder_keywords (user_id, palabra, respuesta) VALUES (?,?,?)",
+                    "INSERT OR IGNORE INTO responder_keywords (user_id, palabra, respuesta) VALUES (?,?,?)",
                     (user_id, p, respuesta)
                 )
         await db.commit()
@@ -731,4 +741,3 @@ async def limpiar_lista_negra_tg(user_id):
     async with _connect() as db:
         await db.execute("DELETE FROM lista_negra_tg WHERE user_id=?", (user_id,))
         await db.commit()
-

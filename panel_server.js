@@ -19,6 +19,9 @@ const PANEL_FILE = path.join(__dirname, "panel.html");
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
+    // Get real client IP for forwarding
+    const clientIp = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress || "";
+
     // Proxy TG requests to the Python bot server (port 3002)
     if (url.pathname.startsWith("/api/tg-auth/") || url.pathname.startsWith("/api/tg/") || url.pathname.startsWith("/api/sesiones_tg")) {
         const options = {
@@ -26,7 +29,7 @@ const server = http.createServer(async (req, res) => {
             port: 3002,
             path: req.url,
             method: req.method,
-            headers: { ...req.headers, host: "127.0.0.1:3002", "x-forwarded-for": req.socket.remoteAddress || "unknown" }
+            headers: { ...req.headers, host: "127.0.0.1:3002", "x-forwarded-for": clientIp }
         };
 
         const proxyReq = http.request(options, (proxyRes) => {
@@ -56,7 +59,7 @@ const server = http.createServer(async (req, res) => {
             port: API_PORT,
             path: req.url,
             method: req.method,
-            headers: { ...req.headers, host: `${API_HOST}:${API_PORT}`, "x-forwarded-for": req.socket.remoteAddress || "unknown" }
+            headers: { ...req.headers, host: `${API_HOST}:${API_PORT}`, "x-forwarded-for": clientIp }
         };
 
         const proxyReq = http.request(options, (proxyRes) => {

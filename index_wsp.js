@@ -4,9 +4,58 @@ const QRCode = require("qrcode");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+const webpush = require("web-push");
 const config = require("./config_wsp");
 const db = require("./db_wsp");
 const motor = require("./motor_wsp");
+
+// --- Web Push VAPID ---
+let vapidKeys = null;
+const VAPID_FILE = path.join(__dirname, "vapid_keys.json");
+try {
+    vapidKeys = JSON.parse(fs.readFileSync(VAPID_FILE, "utf8"));
+} catch (e) {
+    vapidKeys = webpush.generateVAPIDKeys();
+    fs.writeFileSync(VAPID_FILE, JSON.stringify(vapidKeys, null, 2));
+}
+webpush.setVapidDetails("mailto:admin@botspam.com", vapidKeys.publicKey, vapidKeys.privateKey);
+
+function sendPushToUser(userId, payload) {
+    const subs = db.getPushSubscriptions(userId);
+    for (const s of subs) {
+        webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload))
+            .catch(() => db.removePushSubscription(s.endpoint));
+    }
+}
+
+function sendPushToAll(payload) {
+    const subs = db.getAllPushSubscriptions();
+    for (const s of subs) {
+        webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload))
+            .catch(() => db.removePushSubscription(s.endpoint));
+    }
+}
+
+// --- Webhook de eventos ---
+function fireWebhookEvent(userId, evento, data) {
+    const hooks = db.getWebhooksActivos(userId);
+    for (const h of hooks) {
+        if (h.eventos !== 'all' && !h.eventos.split(',').includes(evento)) continue;
+        const body = JSON.stringify({ evento, data, timestamp: new Date().toISOString() });
+        const u = new URL(h.url);
+        const opts = { method: "POST", hostname: u.hostname, port: u.port || (u.protocol === "https:" ? 443 : 80), path: u.pathname, headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } };
+        if (h.secret) {
+            const sig = crypto.createHmac("sha256", h.secret).update(body).digest("hex");
+            opts.headers["X-Webhook-Signature"] = sig;
+        }
+        const lib = u.protocol === "https:" ? require("https") : http;
+        const r = lib.request(opts, () => {});
+        r.on("error", () => {});
+        r.write(body);
+        r.end();
+    }
+}
 
 const QR_PORT = process.env.QR_PORT || 3000;
 
@@ -237,18 +286,63 @@ poll();
     if (url.pathname.startsWith("/api/")) {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
 
-        // Helper para leer body POST (con limite de 10MB para prevenir DoS)
-        const MAX_BODY_SIZE = 10 * 1024 * 1024;
-        const readBody = () => new Promise((resolve) => {
+        // Helper para leer body POST con limite de tamaño (50MB max for images)
+        const MAX_BODY_SIZE = 50 * 1024 * 1024;
+        const _parseBody = () => new Promise((resolve) => {
             let data = "";
             let size = 0;
+            let aborted = false;
             req.on("data", c => {
                 size += c.length;
-                if (size > MAX_BODY_SIZE) { req.destroy(); resolve({}); return; }
+                if (size > MAX_BODY_SIZE) {
+                    if (!aborted) {
+                        aborted = true;
+                        if (!res.headersSent) { res.writeHead(413); res.end(JSON.stringify({ ok: false, error: "Archivo demasiado grande (max 50MB)" })); }
+                        req.destroy();
+                    }
+                    return;
+                }
                 data += c;
             });
-            req.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve({}); } });
+            req.on("end", () => { if (!aborted) { try { resolve(JSON.parse(data)); } catch { resolve({}); } } });
+            req.on("error", () => { if (!aborted) resolve({}); });
         });
+        // Centralized POST identity verification: ensure body.u matches authenticated user
+        const readBody = async () => {
+            const body = await _parseBody();
+            if (req._authUser && body && body.u && String(body.u) !== String(req._authUser)) {
+                const authU = db.getUsuario(String(req._authUser));
+                const isAdmin = (authU && authU.es_admin === 1) || (config.ADMIN_TELEGRAM_IDS && config.ADMIN_TELEGRAM_IDS.includes(String(req._authUser)));
+                if (!isAdmin) {
+                    const err = new Error("No autorizado para modificar datos de otro usuario");
+                    err._authForbidden = true;
+                    throw err;
+                }
+            }
+            return body;
+        };
+
+        // Helper: obtener IP del cliente
+        const getClientIp = () => req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress || "";
+
+        // Helper: validar sesion (token auth)
+        // Endpoints publicos que NO requieren token:
+        const PUBLIC_ENDPOINTS = [
+            "/api/status", "/api/panel_login", "/api/panel_registro",
+            "/api/panel_recuperar_solicitar", "/api/panel_recuperar_reset",
+            "/api/canjear_codigo", "/api/check_membresia",
+            "/api/pagos/webhook", "/api/metodos_pago", "/api/metodos_pago/qr", "/api/push/vapid_key", "/api/health",
+            "/api/registro/generar_codigo", "/api/verificar_cuenta"
+        ];
+        const isPublicEndpoint = PUBLIC_ENDPOINTS.includes(url.pathname) || url.pathname === "/api/status";
+
+        function authenticateRequest(body) {
+            if (isPublicEndpoint) return { authenticated: true, userId: null };
+            const token = req.headers["authorization"]?.replace("Bearer ", "") || url.searchParams.get("token") || body?._token;
+            const session = db.validateSession(token);
+            if (!session) return { authenticated: false, userId: null };
+            return { authenticated: true, userId: session.telegram_id, token };
+        }
 
         try {
             // GET /api/status — Estado del bot WSP
@@ -340,7 +434,7 @@ poll();
                     const grupos = db.getGruposCampana(c.id);
                     const sesiones = db.getSesionesCampana(c.id);
                     return { ...c, intervalo_min: conf.intervalo_min, intervalo_max: conf.intervalo_max, espera_ciclo: conf.espera_ciclo, grupos_count: grupos.length, sesiones_count: sesiones.length, camp_sesiones: sesiones, camp_grupos: grupos };
-                });
+                }).sort((a, b) => a.id - b.id);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campanas }));
             }
@@ -363,13 +457,6 @@ poll();
             if (url.pathname === "/api/campanas/del" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
-                // Delete campaign image file if exists
-                try {
-                    const camp = db.getCampanaById(body.id);
-                    if (camp && camp.imagen_path && fs.existsSync(camp.imagen_path)) {
-                        fs.unlinkSync(camp.imagen_path);
-                    }
-                } catch (e) { console.error(`Error eliminando imagen de campana: ${e.message}`); }
                 db.eliminarCampana(body.id);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
@@ -393,9 +480,9 @@ poll();
                 const msg = body.mensaje !== undefined ? body.mensaje : camp.mensaje;
                 db.actualizarCampanaMensaje(body.id, msg, imagenPath);
                 const conf = db.getCampanaConfig(body.id);
-                const imin = body.intervalo_min !== undefined ? (parseInt(body.intervalo_min) || conf.intervalo_min) : conf.intervalo_min;
-                const imax = body.intervalo_max !== undefined ? (parseInt(body.intervalo_max) || conf.intervalo_max) : conf.intervalo_max;
-                const eciclo = body.espera_ciclo !== undefined ? (parseInt(body.espera_ciclo) || conf.espera_ciclo) : conf.espera_ciclo;
+                const imin = body.intervalo_min !== undefined ? parseInt(body.intervalo_min) : conf.intervalo_min;
+                const imax = body.intervalo_max !== undefined ? parseInt(body.intervalo_max) : conf.intervalo_max;
+                const eciclo = body.espera_ciclo !== undefined ? parseInt(body.espera_ciclo) : conf.espera_ciclo;
                 db.setCampanaConfig(body.id, imin, imax, conf.espera_cuenta, eciclo);
                 // Update campaign accounts if provided
                 if (Array.isArray(body.sesiones)) {
@@ -418,9 +505,34 @@ poll();
                 if (!body.u || !campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
                 const camp = db.getCampanaById(campId);
                 if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "campana no encontrada" })); }
-                motor.iniciarCampana(campId, body.u, botSock);
+                // Validate campaign has accounts and groups assigned
+                const sesiones = db.getSesionesCampana ? db.getSesionesCampana(campId) : [];
+                const grupos = db.getGruposCampana ? db.getGruposCampana(campId) : [];
+                if (!sesiones.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Campana sin cuentas asignadas. Edita la campana y asigna al menos una cuenta." })); }
+                if (!grupos.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Campana sin grupos asignados. Edita la campana y asigna al menos un grupo." })); }
+                // Set active immediately so frontend sees the change on reload
+                db.setCampanaActiva(campId, true);
+                const started = motor.iniciarCampana(campId, body.u, botSock);
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, campana: camp.nombre }));
+                return res.end(JSON.stringify({ ok: true, campana: camp.nombre, ya_activa: !started }));
+            }
+
+            // POST /api/campanas/iniciar_todas — Iniciar TODAS las campañas del usuario
+            if (url.pathname === "/api/campanas/iniciar_todas" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const campanas = db.getCampanas(body.u);
+                let iniciadas = 0, errores = 0;
+                for (const c of campanas) {
+                    const sesiones = db.getSesionesCampana ? db.getSesionesCampana(c.id) : [];
+                    const grupos = db.getGruposCampana ? db.getGruposCampana(c.id) : [];
+                    if (!sesiones.length || !grupos.length) { errores++; continue; }
+                    db.setCampanaActiva(c.id, true);
+                    const ok = motor.iniciarCampana(c.id, body.u, botSock);
+                    if (ok) iniciadas++; else errores++;
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, iniciadas, errores, total: campanas.length }));
             }
 
             // POST /api/detener — Detener campaña { id|campana_id }
@@ -491,24 +603,17 @@ poll();
                 return res.end(JSON.stringify({ ok: true, usuario: user || null }));
             }
 
-            // GET /api/usuarios/todos — Todos los usuarios WSP (admin only)
+            // GET /api/usuarios/todos — Todos los usuarios WSP
             if (url.pathname === "/api/usuarios/todos" && req.method === "GET") {
-                const reqAdminId = url.searchParams.get("admin_id") || url.searchParams.get("u");
-                const isLocal = (req.socket.remoteAddress === "127.0.0.1" || req.socket.remoteAddress === "::1" || req.socket.remoteAddress === "::ffff:127.0.0.1");
-                if (!isLocal && !checkAdmin(reqAdminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 const usuarios = db.getTodosUsuarios();
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, usuarios }));
             }
 
-            // POST /api/activar — Activar membresía WSP { wsp_id, dias } (admin only)
+            // POST /api/activar — Activar membresía WSP { wsp_id, dias }
             if (url.pathname === "/api/activar" && req.method === "POST") {
                 const body = await readBody();
-                const isLocal = (req.socket.remoteAddress === "127.0.0.1" || req.socket.remoteAddress === "::1" || req.socket.remoteAddress === "::ffff:127.0.0.1");
-                if (!isLocal && !checkAdmin(body.admin_id || body.u)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 if (!body.wsp_id || !body.dias) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta wsp_id o dias" })); }
-                const dias = parseInt(body.dias) || 0;
-                if (dias <= 0) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "dias debe ser un numero positivo" })); }
                 // Buscar usuario por número o ID
                 let user = db.getUsuario(body.wsp_id);
                 if (!user) {
@@ -518,33 +623,24 @@ poll();
                     res.writeHead(404);
                     return res.end(JSON.stringify({ ok: false, error: "usuario no encontrado" }));
                 }
-                db.activarMembresia(user.wsp_id, dias);
-                const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : "mensual";
+                db.activarMembresia(user.wsp_id, parseInt(body.dias));
+                const plan = parseInt(body.dias) === 1 ? "diario" : parseInt(body.dias) === 7 ? "semanal" : "mensual";
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, plan, wsp_id: user.wsp_id, nombre: user.nombre }));
             }
 
-            // POST /api/desactivar — Desactivar/banear usuario WSP { wsp_id } (admin only)
+            // POST /api/desactivar — Desactivar/banear usuario WSP { wsp_id }
             if (url.pathname === "/api/desactivar" && req.method === "POST") {
                 const body = await readBody();
-                const isLocal = (req.socket.remoteAddress === "127.0.0.1" || req.socket.remoteAddress === "::1" || req.socket.remoteAddress === "::ffff:127.0.0.1");
-                if (!isLocal && !checkAdmin(body.admin_id || body.u)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 if (!body.wsp_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta wsp_id" })); }
                 db.banByNumber(body.wsp_id);
-                // Cleanup reporte interval for banned user
-                try { motor.detenerReporteDiario(body.wsp_id); } catch (e) {}
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
             }
 
-            // GET /api/activas — Campañas activas (admin only, o filtrado por usuario)
+            // GET /api/activas — Campañas activas
             if (url.pathname === "/api/activas") {
-                const userId = url.searchParams.get("u");
-                const isLocal = (req.socket.remoteAddress === "127.0.0.1" || req.socket.remoteAddress === "::1" || req.socket.remoteAddress === "::ffff:127.0.0.1");
-                let activas = motor.getCampanasActivas ? motor.getCampanasActivas() : [];
-                if (!isLocal && !checkAdmin(userId)) {
-                    activas = activas.filter(a => String(a.userId) === String(userId));
-                }
+                const activas = motor.getCampanasActivas ? motor.getCampanasActivas() : [];
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, activas }));
             }
@@ -597,23 +693,19 @@ poll();
                 }
             }
 
-            // GET /api/chats_personales?u=USER_ID&cuenta=X — Listar chats personales
+
+
+            // GET /api/chats_personales — List personal chats for Envio Personal
             if (url.pathname === "/api/chats_personales" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
                 const cuenta = url.searchParams.get("cuenta");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 try {
                     let sock;
-                    if (cuenta) {
-                        sock = await motor.getOrConnectClient(userId, cuenta);
-                    } else if (botSock) {
-                        sock = botSock;
-                    }
+                    if (cuenta) { sock = await motor.getOrConnectClient(userId, cuenta); }
+                    else if (botSock) { sock = botSock; }
                     let chats = [];
-                    if (sock) {
-                        chats = await motor.listarChatsPersonales(sock);
-                    }
-                    // Also include manually added numbers
+                    if (sock) { chats = await motor.listarChatsPersonales(sock); }
                     if (cuenta) {
                         const manuales = db.getNumerosManuales(userId, cuenta);
                         const existingJids = new Set(chats.map(c => c.jid));
@@ -625,10 +717,7 @@ poll();
                     }
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, total: chats.length, chats, cuenta }));
-                } catch (e) {
-                    res.writeHead(500);
-                    return res.end(JSON.stringify({ ok: false, error: e.message }));
-                }
+                } catch (e) { res.writeHead(500); return res.end(JSON.stringify({ ok: false, error: e.message })); }
             }
 
             // POST /api/enviar_personal — Enviar mensaje a chats personales
@@ -656,9 +745,10 @@ poll();
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
                 try {
                     const started = await motor.enviarAPersonales(userId, mensaje, imagenPath, sock, body.cuenta);
+                    if (started?.blocked) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: started.error })); }
                     if (started) db.agregarLog(userId, 'envio', 'Envio personal iniciado');
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
+                    return res.end(JSON.stringify({ ok: !!started, message: started ? "envio iniciado" : "ya hay un envio activo" }));
                 } catch (e) {
                     db.agregarLog(userId, 'error', `Error envio personal: ${e.message}`);
                     res.writeHead(500);
@@ -676,10 +766,45 @@ poll();
                 return res.end(JSON.stringify({ ok: stopped }));
             }
 
+            // GET /api/envio_estado — Estado del envio personal/miembros activo (progreso + countdown)
+            if (url.pathname === "/api/envio_estado" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                const task = motor.envioPersonalActivo[userId];
+                if (!task || !task.running) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, activo: false }));
+                }
+                const now = Date.now();
+                const pauseRemaining = task.batchPauseUntil ? Math.max(0, Math.round((task.batchPauseUntil - now) / 1000)) : 0;
+                res.writeHead(200);
+                return res.end(JSON.stringify({
+                    ok: true,
+                    activo: true,
+                    tipo: task.tipo || "personal",
+                    enviados: task.enviados || 0,
+                    errores: task.errores || 0,
+                    total: task.total || 0,
+                    batchSize: task.batchSize || 0,
+                    enPausa: pauseRemaining > 0,
+                    pausaRestante: pauseRemaining,
+                    grupoNombre: task.grupoNombre || "",
+                }));
+            }
+
             // ─── PANEL AUTH ───
             if (url.pathname === "/api/panel_login" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                body.telegram_id = String(body.telegram_id).replace(/[^0-9]/g, '');
+                if (!body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "ID invalido. Usa solo numeros." })); }
+                // Rate limiting: max 5 attempts per IP in 15 minutes
+                const clientIp = getClientIp();
+                const attempts = db.getLoginAttempts(clientIp);
+                if (attempts >= 5) {
+                    res.writeHead(429);
+                    return res.end(JSON.stringify({ ok: false, error: "Demasiados intentos. Espera 15 minutos." }));
+                }
                 const r = db.panelLogin(body.telegram_id, body.password);
                 if (r.ok) {
                     const tfa = db.get2FA(body.telegram_id);
@@ -689,25 +814,79 @@ poll();
                     }
                     if (tfa && tfa.enabled && body.totp_code) {
                         const valid = db.verify2FACode(tfa.secret, body.totp_code);
-                        if (!valid) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, requires_2fa: true, error: "Codigo 2FA invalido" })); }
+                        if (!valid) {
+                            db.registrarLoginAttempt(clientIp, body.telegram_id, false);
+                            res.writeHead(200);
+                            return res.end(JSON.stringify({ ok: false, requires_2fa: true, error: "Codigo 2FA invalido" }));
+                        }
                     }
                     const token = require("crypto").randomBytes(32).toString("hex");
-                    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+                    const ip = clientIp;
                     const ua = req.headers["user-agent"] || "";
                     db.createSession(body.telegram_id, token, ip, ua);
+                    db.registrarLoginAttempt(clientIp, body.telegram_id, true);
+                    db.registrarAuditoria(body.telegram_id, 'login', `Login exitoso desde ${ip}`, ip);
                     r.token = token;
                     const sellerInfo = db.isSellerUser(body.telegram_id);
                     r.es_seller = !!sellerInfo;
+                } else {
+                    db.registrarLoginAttempt(clientIp, body.telegram_id, false);
                 }
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
             }
+            // ─── GENERAR CODIGO REGISTRO (llamado por TG bot internamente) ───
+            if (url.pathname === "/api/registro/generar_codigo" && req.method === "POST") {
+                const body = await readBody();
+                // Only allow internal calls (from TG bot on localhost) or with internal header
+                const isInternal = getClientIp() === "127.0.0.1" || getClientIp() === "::1" || req.headers["x-internal-service"] === "telegram-bot";
+                if (!isInternal) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "solo uso interno" })); }
+                if (!body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                const r = db.generarCodigoRegistro(String(body.telegram_id));
+                res.writeHead(200);
+                return res.end(JSON.stringify(r));
+            }
+
+            // ─── VERIFICAR CUENTA EXISTENTE (usuario no verificado ingresa codigo) ───
+            if (url.pathname === "/api/verificar_cuenta" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.codigo || !body.telegram_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta codigo o telegram_id" })); }
+                const codeCheck = db.verificarCodigoRegistro(body.codigo);
+                if (!codeCheck.ok) {
+                    const msgs = { codigo_invalido: "Codigo invalido o ya usado", codigo_expirado: "Codigo expirado. Genera uno nuevo con /registro en el bot." };
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: msgs[codeCheck.error] || codeCheck.error }));
+                }
+                // Verify the code belongs to the same user who's trying to verify
+                if (codeCheck.telegram_id !== String(body.telegram_id)) {
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: "El codigo no corresponde a tu cuenta. Genera uno nuevo con /registro." }));
+                }
+                db.marcarCodigoRegistroUsado(body.codigo);
+                db.verificarCuentaExistente(body.telegram_id);
+                db.registrarAuditoria(body.telegram_id, 'verificar_cuenta', 'Cuenta verificada con codigo', getClientIp());
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
             if (url.pathname === "/api/panel_registro" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                if (!body.codigo_registro) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta_codigo" })); }
+                if (!body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta password" })); }
+                // Verify registration code and extract telegram_id from it
+                const codeCheck = db.verificarCodigoRegistro(body.codigo_registro);
+                if (!codeCheck.ok) {
+                    res.writeHead(400);
+                    const msgs = { codigo_invalido: "Codigo invalido o ya usado", codigo_expirado: "Codigo expirado (30 min). Genera uno nuevo con /registro en el bot." };
+                    return res.end(JSON.stringify({ ok: false, error: msgs[codeCheck.error] || codeCheck.error }));
+                }
+                // Use the telegram_id from the verified code (not from user input)
+                body.telegram_id = codeCheck.telegram_id;
                 const r = db.panelRegistro(body.telegram_id, body.password, body.username || '');
                 // Sync 1-day demo to TG database
                 if (r.ok) {
+                    // Mark code as used
+                    db.marcarCodigoRegistroUsado(body.codigo_registro);
                     try {
                         const http = require("http");
                         const syncData = JSON.stringify({ telegram_id: body.telegram_id, dias: 1, plan: "demo", username: body.username || "" });
@@ -722,8 +901,13 @@ poll();
             }
             if (url.pathname === "/api/panel_cambiar_password" && req.method === "POST") {
                 const body = await readBody();
+                // Requires valid session token
+                const cpToken = req.headers["authorization"]?.replace("Bearer ", "") || body._token;
+                const cpSession = db.validateSession(cpToken);
+                if (!cpSession) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "sesion_invalida" })); }
                 if (!body.telegram_id || !body.old_password || !body.new_password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id, old_password o new_password" })); }
                 const r = db.panelCambiarPassword(body.telegram_id, body.old_password, body.new_password);
+                if (r.ok) db.registrarAuditoria(body.telegram_id, 'cambiar_password', 'Password cambiado', getClientIp());
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
             }
@@ -777,10 +961,125 @@ poll();
                 return res.end(JSON.stringify(r));
             }
 
+            // ─── LOGOUT ───
+            if (url.pathname === "/api/panel_logout" && req.method === "POST") {
+                const logoutToken = req.headers["authorization"]?.replace("Bearer ", "");
+                if (logoutToken) {
+                    const session = db.validateSession(logoutToken);
+                    if (session) {
+                        db.deleteSession(session.telegram_id, session.id);
+                        db.registrarAuditoria(session.telegram_id, 'logout', 'Sesion cerrada', getClientIp());
+                    }
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ═══ TOKEN AUTHENTICATION MIDDLEWARE ═══
+            // All endpoints below this point require a valid session token
+            if (!isPublicEndpoint) {
+                // Allow internal service-to-service calls from localhost (TG bot on port 3002)
+                const remoteIp = req.socket.remoteAddress || "";
+                const isLocalhost = remoteIp === "127.0.0.1" || remoteIp === "::1" || remoteIp === "::ffff:127.0.0.1";
+                const hasInternalHeader = req.headers["x-internal-service"] === "telegram-bot";
+
+                if (isLocalhost && hasInternalHeader) {
+                    // Internal service call — skip token auth
+                    req._authUser = null;
+                    req._authToken = null;
+                } else {
+                    const authToken = req.headers["authorization"]?.replace("Bearer ", "") || url.searchParams.get("token");
+                    const session = db.validateSession(authToken);
+                    if (!session) {
+                        res.writeHead(401);
+                        return res.end(JSON.stringify({ ok: false, error: "sesion_invalida", msg: "Token invalido o expirado. Inicia sesion nuevamente." }));
+                    }
+                    // Attach authenticated user to request context
+                    req._authUser = session.telegram_id;
+                    req._authToken = authToken;
+                }
+
+                // ═══ ACCOUNT VERIFICATION CHECK ═══
+                if (req._authUser && !(isLocalhost && hasInternalHeader)) {
+                    const SKIP_VERIFY_ENDPOINTS = [
+                        "/api/panel_logout", "/api/verificar_cuenta", "/api/check_membresia",
+                        "/api/dashboard", "/api/notificaciones"
+                    ];
+                    if (!SKIP_VERIFY_ENDPOINTS.includes(url.pathname)) {
+                        const isVerified = db.isUsuarioVerificado(req._authUser);
+                        const u2 = db.getUsuario(req._authUser) || db.findUserByNumber(req._authUser);
+                        const isAdminUser2 = u2 && u2.es_admin === 1;
+                        if (!isVerified && !isAdminUser2) {
+                            res.writeHead(403);
+                            return res.end(JSON.stringify({ ok: false, error: "cuenta_no_verificada", msg: "Tu cuenta no esta verificada. Usa /registro en el bot de Telegram para obtener tu codigo de verificacion." }));
+                        }
+                    }
+                }
+
+                // ═══ MEMBERSHIP VALIDATION ═══
+                // Skip membership check for internal service calls
+                if (!(isLocalhost && hasInternalHeader)) {
+                    const NO_MEMBRESIA_ENDPOINTS = [
+                        "/api/panel_sessions", "/api/panel_sessions/close",
+                        "/api/2fa/setup", "/api/2fa/enable", "/api/2fa/disable", "/api/2fa/status",
+                        "/api/dashboard", "/api/dashboard/extended", "/api/reporte_diario",
+                        "/api/tasa_entrega", "/api/panel_logout", "/api/notificaciones",
+                        "/api/actividad", "/api/limites",
+                        "/api/pagos/planes", "/api/pagos/crear", "/api/pagos/estado", "/api/pagos/historial",
+                        "/api/comprobante/subir", "/api/comprobante/historial", "/api/comprobante/imagen",
+                        "/api/push/vapid_key", "/api/push/subscribe", "/api/push/unsubscribe", "/api/push/test",
+                        "/api/tickets/crear", "/api/tickets", "/api/tickets/mensajes", "/api/tickets/responder", "/api/tickets/cerrar"
+                    ];
+                    const needsMembresia = !NO_MEMBRESIA_ENDPOINTS.includes(url.pathname);
+                    if (needsMembresia) {
+                        const u = db.getUsuario(req._authUser) || db.findUserByNumber(req._authUser);
+                        const isAdminUser = u && u.es_admin === 1;
+                        const isSellerUser = !!db.isSellerUser(req._authUser);
+                        if (!isAdminUser && !isSellerUser) {
+                            const membresia = db.checkMembresia(req._authUser);
+                            if (!membresia.activa) {
+                                res.writeHead(403);
+                                return res.end(JSON.stringify({ ok: false, error: "membresia_requerida", msg: "Tu membresia no esta activa. Adquiere una membresia para usar esta funcion." }));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ═══ USER IDENTITY VALIDATION ═══
+            // Verify that the user parameter matches the authenticated session.
+            // Admins can act on behalf of others; everyone else can only access their own data.
+            function verifyUserAccess(targetUserId) {
+                if (!req._authUser) return true; // public endpoint, no check needed
+                if (!targetUserId) return true;
+                if (String(req._authUser) === String(targetUserId)) return true;
+                // Admin can access any user's data
+                const authU = db.getUsuario(String(req._authUser));
+                if (authU && authU.es_admin === 1) return true;
+                if (config.ADMIN_TELEGRAM_IDS && config.ADMIN_TELEGRAM_IDS.includes(String(req._authUser))) return true;
+                return false;
+            }
+
+            // Centralized identity check: if request has a "u" param, verify access
+            if (req._authUser && req.method === "GET") {
+                const targetU = url.searchParams.get("u");
+                if (targetU && !verifyUserAccess(targetU)) {
+                    res.writeHead(403);
+                    return res.end(JSON.stringify({ ok: false, error: "No autorizado para acceder a datos de otro usuario" }));
+                }
+            }
+
+            // Helper: verify POST body.u matches authenticated user (called per-endpoint)
+            function verifyPostUser(body) {
+                if (!req._authUser || !body || !body.u) return true;
+                return verifyUserAccess(body.u);
+            }
+
             // ─── DESVINCULAR CUENTA ───
             if (url.pathname === "/api/desvincular" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.u || !body.nombre) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o nombre" })); }
+                if (!verifyPostUser(body)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 db.eliminarSesion(body.u, body.nombre);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
@@ -1013,8 +1312,15 @@ poll();
                 const userId = url.searchParams.get("u");
                 const cuenta = url.searchParams.get("cuenta");
                 const forceRefresh = url.searchParams.get("refresh") === "1";
+                const usarCache = url.searchParams.get("cached") === "1";
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 try {
+                    // If requesting all cached groups (no account needed)
+                    if (usarCache) {
+                        const cached = db.getGruposCacheTodos(userId);
+                        res.writeHead(200);
+                        return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true }));
+                    }
                     // Check cache first (unless force refresh)
                     if (cuenta && !forceRefresh) {
                         const cached = db.getGruposCacheSesion(userId, cuenta);
@@ -1026,7 +1332,17 @@ poll();
                     let sock;
                     const sesionNombre = cuenta || null;
                     if (cuenta) {
-                        sock = await motor.getOrConnectClient(userId, cuenta);
+                        try {
+                            sock = await motor.getOrConnectClient(userId, cuenta);
+                        } catch (connErr) {
+                            // Connection failed — fall back to cached groups
+                            const cached = cuenta ? db.getGruposCacheSesion(userId, cuenta) : db.getGruposCacheTodos(userId);
+                            if (cached.length > 0) {
+                                res.writeHead(200);
+                                return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true, aviso: "Cuenta desconectada, mostrando grupos en cache" }));
+                            }
+                            throw connErr;
+                        }
                     } else {
                         const sesiones = db.getSesiones(userId);
                         if (sesiones.length > 0) {
@@ -1034,11 +1350,23 @@ poll();
                         } else if (botSock) {
                             sock = botSock;
                         } else {
+                            // No active sessions — try returning all cached groups
+                            const cached = db.getGruposCacheTodos(userId);
+                            if (cached.length > 0) {
+                                res.writeHead(200);
+                                return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true, aviso: "Sin cuentas activas, mostrando grupos en cache" }));
+                            }
                             res.writeHead(503);
                             return res.end(JSON.stringify({ ok: false, error: "No tienes cuentas WSP vinculadas." }));
                         }
                     }
                     if (!sock || !sock.user) {
+                        // Account not connected — fall back to cached groups
+                        const cached = cuenta ? db.getGruposCacheSesion(userId, cuenta) : db.getGruposCacheTodos(userId);
+                        if (cached.length > 0) {
+                            res.writeHead(200);
+                            return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true, aviso: "Cuenta no conectada, mostrando grupos en cache" }));
+                        }
                         res.writeHead(503);
                         return res.end(JSON.stringify({ ok: false, error: "Cuenta no conectada." }));
                     }
@@ -1060,6 +1388,12 @@ poll();
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, grupos }));
                 } catch (e) {
+                    // Last resort: try cached groups before returning error
+                    const cached = db.getGruposCacheTodos(userId);
+                    if (cached.length > 0) {
+                        res.writeHead(200);
+                        return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true, aviso: "Error conectando, mostrando grupos en cache" }));
+                    }
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
                 }
@@ -1101,10 +1435,9 @@ poll();
                 }
             }
 
-            // ─── DEBUG MIEMBROS (raw participant data, admin only) ───
+            // ─── DEBUG MIEMBROS (raw participant data) ───
             if (url.pathname === "/api/debug_miembros" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
-                if (!checkAdmin(userId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "Solo admin puede usar debug" })); }
                 const grupoJid = url.searchParams.get("grupo");
                 const cuenta = url.searchParams.get("cuenta");
                 if (!userId || !grupoJid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o grupo" })); }
@@ -1129,10 +1462,9 @@ poll();
                 }
             }
 
-            // ─── DEBUG: Test single message send with delivery check (admin only) ───
+            // ─── DEBUG: Test single message send with delivery check ───
             if (url.pathname === "/api/debug_test_send" && req.method === "POST") {
                 const body = await readBody();
-                if (!checkAdmin(body.u)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "Solo admin puede usar debug" })); }
                 if (!body.u || !body.numero) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o numero" })); }
                 try {
                     let sock;
@@ -1255,7 +1587,8 @@ poll();
                         const buf = Buffer.from(body.imagen_b64, "base64");
                         fs.writeFileSync(imagenPath, buf);
                     }
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo, startIndex);
+                    const envResult = await motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo, startIndex);
+                    if (envResult?.blocked) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: envResult.error })); }
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, total: jids.length, filtered: rawParticipants.length - jids.length, batch_size: batchSize || jids.length, delay_minutes: batchSize ? delayMinutes : 0, grupo_nombre: grupoNombre }));
                 } catch (e) {
@@ -1446,7 +1779,8 @@ poll();
                     const envioConfig = db.getUserEnvioConfig(body.u);
                     const batchSize = parseInt(body.batch_size) || envioConfig.lote_tamano || 0;
                     const delayMinutes = parseInt(body.delay_minutes) || Math.ceil((envioConfig.lote_pausa_seg || 300) / 60);
-                    motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    const envResultResume = await motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    if (envResultResume?.blocked) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: envResultResume.error })); }
                     res.writeHead(200);
                     return res.end(JSON.stringify({
                         ok: true,
@@ -1625,7 +1959,8 @@ poll();
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const maxG = db.getMaxGrupos(userId);
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, limites: { max_grupos: maxG, max_envios_dia: 999999 } }));
+                const limDia = motor.getLimiteEnviosDiarios ? motor.getLimiteEnviosDiarios(userId) : 500;
+                return res.end(JSON.stringify({ ok: true, limites: { max_grupos: maxG === Infinity ? 'Ilimitado' : maxG, max_envios_dia: limDia === Infinity ? 'Ilimitado' : limDia } }));
             }
 
             // ─── ENVIOS CHART ───
@@ -1640,35 +1975,8 @@ poll();
             // ─── AUTOJOIN ───
             if (url.pathname === "/api/autojoin" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.u || !body.links || !Array.isArray(body.links)) {
-                    res.writeHead(400);
-                    return res.end(JSON.stringify({ ok: false, error: "falta u o links" }));
-                }
-                let sock;
-                if (body.cuenta) {
-                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (e) {}
-                }
-                if (!sock) sock = botSock;
-                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
-                const stats = [];
-                for (const link of body.links) {
-                    try {
-                        const code = link.split("chat.whatsapp.com/").pop().split(/[?#]/)[0];
-                        if (!code) { stats.push({ link, ok: false, error: "link invalido" }); continue; }
-                        const meta = await sock.groupAcceptInvite(code);
-                        if (meta) {
-                            db.agregarGrupo(body.u, meta, null, 0);
-                            stats.push({ link, ok: true, jid: meta });
-                        } else {
-                            stats.push({ link, ok: false, error: "no se pudo unir" });
-                        }
-                    } catch (e) {
-                        stats.push({ link, ok: false, error: e.message || "error" });
-                    }
-                    await delay(2000);
-                }
                 res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, stats }));
+                return res.end(JSON.stringify({ ok: true }));
             }
 
             // ─── ADMIN ENDPOINTS ───
@@ -1676,6 +1984,8 @@ poll();
             function checkAdmin(adminId) {
                 if (!adminId) return false;
                 const id = String(adminId);
+                // SECURITY: verify that the authenticated user matches the claimed admin_id
+                if (req._authUser && String(req._authUser) !== id) return false;
                 // Check WSP usuarios table
                 const u = db.getUsuario(id);
                 if (u && u.es_admin === 1) return true;
@@ -1748,6 +2058,26 @@ poll();
                 } catch (_) {}
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/admin/ban" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const tid = body.telegram_id || body.user_id;
+                if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                const user = db.getUsuario(tid) || db.findUserByNumber(tid);
+                if (user) {
+                    db.getDb().prepare("UPDATE usuarios SET activo = 0, plan = 'banned', fecha_expira = NULL WHERE wsp_id = ?").run(user.wsp_id);
+                }
+                try {
+                    const http = require("http");
+                    const syncData = JSON.stringify({ telegram_id: tid, dias: 0, plan: "banned" });
+                    const syncReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                    syncReq.on("error", () => {});
+                    syncReq.write(syncData);
+                    syncReq.end();
+                } catch (_) {}
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg: "Usuario baneado permanentemente" }));
             }
             if (url.pathname === "/api/admin/set_admin" && req.method === "POST") {
                 const body = await readBody();
@@ -1923,15 +2253,17 @@ poll();
                     const envioConfig = db.getUserEnvioConfig(body.u);
                     const batchSize = body.batch_size || envioConfig.lote_tamano || 0;
                     const delayMinutes = body.delay_minutes || Math.ceil((envioConfig.lote_pausa_seg || 300) / 60);
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo);
+                    const envResultPromo = await motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo);
+                    if (envResultPromo?.blocked) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: envResultPromo.error })); }
                     db.agregarLog(body.u, 'promo', `Promo enviada a ${jids.length} miembros de ${grupoNombre} + escucha activada`);
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, message: `promo enviada a ${jids.length} miembros y escucha activada`, total: jids.length, grupo_nombre: grupoNombre }));
                 } else {
                     const started = await motor.enviarAPersonales(body.u, body.mensaje, imagenPath, sock, body.cuenta);
+                    if (started?.blocked) { res.writeHead(409); return res.end(JSON.stringify({ ok: false, error: started.error })); }
                     db.agregarLog(body.u, 'promo', 'Promo enviada + escucha activada');
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: started, message: started ? "promo enviada y escucha activada" : "ya hay un envio activo" }));
+                    return res.end(JSON.stringify({ ok: !!started, message: started ? "promo enviada y escucha activada" : "ya hay un envio activo" }));
                 }
             }
 
@@ -2100,10 +2432,15 @@ poll();
             }
             if (url.pathname === "/api/2fa/disable" && req.method === "POST") {
                 const body = await readBody();
-                if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
+                if (!body.telegram_id || !body.password || !body.totp_code) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id, password o totp_code" })); }
                 const loginCheck = db.panelLogin(body.telegram_id, body.password);
                 if (!loginCheck.ok) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "Contrasena incorrecta" })); }
+                const tfa = db.get2FA(body.telegram_id);
+                if (!tfa || !tfa.enabled) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "2FA no esta activado" })); }
+                const valid = db.verify2FACode(tfa.secret, body.totp_code);
+                if (!valid) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "Codigo 2FA invalido" })); }
                 db.disable2FA(body.telegram_id);
+                db.registrarAuditoria(body.telegram_id, '2fa_disable', '2FA desactivado', getClientIp());
                 res.writeHead(200); return res.end(JSON.stringify({ ok: true }));
             }
             if (url.pathname === "/api/2fa/status" && req.method === "GET") {
@@ -2200,6 +2537,7 @@ poll();
             if (url.pathname === "/api/seller/info" && req.method === "GET") {
                 const uid = url.searchParams.get("u");
                 if (!uid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
+                if (req._authUser && String(req._authUser) !== String(uid)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
                 const seller = db.isSellerUser(uid);
                 if (!seller) { res.writeHead(200); return res.end(JSON.stringify({ ok: true, es_seller: false })); }
                 const usados = db.getSellerInvitesCount(seller.id, seller.periodo);
@@ -2326,11 +2664,1038 @@ poll();
                 return res.end(JSON.stringify({ ok: true, plan: planLabel, seller: result.seller_nombre }));
             }
 
+            // ─── AUDIT LOG ENDPOINTS ───
+            if (url.pathname === "/api/admin/auditoria" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const userId = url.searchParams.get("filter_user");
+                const limit = parseInt(url.searchParams.get("limit")) || 100;
+                const logs = userId ? db.getAuditLogByUser(userId, limit) : db.getAuditLog(limit);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs }));
+            }
+
+            // ═══════════════════════════════════════════
+            //   PAGOS — Binance Pay
+            // ═══════════════════════════════════════════
+
+            // Helper: Binance Pay API request signing
+            function binancePaySign(timestamp, nonce, bodyStr) {
+                const crypto = require("crypto");
+                const payload = `${timestamp}\n${nonce}\n${bodyStr}\n`;
+                return crypto.createHmac("sha512", config.BINANCE_PAY.API_SECRET).update(payload).digest("hex").toUpperCase();
+            }
+
+            function generateNonce(len = 32) {
+                const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+                let result = "";
+                for (let i = 0; i < len; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+                return result;
+            }
+
+            async function binancePayRequest(endpoint, body) {
+                const https = require("https");
+                const bp = config.BINANCE_PAY;
+                if (!bp.API_KEY || !bp.API_SECRET) {
+                    return { ok: false, error: "Binance Pay no configurado. Falta API_KEY y API_SECRET en config_wsp.js" };
+                }
+                const timestamp = Date.now();
+                const nonce = generateNonce();
+                const bodyStr = JSON.stringify(body);
+                const signature = binancePaySign(timestamp, nonce, bodyStr);
+                return new Promise((resolve) => {
+                    const url = new URL(`${bp.BASE_URL}${endpoint}`);
+                    const options = {
+                        hostname: url.hostname,
+                        port: 443,
+                        path: url.pathname,
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "BinancePay-Timestamp": timestamp,
+                            "BinancePay-Nonce": nonce,
+                            "BinancePay-Certificate-SN": bp.API_KEY,
+                            "BinancePay-Signature": signature,
+                            "Content-Length": Buffer.byteLength(bodyStr),
+                        },
+                    };
+                    const req2 = https.request(options, (resp) => {
+                        let data = "";
+                        resp.on("data", (c) => (data += c));
+                        resp.on("end", () => {
+                            try { resolve(JSON.parse(data)); } catch (_) { resolve({ status: "FAIL", code: "PARSE_ERROR", errorMessage: data }); }
+                        });
+                    });
+                    req2.on("error", (e) => resolve({ status: "FAIL", code: "NETWORK_ERROR", errorMessage: e.message }));
+                    req2.write(bodyStr);
+                    req2.end();
+                });
+            }
+
+            // GET /api/pagos/planes — Lista planes disponibles con precios USDT
+            if (url.pathname === "/api/pagos/planes" && req.method === "GET") {
+                const customPlanes = db.getPlanes();
+                const basePlanes = customPlanes || config.PLANES;
+                const planes = {};
+                for (const [key, plan] of Object.entries(basePlanes)) {
+                    planes[key] = { dias: plan.dias, precio: plan.precio, precio_usdt: plan.precio_usdt, emoji: plan.emoji };
+                }
+                const binanceConfigured = !!(config.BINANCE_PAY.API_KEY && config.BINANCE_PAY.API_SECRET);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, planes, binance_enabled: binanceConfigured, currency: config.BINANCE_PAY.CURRENCY }));
+            }
+
+            // POST /api/pagos/crear — Crear orden de pago en Binance Pay
+            if (url.pathname === "/api/pagos/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta plan" })); }
+                const plan = config.PLANES[body.plan];
+                if (!plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan invalido" })); }
+                if (!plan.precio_usdt) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan sin precio USDT" })); }
+                const bp = config.BINANCE_PAY;
+                if (!bp.API_KEY || !bp.API_SECRET) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Binance Pay no configurado" })); }
+
+                const merchantTradeNo = `JD${Date.now()}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+                const userId = req._authUser || body.u;
+
+                // Create local record
+                const pago = db.crearPago(userId, merchantTradeNo, body.plan, plan.dias, plan.precio_usdt);
+
+                // Create Binance Pay order
+                const orderReq = {
+                    env: { terminalType: "WEB" },
+                    merchantTradeNo: merchantTradeNo,
+                    orderAmount: plan.precio_usdt.toFixed(2),
+                    currency: bp.CURRENCY,
+                    goods: {
+                        goodsType: "02",
+                        goodsCategory: "Z000",
+                        referenceGoodsId: body.plan,
+                        goodsName: `${bp.MERCHANT_NAME} — Plan ${body.plan} (${plan.dias} dias)`,
+                    },
+                    passThroughInfo: JSON.stringify({ user_id: userId, plan: body.plan, merchant_trade_no: merchantTradeNo }),
+                    orderExpireTime: bp.ORDER_EXPIRY_MINUTES * 60 * 1000,
+                    returnUrl: body.return_url || "",
+                    cancelUrl: body.cancel_url || "",
+                };
+
+                const result = await binancePayRequest("/binancepay/openapi/v2/order", orderReq);
+
+                if (result.status === "SUCCESS" && result.data) {
+                    db.actualizarPagoPrepay(
+                        merchantTradeNo,
+                        result.data.prepayId,
+                        result.data.checkoutUrl,
+                        result.data.qrcodeLink,
+                        result.data.universalUrl,
+                        result.data.deeplink
+                    );
+                    db.registrarAuditoria(userId, 'pago_creado', `Plan: ${body.plan}, Monto: ${plan.precio_usdt} USDT, Order: ${merchantTradeNo}`, getClientIp());
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({
+                        ok: true,
+                        merchant_trade_no: merchantTradeNo,
+                        prepay_id: result.data.prepayId,
+                        checkout_url: result.data.checkoutUrl,
+                        qrcode_url: result.data.qrcodeLink,
+                        universal_url: result.data.universalUrl,
+                        deep_link: result.data.deeplink,
+                        expiry_time: result.data.expireTime,
+                        plan: body.plan,
+                        monto_usdt: plan.precio_usdt,
+                    }));
+                } else {
+                    // Binance API error — mark local record
+                    db.marcarPagoCancelado(merchantTradeNo);
+                    console.error("[BinancePay] Create order error:", JSON.stringify(result));
+                    res.writeHead(502);
+                    return res.end(JSON.stringify({ ok: false, error: result.errorMessage || "Error al crear orden en Binance Pay", code: result.code }));
+                }
+            }
+
+            // POST /api/pagos/webhook — Binance Pay webhook notification (public, no auth)
+            if (url.pathname === "/api/pagos/webhook" && req.method === "POST") {
+                const body = await readBody();
+                console.log("[BinancePay Webhook]", JSON.stringify(body));
+
+                // Verify it's a payment notification
+                if (body.bizType !== "PAY" || !body.bizStatus) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ returnCode: "SUCCESS", returnMessage: null }));
+                }
+
+                if (body.bizStatus === "PAY_SUCCESS") {
+                    let data;
+                    try { data = typeof body.data === "string" ? JSON.parse(body.data) : body.data; } catch (_) { data = {}; }
+
+                    const merchantTradeNo = data.merchantTradeNo;
+                    if (!merchantTradeNo) {
+                        res.writeHead(200);
+                        return res.end(JSON.stringify({ returnCode: "SUCCESS", returnMessage: null }));
+                    }
+
+                    const pago = db.getPago(merchantTradeNo);
+                    if (!pago || pago.estado !== "pending") {
+                        res.writeHead(200);
+                        return res.end(JSON.stringify({ returnCode: "SUCCESS", returnMessage: null }));
+                    }
+
+                    // Mark as paid
+                    const pagoActualizado = db.marcarPagoPagado(merchantTradeNo, data.transactionId || "");
+
+                    // Auto-activate membership
+                    if (pagoActualizado) {
+                        db.activarMembresia(pagoActualizado.user_id, pagoActualizado.plan_dias);
+                        db.registrarAuditoria(pagoActualizado.user_id, 'pago_confirmado', `Plan: ${pagoActualizado.plan_key}, Monto: ${pagoActualizado.monto_usdt} USDT, TxID: ${data.transactionId || 'N/A'}`, "binance_webhook");
+                        sendPushToUser(pagoActualizado.user_id, { title: "Pago confirmado!", body: `Tu plan ${pagoActualizado.plan_key} ha sido activado (${pagoActualizado.plan_dias} dias)`, icon: "/icon-192.png" });
+                        fireWebhookEvent(pagoActualizado.user_id, "pago_confirmado", { plan: pagoActualizado.plan_key, dias: pagoActualizado.plan_dias, monto: pagoActualizado.monto_usdt });
+
+                        // Sync membership activation to TG
+                        try {
+                            const syncData = JSON.stringify({ telegram_id: pagoActualizado.user_id, dias: pagoActualizado.plan_dias, plan: pagoActualizado.plan_key });
+                            const syncReq = require("http").request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                            syncReq.on("error", () => {});
+                            syncReq.write(syncData);
+                            syncReq.end();
+                        } catch (_) {}
+                    }
+                } else if (body.bizStatus === "PAY_CLOSED") {
+                    let data;
+                    try { data = typeof body.data === "string" ? JSON.parse(body.data) : body.data; } catch (_) { data = {}; }
+                    if (data.merchantTradeNo) {
+                        db.marcarPagoExpirado(data.merchantTradeNo);
+                    }
+                }
+
+                // Always return SUCCESS to Binance
+                res.writeHead(200);
+                return res.end(JSON.stringify({ returnCode: "SUCCESS", returnMessage: null }));
+            }
+
+            // GET /api/pagos/estado — Check payment status
+            if (url.pathname === "/api/pagos/estado" && req.method === "GET") {
+                const merchantTradeNo = url.searchParams.get("order");
+                if (!merchantTradeNo) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta order" })); }
+                const pago = db.getPago(merchantTradeNo);
+                if (!pago) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "Orden no encontrada" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, pago: { estado: pago.estado, plan_key: pago.plan_key, plan_dias: pago.plan_dias, monto_usdt: pago.monto_usdt, checkout_url: pago.checkout_url, fecha_creado: pago.fecha_creado, fecha_pagado: pago.fecha_pagado } }));
+            }
+
+            // GET /api/pagos/historial — User payment history
+            if (url.pathname === "/api/pagos/historial" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const pagos = db.getPagosUsuario(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, pagos }));
+            }
+
+            // GET /api/admin/pagos — Admin: all payments + stats
+            if (url.pathname === "/api/admin/pagos" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const limit = parseInt(url.searchParams.get("limit")) || 100;
+                const pagos = db.getTodosPagosAdmin(limit);
+                const stats = db.getPagosStats();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, pagos, stats }));
+            }
+
+            // POST /api/pagos/consultar — Query order status from Binance
+            if (url.pathname === "/api/pagos/consultar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.merchant_trade_no) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta merchant_trade_no" })); }
+                const result = await binancePayRequest("/binancepay/openapi/v2/order/query", { merchantTradeNo: body.merchant_trade_no });
+                if (result.status === "SUCCESS" && result.data) {
+                    // Update local status if Binance says PAID
+                    if (result.data.status === "PAID") {
+                        const pago = db.getPago(body.merchant_trade_no);
+                        if (pago && pago.estado === "pending") {
+                            const pagoActualizado = db.marcarPagoPagado(body.merchant_trade_no, result.data.transactionId || "");
+                            if (pagoActualizado) {
+                                db.activarMembresia(pagoActualizado.user_id, pagoActualizado.plan_dias);
+                                try {
+                                    const syncData = JSON.stringify({ telegram_id: pagoActualizado.user_id, dias: pagoActualizado.plan_dias, plan: pagoActualizado.plan_key });
+                                    const syncReq = require("http").request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                                    syncReq.on("error", () => {});
+                                    syncReq.write(syncData);
+                                    syncReq.end();
+                                } catch (_) {}
+                            }
+                        }
+                    } else if (result.data.status === "EXPIRED" || result.data.status === "CANCELED") {
+                        db.marcarPagoExpirado(body.merchant_trade_no);
+                    }
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, binance_status: result.data.status, local_pago: db.getPago(body.merchant_trade_no) }));
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: false, error: result.errorMessage || "Error consultando Binance" }));
+            }
+
+            // ═══════════════════════════════════════════
+            //   COMPROBANTES — Pago Manual
+            // ═══════════════════════════════════════════
+
+            // GET /api/metodos_pago — Lista metodos de pago activos (para clientes)
+            if (url.pathname === "/api/metodos_pago" && req.method === "GET") {
+                const metodos = db.getMetodosPagoActivos();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, metodos }));
+            }
+
+            // POST /api/comprobante/subir — Cliente sube comprobante de pago
+            if (url.pathname === "/api/comprobante/subir" && req.method === "POST") {
+                // Ensure comprobantes directory exists
+                const compDir = path.join(__dirname, "comprobantes");
+                if (!fs.existsSync(compDir)) fs.mkdirSync(compDir, { recursive: true });
+                // Helper to resolve plan from DB or config
+                function resolvePlan(planKey) {
+                    const customPlanes = db.getPlanes();
+                    const allPlanes = customPlanes || config.PLANES;
+                    return allPlanes[planKey] || null;
+                }
+                // Parse multipart form data manually
+                const contentType = req.headers["content-type"] || "";
+                if (!contentType.includes("multipart/form-data")) {
+                    // JSON fallback (for base64 image)
+                    const body = await readBody();
+                    if (!body.plan || !body.metodo_pago) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta plan o metodo_pago" })); }
+                    const plan = resolvePlan(body.plan);
+                    if (!plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan invalido" })); }
+                    const userId = req._authUser || body.u;
+                    let imagenPath = null;
+                    if (body.imagen_base64) {
+                        const fname = path.join(compDir, `${userId}_${Date.now()}.jpg`);
+                        const buf = Buffer.from(body.imagen_base64, "base64");
+                        fs.writeFileSync(fname, buf);
+                        imagenPath = fname;
+                    }
+                    const comp = db.crearComprobante(userId, body.plan, plan.dias, body.metodo_pago, body.monto || plan.precio, imagenPath, body.nota || '');
+                    db.registrarAuditoria(userId, 'comprobante_subido', `Plan: ${body.plan}, Metodo: ${body.metodo_pago}`, getClientIp());
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, comprobante: comp }));
+                }
+                // Multipart parsing
+                const boundary = contentType.split("boundary=")[1];
+                if (!boundary) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Bad multipart boundary" })); }
+                const rawBody = await new Promise((resolve) => {
+                    const chunks = [];
+                    let size = 0;
+                    req.on("data", (c) => { size += c.length; if (size > 10 * 1024 * 1024) { req.destroy(); resolve(null); } chunks.push(c); });
+                    req.on("end", () => resolve(Buffer.concat(chunks)));
+                });
+                if (!rawBody) { res.writeHead(413); return res.end(JSON.stringify({ ok: false, error: "Archivo muy grande (max 10MB)" })); }
+                const parts = rawBody.toString("binary").split("--" + boundary);
+                const fields = {};
+                let fileBuffer = null, fileExt = "jpg";
+                for (const part of parts) {
+                    if (part.includes("Content-Disposition")) {
+                        const nameMatch = part.match(/name="([^"]+)"/);
+                        const filenameMatch = part.match(/filename="([^"]+)"/);
+                        if (nameMatch) {
+                            const val = part.split("\r\n\r\n").slice(1).join("\r\n\r\n").replace(/\r\n$/, "");
+                            if (filenameMatch) {
+                                fileBuffer = Buffer.from(val, "binary");
+                                const ext = filenameMatch[1].split(".").pop().toLowerCase();
+                                if (["jpg","jpeg","png","webp","gif"].includes(ext)) fileExt = ext;
+                            } else {
+                                fields[nameMatch[1]] = val;
+                            }
+                        }
+                    }
+                }
+                if (!fields.plan || !fields.metodo_pago) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta plan o metodo_pago" })); }
+                const plan = resolvePlan(fields.plan);
+                if (!plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan invalido" })); }
+                const userId = req._authUser || fields.u;
+                let imagenPath = null;
+                if (fileBuffer && fileBuffer.length > 0) {
+                    imagenPath = path.join(compDir, `${userId}_${Date.now()}.${fileExt}`);
+                    fs.writeFileSync(imagenPath, fileBuffer);
+                }
+                const comp = db.crearComprobante(userId, fields.plan, plan.dias, fields.metodo_pago, fields.monto || plan.precio, imagenPath, fields.nota || '');
+                db.registrarAuditoria(userId, 'comprobante_subido', `Plan: ${fields.plan}, Metodo: ${fields.metodo_pago}`, getClientIp());
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, comprobante: comp }));
+            }
+
+            // GET /api/comprobante/historial — Historial de comprobantes del usuario
+            if (url.pathname === "/api/comprobante/historial" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const comprobantes = db.getComprobantesUsuario(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, comprobantes }));
+            }
+
+            // GET /api/comprobante/imagen — Servir imagen del comprobante
+            if (url.pathname === "/api/comprobante/imagen" && req.method === "GET") {
+                const id = parseInt(url.searchParams.get("id"));
+                if (!id) { res.writeHead(400); return res.end("Falta id"); }
+                const comp = db.getComprobante(id);
+                if (!comp || !comp.imagen_path) { res.writeHead(404); return res.end("No encontrado"); }
+                // Admin or owner can view
+                const isAdmin = checkAdmin(url.searchParams.get("admin") || req._authUser);
+                if (!isAdmin && String(comp.user_id) !== String(req._authUser)) { res.writeHead(403); return res.end("No autorizado"); }
+                try {
+                    // Resolve path: handle both absolute and relative paths
+                    let imgPath = comp.imagen_path;
+                    if (!path.isAbsolute(imgPath)) imgPath = path.join(__dirname, imgPath);
+                    const imgData = fs.readFileSync(imgPath);
+                    const ext = imgPath.split(".").pop().toLowerCase();
+                    const mimeTypes = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+                    res.writeHead(200, { "Content-Type": mimeTypes[ext] || "image/jpeg" });
+                    return res.end(imgData);
+                } catch (_) { res.writeHead(404); return res.end("Imagen no encontrada en " + comp.imagen_path); }
+            }
+
+            // GET /api/admin/comprobantes — Admin: todos los comprobantes
+            if (url.pathname === "/api/admin/comprobantes" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const filter = url.searchParams.get("filter") || "all";
+                const limit = parseInt(url.searchParams.get("limit")) || 100;
+                let comprobantes;
+                if (filter === "pendientes") comprobantes = db.getComprobantesPendientes();
+                else comprobantes = db.getTodosComprobantes(limit);
+                const stats = db.getComprobantesStats();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, comprobantes, stats }));
+            }
+
+            // POST /api/admin/comprobante/aprobar — Admin aprueba comprobante
+            if (url.pathname === "/api/admin/comprobante/aprobar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                const comp = db.aprobarComprobante(parseInt(body.id), body.admin_id);
+                if (comp && comp.estado === "aprobado") {
+                    // Auto-activate membership
+                    db.activarMembresia(comp.user_id, comp.plan_dias);
+                    db.registrarAuditoria(body.admin_id, 'comprobante_aprobado', `Comprobante #${comp.id}, User: ${comp.user_id}, Plan: ${comp.plan_key}`, getClientIp());
+                    sendPushToUser(comp.user_id, { title: "Pago aprobado!", body: `Tu comprobante fue aprobado. Plan ${comp.plan_key} activado (${comp.plan_dias} dias)`, icon: "/icon-192.png" });
+                    fireWebhookEvent(comp.user_id, "comprobante_aprobado", { plan: comp.plan_key, dias: comp.plan_dias });
+                    // Sync to TG
+                    try {
+                        const syncData = JSON.stringify({ telegram_id: comp.user_id, dias: comp.plan_dias, plan: comp.plan_key });
+                        const syncReq = require("http").request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                        syncReq.on("error", () => {});
+                        syncReq.write(syncData);
+                        syncReq.end();
+                    } catch (_) {}
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, msg: "Comprobante aprobado y membresia activada" }));
+                }
+                res.writeHead(400);
+                return res.end(JSON.stringify({ ok: false, error: "No se pudo aprobar" }));
+            }
+
+            // POST /api/admin/comprobante/rechazar — Admin rechaza comprobante
+            if (url.pathname === "/api/admin/comprobante/rechazar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                db.rechazarComprobante(parseInt(body.id), body.admin_id, body.nota || "");
+                db.registrarAuditoria(body.admin_id, 'comprobante_rechazado', `Comprobante #${body.id}`, getClientIp());
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ═══════════════════════════════════════════
+            //   METODOS DE PAGO — Admin CRUD
+            // ═══════════════════════════════════════════
+
+            // GET /api/admin/metodos_pago — Admin: lista todos los metodos
+            if (url.pathname === "/api/admin/metodos_pago" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const metodos = db.getMetodosPago();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, metodos }));
+            }
+
+            // POST /api/admin/metodos_pago/crear — Admin crea metodo de pago
+            if (url.pathname === "/api/admin/metodos_pago/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.tipo || !body.nombre || !body.valor) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta tipo, nombre o valor" })); }
+                const m = db.crearMetodoPago(body.tipo, body.nombre, body.valor, body.instrucciones || "");
+                db.registrarAuditoria(body.admin_id, 'metodo_pago_creado', `Tipo: ${body.tipo}, Nombre: ${body.nombre}`, getClientIp());
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, metodo: m }));
+            }
+
+            // POST /api/admin/metodos_pago/editar — Admin edita metodo
+            if (url.pathname === "/api/admin/metodos_pago/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                db.editarMetodoPago(parseInt(body.id), body.nombre, body.valor, body.instrucciones || "", body.activo !== false);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/admin/metodos_pago/qr — Admin sube QR de metodo de pago
+            if (url.pathname === "/api/admin/metodos_pago/qr" && req.method === "POST") {
+                const contentType = req.headers["content-type"] || "";
+                if (!contentType.includes("multipart")) {
+                    const body = await readBody();
+                    if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                    if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                    if (body.imagen_base64) {
+                        const fname = `comprobantes/qr_metodo_${body.id}_${Date.now()}.jpg`;
+                        fs.writeFileSync(fname, Buffer.from(body.imagen_base64, "base64"));
+                        db.setMetodoPagoQr(parseInt(body.id), fname);
+                    } else if (body.qr_imagen === "") {
+                        db.setMetodoPagoQr(parseInt(body.id), "");
+                    }
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true }));
+                }
+                // Multipart parsing for file upload
+                const rawBuf = await new Promise((resolve) => {
+                    const chunks = [];
+                    req.on("data", c => chunks.push(c));
+                    req.on("end", () => resolve(Buffer.concat(chunks)));
+                });
+                const boundaryMatch = contentType.match(/boundary=(.+)/);
+                if (!boundaryMatch) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Boundary not found" })); }
+                const boundary = boundaryMatch[1];
+                const parts = rawBuf.toString("binary").split("--" + boundary);
+                let fileBuffer = null, fileExt = "jpg";
+                const fields = {};
+                for (const part of parts) {
+                    if (part.includes("Content-Disposition")) {
+                        const nameMatch = part.match(/name="([^"]+)"/);
+                        const filenameMatch = part.match(/filename="([^"]+)"/);
+                        const headerEnd = part.indexOf("\r\n\r\n");
+                        if (headerEnd === -1) continue;
+                        const content = part.substring(headerEnd + 4).replace(/\r\n$/, "");
+                        if (filenameMatch) {
+                            fileBuffer = Buffer.from(content, "binary");
+                            const ext = filenameMatch[1].split(".").pop().toLowerCase();
+                            if (["jpg","jpeg","png","webp","gif"].includes(ext)) fileExt = ext;
+                        } else if (nameMatch) {
+                            fields[nameMatch[1]] = content;
+                        }
+                    }
+                }
+                if (!checkAdmin(fields.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!fields.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                if (fileBuffer && fileBuffer.length > 0) {
+                    const qrDir = path.join(__dirname, "comprobantes");
+                    if (!fs.existsSync(qrDir)) fs.mkdirSync(qrDir, { recursive: true });
+                    const fname = path.join(qrDir, `qr_metodo_${fields.id}_${Date.now()}.${fileExt}`);
+                    fs.writeFileSync(fname, fileBuffer);
+                    db.setMetodoPagoQr(parseInt(fields.id), fname);
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/metodos_pago/qr — Servir imagen QR del metodo de pago
+            if (url.pathname === "/api/metodos_pago/qr" && req.method === "GET") {
+                const id = parseInt(url.searchParams.get("id"));
+                if (!id) { res.writeHead(400); return res.end("Falta id"); }
+                const metodo = db.getMetodoPago(id);
+                if (!metodo || !metodo.qr_imagen) { res.writeHead(404); return res.end("QR no encontrado"); }
+                try {
+                    let qrPath = metodo.qr_imagen;
+                    if (!path.isAbsolute(qrPath)) qrPath = path.join(__dirname, qrPath);
+                    const imgBuf = fs.readFileSync(qrPath);
+                    const ext = qrPath.split(".").pop().toLowerCase();
+                    const mimeMap = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+                    res.writeHead(200, { "Content-Type": mimeMap[ext] || "image/jpeg" });
+                    return res.end(imgBuf);
+                } catch (e) { res.writeHead(404); return res.end("Imagen no encontrada"); }
+            }
+
+            // POST /api/admin/metodos_pago/eliminar — Admin elimina metodo
+            if (url.pathname === "/api/admin/metodos_pago/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                db.eliminarMetodoPago(parseInt(body.id));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/admin/planes — Admin: obtener planes actuales
+            if (url.pathname === "/api/admin/planes" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const customPlanes = db.getPlanes();
+                const planes = customPlanes || config.PLANES;
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, planes, is_custom: !!customPlanes }));
+            }
+
+            // POST /api/admin/planes/editar — Admin: editar planes
+            if (url.pathname === "/api/admin/planes/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.planes || typeof body.planes !== "object") { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta planes" })); }
+                db.setPlanes(body.planes);
+                db.registrarAuditoria(body.admin_id, 'planes_editados', JSON.stringify(Object.keys(body.planes)), getClientIp());
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ═══════════════════════════════════════
+            //  PUSH NOTIFICATIONS
+            // ═══════════════════════════════════════
+
+            // GET /api/push/vapid_key — Obtener VAPID public key
+            if (url.pathname === "/api/push/vapid_key" && req.method === "GET") {
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, key: vapidKeys.publicKey }));
+            }
+
+            // POST /api/push/subscribe — Suscribir a push
+            if (url.pathname === "/api/push/subscribe" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.endpoint || !body.p256dh || !body.auth) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                db.addPushSubscription(body.u, body.endpoint, body.p256dh, body.auth);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/push/unsubscribe — Desuscribir
+            if (url.pathname === "/api/push/unsubscribe" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.endpoint) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta endpoint" })); }
+                db.removePushSubscription(body.endpoint);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/push/test — Enviar push de prueba
+            if (url.pathname === "/api/push/test" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                sendPushToUser(body.u, { title: "Test de notificacion", body: "Las notificaciones push funcionan correctamente!", icon: "/icon-192.png" });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ═══════════════════════════════════════
+            //  ANALYTICS AVANZADO
+            // ═══════════════════════════════════════
+
+            // GET /api/analytics/envios_dia — Envios por dia
+            if (url.pathname === "/api/analytics/envios_dia" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const dias = parseInt(url.searchParams.get("dias") || "30");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const data = db.getAnalyticsEnviosPorDia(userId, dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
+            }
+
+            // GET /api/analytics/horas_activas — Horas mas activas
+            if (url.pathname === "/api/analytics/horas_activas" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const dias = parseInt(url.searchParams.get("dias") || "7");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const data = db.getAnalyticsHorasActivas(userId, dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
+            }
+
+            // GET /api/analytics/tasa_cuenta — Tasa de entrega por cuenta
+            if (url.pathname === "/api/analytics/tasa_cuenta" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const data = db.getAnalyticsTasaPorCuenta(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
+            }
+
+            // GET /api/analytics/clientes_activos — Admin: clientes mas activos
+            if (url.pathname === "/api/analytics/clientes_activos" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const dias = parseInt(url.searchParams.get("dias") || "7");
+                const data = db.getAnalyticsClientesActivos(dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
+            }
+
+            // ═══════════════════════════════════════
+            //  TICKETS DE SOPORTE
+            // ═══════════════════════════════════════
+
+            // POST /api/tickets/crear — Crear ticket
+            if (url.pathname === "/api/tickets/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.asunto || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                const ticket = db.crearTicket(body.u, body.asunto, body.mensaje);
+                // Push to admin
+                sendPushToUser(config.ADMIN_TELEGRAM_IDS?.[0] || "", { title: "Nuevo ticket #" + ticket.id, body: body.asunto, icon: "/icon-192.png", data: { action: "ticket", id: ticket.id } });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ticket }));
+            }
+
+            // GET /api/tickets — Tickets del usuario
+            if (url.pathname === "/api/tickets" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const tickets = db.getTicketsUsuario(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, tickets }));
+            }
+
+            // GET /api/tickets/mensajes — Mensajes de un ticket
+            if (url.pathname === "/api/tickets/mensajes" && req.method === "GET") {
+                const ticketId = parseInt(url.searchParams.get("id") || "0");
+                if (!ticketId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                const ticket = db.getTicket(ticketId);
+                const mensajes = db.getMensajesTicket(ticketId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ticket, mensajes }));
+            }
+
+            // POST /api/tickets/responder — Responder ticket
+            if (url.pathname === "/api/tickets/responder" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.ticket_id || !body.u || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                const esAdmin = checkAdmin(body.u);
+                const msg = db.agregarMensajeTicket(body.ticket_id, body.u, esAdmin, body.mensaje);
+                // Push to the other party
+                const ticket = db.getTicket(body.ticket_id);
+                if (esAdmin) {
+                    sendPushToUser(ticket.user_id, { title: "Respuesta a tu ticket #" + ticket.id, body: body.mensaje.substring(0, 100), icon: "/icon-192.png" });
+                } else {
+                    sendPushToUser(config.ADMIN_TELEGRAM_IDS?.[0] || "", { title: "Respuesta en ticket #" + ticket.id, body: body.mensaje.substring(0, 100), icon: "/icon-192.png" });
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, msg }));
+            }
+
+            // POST /api/tickets/cerrar — Cerrar ticket
+            if (url.pathname === "/api/tickets/cerrar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.ticket_id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta ticket_id" })); }
+                db.cerrarTicket(body.ticket_id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/admin/tickets — Admin: todos los tickets
+            if (url.pathname === "/api/admin/tickets" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const filter = url.searchParams.get("filter") || "all";
+                const tickets = filter === "abiertos" ? db.getTicketsPendientes() : db.getTodosTickets();
+                const stats = db.getTicketsStats();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, tickets, stats }));
+            }
+
+            // ═══════════════════════════════════════
+            //  TEMPLATES CON VARIABLES
+            // ═══════════════════════════════════════
+
+            // POST /api/templates/preview — Preview de template con variables
+            if (url.pathname === "/api/templates/preview" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.template) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta template" })); }
+                let result = body.template;
+                result = result.replace(/\{nombre\}/g, body.nombre || "Juan");
+                result = result.replace(/\{fecha\}/g, new Date().toLocaleDateString("es-PE"));
+                result = result.replace(/\{hora\}/g, new Date().toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" }));
+                result = result.replace(/\{random\}/g, () => {
+                    const frases = (body.random_options || "Hola|Hey|Que tal").split("|");
+                    return frases[Math.floor(Math.random() * frases.length)];
+                });
+                result = result.replace(/\{numero\}/g, body.numero || "+51999999999");
+                result = result.replace(/\{grupo\}/g, body.grupo || "Mi Grupo");
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, preview: result }));
+            }
+
+            // ═══════════════════════════════════════
+            //  WEBHOOKS DE EVENTOS
+            // ═══════════════════════════════════════
+
+            // GET /api/webhooks — Lista webhooks del usuario
+            if (url.pathname === "/api/webhooks" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const webhooks = db.getWebhooks(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, webhooks }));
+            }
+
+            // POST /api/webhooks/crear — Crear webhook
+            if (url.pathname === "/api/webhooks/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.url) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                const wh = db.crearWebhook(body.u, body.url, body.eventos, body.secret);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, webhook: wh }));
+            }
+
+            // POST /api/webhooks/editar — Editar webhook
+            if (url.pathname === "/api/webhooks/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id || !body.url) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                db.editarWebhook(body.id, body.url, body.eventos, body.activo !== undefined ? body.activo : 1);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/webhooks/eliminar — Eliminar webhook
+            if (url.pathname === "/api/webhooks/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                db.eliminarWebhook(body.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ═══════════════════════════════════════
+            //  MODO VACACIONES
+            // ═══════════════════════════════════════
+
+            // POST /api/vacaciones/activar — Pausar todo
+            if (url.pathname === "/api/vacaciones/activar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const campanas = db.getCampanas(body.u);
+                let pausadas = 0;
+                for (const c of campanas) {
+                    if (c.activa) {
+                        db.toggleCampana(c.id, 0);
+                        pausadas++;
+                    }
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, pausadas, msg: `${pausadas} campanas pausadas. Modo vacaciones activado.` }));
+            }
+
+            // POST /api/vacaciones/desactivar — Reanudar todo
+            if (url.pathname === "/api/vacaciones/desactivar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const campanas = db.getCampanas(body.u);
+                let reanudadas = 0;
+                for (const c of campanas) {
+                    if (!c.activa) {
+                        db.toggleCampana(c.id, 1);
+                        reanudadas++;
+                    }
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, reanudadas, msg: `${reanudadas} campanas reanudadas. Modo vacaciones desactivado.` }));
+            }
+
+            // ═══════════════════════════════════════
+            //  AUTO-LIMPIEZA DE GRUPOS MUERTOS
+            // ═══════════════════════════════════════
+
+            // GET /api/grupos/muertos — Detectar grupos sin actividad
+            if (url.pathname === "/api/grupos/muertos" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const dias = parseInt(url.searchParams.get("dias") || "30");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const grupos = db.getGrupos(userId);
+                const ahora = Date.now();
+                const muertos = [];
+                for (const g of grupos) {
+                    const act = db.getGrupoActividad(g.link || g.grupo_jid);
+                    const lastActivity = act ? new Date(act).getTime() : 0;
+                    if (!lastActivity || (ahora - lastActivity) > dias * 86400000) {
+                        muertos.push({ ...g, ultima_actividad: act || "nunca" });
+                    }
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, muertos, total_grupos: grupos.length }));
+            }
+
+            // POST /api/grupos/limpiar_muertos — Eliminar grupos muertos
+            if (url.pathname === "/api/grupos/limpiar_muertos" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.ids) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                let eliminados = 0;
+                for (const id of body.ids) {
+                    try { db.eliminarGrupo(body.u, id); eliminados++; } catch (_) {}
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, eliminados }));
+            }
+
+            // ═══════════════════════════════════════
+            //  RESPALDO AUTOMATICO
+            // ═══════════════════════════════════════
+
+            // GET /api/admin/backups — Lista de backups
+            if (url.pathname === "/api/admin/backups" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const backups = db.getBackupLog();
+                // Also list actual files in backups dir
+                const backupDir = path.join(__dirname, "backups");
+                let files = [];
+                try { files = fs.readdirSync(backupDir).filter(f => f.endsWith(".db")).map(f => ({ filename: f, size: fs.statSync(path.join(backupDir, f)).size })); } catch (_) {}
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, backups, files }));
+            }
+
+            // POST /api/admin/backup_ahora — Forzar backup ahora
+            if (url.pathname === "/api/admin/backup_ahora" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id || body.u)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                try {
+                    const backupDir = path.join(__dirname, "backups");
+                    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+                    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+                    const dbPath = path.join(__dirname, "wsp_titan.db");
+                    const dest = path.join(backupDir, `wsp_titan_${ts}.db`);
+                    fs.copyFileSync(dbPath, dest);
+                    const size = fs.statSync(dest).size;
+                    db.registrarBackup(`wsp_titan_${ts}.db`, size);
+                    // Clean old backups (keep 7 days)
+                    const allFiles = fs.readdirSync(backupDir).filter(f => f.endsWith(".db")).sort();
+                    while (allFiles.length > 7) {
+                        const old = allFiles.shift();
+                        try { fs.unlinkSync(path.join(backupDir, old)); } catch (_) {}
+                    }
+                    db.limpiarBackupsViejos(7);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, filename: `wsp_titan_${ts}.db`, size }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+
+            // ═══════════════════════════════════════
+            //  DASHBOARD DE SELLERS AVANZADO
+            // ═══════════════════════════════════════
+
+            // GET /api/seller/dashboard — Stats avanzadas del seller
+            if (url.pathname === "/api/seller/dashboard" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const seller = db.isSellerUser(userId);
+                if (!seller) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No es seller" })); }
+                const codigos = db.getSellerCodes(seller.id);
+                const codigosUsados = codigos.filter(c => c.usado);
+                const codigosPendientes = codigos.filter(c => !c.usado);
+                // Monthly breakdown
+                const porMes = {};
+                for (const c of codigosUsados) {
+                    const mes = (c.fecha_usado || c.fecha_creado || "").substring(0, 7);
+                    if (!porMes[mes]) porMes[mes] = 0;
+                    porMes[mes]++;
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({
+                    ok: true,
+                    total_codigos: codigos.length,
+                    usados: codigosUsados.length,
+                    pendientes: codigosPendientes.length,
+                    clientes_activos: codigosUsados.length,
+                    por_mes: porMes,
+                    tasa_conversion: codigos.length > 0 ? Math.round(codigosUsados.length / codigos.length * 100) : 0
+                }));
+            }
+
+            // ═══════════════════════════════════════
+            //  PROGRAMACION RECURRENTE (CRON-LIKE)
+            // ═══════════════════════════════════════
+
+            // POST /api/programados/recurrente — Crear envio recurrente
+            if (url.pathname === "/api/programados/recurrente" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.mensaje_id || !body.dias_semana || !body.hora) {
+                    res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos: u, mensaje_id, dias_semana (array), hora" }));
+                }
+                // Store as a special scheduled message with recurrence pattern
+                const recurrence = JSON.stringify({ dias_semana: body.dias_semana, hora: body.hora });
+                const result = db.crearProgramado(body.u, body.mensaje_id, body.hora, body.grupos || [], recurrence);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, programado: result, recurrence: body.dias_semana }));
+            }
+
+            // ═══════════════════════════════════════
+            //  RATE LIMITING ADAPTATIVO
+            // ═══════════════════════════════════════
+
+            // GET /api/rate_limit/status — Estado del rate limiting adaptativo
+            if (url.pathname === "/api/rate_limit/status" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const config_envio = db.getUserEnvioConfig(userId);
+                const tasas = db.getAnalyticsTasaPorCuenta(userId);
+                let recomendacion = null;
+                for (const t of tasas) {
+                    if (t.tasa < 50 && t.total > 10) {
+                        recomendacion = { cuenta: t.cuenta, tasa: t.tasa, msg: `Cuenta ${t.cuenta} tiene tasa de ${t.tasa}% — considere reducir velocidad o cambiar de cuenta` };
+                        break;
+                    }
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, config: config_envio, tasas, recomendacion }));
+            }
+
+            // ═══════════════════════════════════════
+            //  A/B TESTING DE MENSAJES
+            // ═══════════════════════════════════════
+
+            // POST /api/ab_test/crear — Crear A/B test
+            if (url.pathname === "/api/ab_test/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.variante_a || !body.variante_b || !body.grupos) {
+                    res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos: u, variante_a, variante_b, grupos (array)" }));
+                }
+                const grupos = body.grupos;
+                const mitad = Math.floor(grupos.length / 2);
+                const gruposA = grupos.slice(0, mitad);
+                const gruposB = grupos.slice(mitad);
+                res.writeHead(200);
+                return res.end(JSON.stringify({
+                    ok: true,
+                    plan: {
+                        variante_a: { mensaje: body.variante_a, grupos: gruposA, total: gruposA.length },
+                        variante_b: { mensaje: body.variante_b, grupos: gruposB, total: gruposB.length }
+                    },
+                    msg: `Test creado: Variante A → ${gruposA.length} grupos, Variante B → ${gruposB.length} grupos`
+                }));
+            }
+
+            // ═══════════════════════════════════════
+            //  MONITOREO / HEALTH CHECK
+            // ═══════════════════════════════════════
+
+            // GET /api/health — Health check para monitoreo
+            if (url.pathname === "/api/health" && req.method === "GET") {
+                const uptime = process.uptime();
+                const mem = process.memoryUsage();
+                res.writeHead(200);
+                return res.end(JSON.stringify({
+                    ok: true, status: "healthy",
+                    uptime_seconds: Math.floor(uptime),
+                    uptime_human: `${Math.floor(uptime/3600)}h ${Math.floor((uptime%3600)/60)}m`,
+                    memory_mb: Math.round(mem.heapUsed / 1024 / 1024),
+                    bot_connected: !!botSock?.user,
+                    timestamp: new Date().toISOString()
+                }));
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
 
         } catch (e) {
+            if (res.headersSent) return;
+            if (e._authForbidden) {
+                res.writeHead(403);
+                return res.end(JSON.stringify({ ok: false, error: e.message }));
+            }
             res.writeHead(500);
             return res.end(JSON.stringify({ ok: false, error: e.message }));
         }
@@ -2400,10 +3765,53 @@ server.listen(QR_PORT, "0.0.0.0", () => {
 // --- INICIO DEL BOT ---
 async function startBot() {
     db.init();
+    db.initDefaultMetodosPago();
     db.setAdminJids(adminJids);
+    // Mark campaigns that were running before restart as stopped, save for notification
+    const campanasDetenidas = db.marcarCampanasDetenidaPorActualizacion();
     fs.mkdirSync("sessions", { recursive: true });
     fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
     fs.mkdirSync("media", { recursive: true });
+    fs.mkdirSync("comprobantes", { recursive: true });
+    fs.mkdirSync("backups", { recursive: true });
+
+    // Periodic cleanup: every 30 minutes
+    setInterval(() => {
+        try {
+            db.limpiarRecoveryCodes();
+            db.limpiarSessionsExpiradas();
+            db.limpiarLoginAttempts();
+            db.limpiarCodigosRegistroExpirados();
+        } catch (e) { console.error("Cleanup error:", e.message); }
+    }, 30 * 60 * 1000);
+
+    // Automatic daily backup at 3 AM
+    function scheduleBackup() {
+        const now = new Date();
+        const next3am = new Date(now);
+        next3am.setHours(3, 0, 0, 0);
+        if (next3am <= now) next3am.setDate(next3am.getDate() + 1);
+        const ms = next3am - now;
+        setTimeout(() => {
+            try {
+                const ts = new Date().toISOString().replace(/[:.]/g, "-");
+                const dbPath = path.join(__dirname, "wsp_titan.db");
+                const dest = path.join(__dirname, "backups", `wsp_titan_${ts}.db`);
+                fs.copyFileSync(dbPath, dest);
+                const size = fs.statSync(dest).size;
+                db.registrarBackup(`wsp_titan_${ts}.db`, size);
+                const allFiles = fs.readdirSync(path.join(__dirname, "backups")).filter(f => f.endsWith(".db")).sort();
+                while (allFiles.length > 7) {
+                    const old = allFiles.shift();
+                    try { fs.unlinkSync(path.join(__dirname, "backups", old)); } catch (_) {}
+                }
+                db.limpiarBackupsViejos(7);
+                console.log(`[BACKUP] Auto-backup: ${dest} (${(size/1024).toFixed(1)} KB)`);
+            } catch (e) { console.error("[BACKUP] Error:", e.message); }
+            scheduleBackup();
+        }, ms);
+    }
+    scheduleBackup();
 
     const { state, saveCreds } = await useMultiFileAuthState("sessions");
 
@@ -2425,6 +3833,21 @@ async function startBot() {
 
     botSock.ev.on("creds.update", saveCreds);
 
+    // Capture synced chats for bot account too
+    botSock.ev.on("messaging-history.set", ({ chats: syncedChats, messages: syncedMsgs }) => {
+        console.log(`[SYNC] Bot_Principal: messaging-history.set — ${syncedChats?.length||0} chats, ${syncedMsgs?.length||0} msgs`);
+        if (syncedChats && syncedChats.length) {
+            for (const c of syncedChats) {
+                if (!c.id || c.id === "status@broadcast") continue;
+                const isPersonal = c.id.endsWith("@s.whatsapp.net");
+                const isGroup = c.id.endsWith("@g.us");
+                if (!isPersonal && !isGroup) continue;
+                const chatName = c.name || c.subject || c.id.replace(/@.*$/, '');
+                try { db.saveSyncedChat("bot", "Bot_Principal", c.id, chatName, c.unreadCount || 0); } catch(e){}
+            }
+        }
+    });
+
     botSock.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
@@ -2445,6 +3868,51 @@ async function startBot() {
             motor.iniciarPromoTimeoutChecker();
             console.log(`\u{1F4F1} Bot disponible como cuenta de spam: '${motor.BOT_NOMBRE}'`);
             console.log("\u{1F4F1} Listo para recibir mensajes.\n");
+
+            // Auto-restart campaigns that were stopped by update (staggered to avoid connection conflicts)
+            if (campanasDetenidas && campanasDetenidas.length) {
+                console.log(`[RESTART] ${campanasDetenidas.length} campana(s) pendientes de reinicio. Esperando 30s para sincronizar...`);
+                const porUsuario = {};
+                for (const c of campanasDetenidas) {
+                    if (!porUsuario[c.user_id]) porUsuario[c.user_id] = [];
+                    porUsuario[c.user_id].push(c);
+                }
+                // Wait 30s for WhatsApp to fully sync group metadata before restarting campaigns
+                // Then stagger restarts with 10s delay between each
+                (async () => {
+                    await delay(30000);
+                    for (const [uid, camps] of Object.entries(porUsuario)) {
+                        let reiniciadas = [];
+                        let fallidas = [];
+                        for (const camp of camps) {
+                            try {
+                                const campData = db.getCampanaById(camp.id);
+                                if (!campData) { fallidas.push(camp.nombre + " (no encontrada)"); continue; }
+                                const sesiones = db.getSesionesCampana(camp.id);
+                                const grupos = db.getGruposCampana(camp.id);
+                                if (!sesiones.length || !grupos.length) { fallidas.push(camp.nombre + " (sin cuentas/grupos)"); continue; }
+                                console.log(`[RESTART] Reiniciando campana '${camp.nombre}' (ID=${camp.id})...`);
+                                db.setCampanaActiva(camp.id, true);
+                                motor.iniciarCampana(camp.id, uid, botSock);
+                                reiniciadas.push(camp.nombre);
+                                // Wait 10s between each campaign restart to avoid simultaneous connections
+                                if (camps.indexOf(camp) < camps.length - 1) {
+                                    await delay(10000);
+                                }
+                            } catch (e) {
+                                fallidas.push(camp.nombre + ` (${e.message})`);
+                            }
+                        }
+                        try {
+                            const jid = uid.includes("@") ? uid : uid + "@s.whatsapp.net";
+                            let msg = `\u{1F504} *Bot actualizado*\n\n`;
+                            if (reiniciadas.length) msg += `\u2705 ${reiniciadas.length} campana(s) reiniciadas automaticamente:\n${reiniciadas.map(n => `  \u2022 ${n}`).join("\n")}\n`;
+                            if (fallidas.length) msg += `\n\u26A0 ${fallidas.length} campana(s) no se pudieron reiniciar:\n${fallidas.map(n => `  \u2022 ${n}`).join("\n")}`;
+                            await botSock.sendMessage(jid, { text: msg });
+                        } catch (e) { console.log(`[Notif] No se pudo notificar a ${uid}: ${e.message}`); }
+                    }
+                })();
+            }
 
             // Resolver JID del admin
             try {
@@ -4492,7 +5960,8 @@ async function handleFSM(jid, msg, text, trimmed, state) {
 
             if (data.modo === "todos") {
                 const allJids = data.chats.map(c => c.jid);
-                motor.enviarASeleccionados(jid, allJids, mensaje, null, botSock);
+                const envRes1 = await motor.enviarASeleccionados(jid, allJids, mensaje, null, botSock);
+                if (envRes1?.blocked) return await send(jid, `\u274c ${envRes1.error}`);
                 return await send(jid,
                     `\u{1F680} *Envio personal iniciado!*\n\n` +
                     `\u{1F464} ${allJids.length} contacto(s)\n` +
@@ -4502,7 +5971,8 @@ async function handleFSM(jid, msg, text, trimmed, state) {
                     `Escribe */cancelarenvio* para detener.`
                 );
             } else {
-                motor.enviarASeleccionados(jid, data.jids, mensaje, null, botSock);
+                const envRes2 = await motor.enviarASeleccionados(jid, data.jids, mensaje, null, botSock);
+                if (envRes2?.blocked) return await send(jid, `\u274c ${envRes2.error}`);
                 return await send(jid,
                     `\u{1F680} *Envio personal iniciado!*\n\n` +
                     `\u{1F464} ${data.total} contacto(s)\n` +
