@@ -705,12 +705,11 @@ poll();
             if (url.pathname === "/api/panel_registro" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
-                // Validar que telegram_id sea numerico
                 const tid = String(body.telegram_id).trim();
                 if (!/^\d{5,15}$/.test(tid)) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "El ID de Telegram debe ser un numero de 5-15 digitos. Usa /me en el bot para obtenerlo." })); }
-                const r = db.panelRegistro(tid, body.password, body.username || '', body.codigo || '');
-                // Sync 1-day demo to TG database + notify admin
+                const r = db.panelRegistro(tid, body.password, body.username || '');
                 if (r.ok) {
+                    // Sync 1-day demo to TG database
                     try {
                         const syncData = JSON.stringify({ telegram_id: tid, dias: 1, plan: "demo", username: body.username || "" });
                         const syncReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
@@ -726,26 +725,65 @@ poll();
                         notifReq.write(notifData);
                         notifReq.end();
                     } catch (_) {}
+                    // Si no es admin, generar codigo y enviarlo via TG bot automaticamente
+                    if (!r.verificado) {
+                        try {
+                            const code = db.generarCodigoRegistro(tid);
+                            const codeData = JSON.stringify({ telegram_id: tid, code });
+                            const codeReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/enviar_codigo_verificacion", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(codeData) } });
+                            codeReq.on("error", () => {});
+                            codeReq.write(codeData);
+                            codeReq.end();
+                        } catch (_) {}
+                    }
                 }
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
             }
-            // Generar codigo de registro (llamado internamente por el bot TG)
-            if (url.pathname === "/api/generar_codigo_registro" && req.method === "POST") {
+            // Verificar cuenta con codigo
+            if (url.pathname === "/api/verificar_cuenta" && req.method === "POST") {
                 const body = await readBody();
                 const tid = String(body.telegram_id || "").trim();
-                if (!tid || !/^\d{5,15}$/.test(tid)) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "telegram_id invalido" })); }
-                // Verificar si ya esta registrado
-                const existing = db.getPanelUser(tid);
-                if (existing) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "ya_registrado" })); }
+                const codigo = String(body.codigo || "").trim();
+                if (!tid || !codigo) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o codigo" })); }
+                const r = db.verificarCuenta(tid, codigo);
+                res.writeHead(200);
+                return res.end(JSON.stringify(r));
+            }
+            // Reenviar codigo de verificacion (para usuarios ya registrados no verificados)
+            if (url.pathname === "/api/reenviar_codigo_verificacion" && req.method === "POST") {
+                const body = await readBody();
+                const tid = String(body.telegram_id || "").trim();
+                if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                if (db.isUserVerificado(tid)) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "ya_verificado" })); }
                 try {
                     const code = db.generarCodigoRegistro(tid);
+                    const codeData = JSON.stringify({ telegram_id: tid, code });
+                    const codeReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/enviar_codigo_verificacion", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(codeData) } });
+                    codeReq.on("error", () => {});
+                    codeReq.write(codeData);
+                    codeReq.end();
                     res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, code }));
+                    return res.end(JSON.stringify({ ok: true }));
                 } catch (e) {
                     res.writeHead(500);
                     return res.end(JSON.stringify({ ok: false, error: e.message }));
                 }
+            }
+            // Admin: eliminar usuario
+            if (url.pathname === "/api/admin/eliminar_usuario" && req.method === "POST") {
+                const body = await readBody();
+                const tid = String(body.telegram_id || "").trim();
+                if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                const r = db.eliminarUsuarioPanel(tid);
+                res.writeHead(200);
+                return res.end(JSON.stringify(r));
+            }
+            // Admin: listar usuarios del panel
+            if (url.pathname === "/api/admin/usuarios" && req.method === "GET") {
+                const users = db.getAllPanelUsers();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, users }));
             }
             if (url.pathname === "/api/panel_cambiar_password" && req.method === "POST") {
                 const body = await readBody();
@@ -2432,8 +2470,8 @@ async function startBot() {
     fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
     fs.mkdirSync("media", { recursive: true });
 
-    // Limpieza periodica de codigos de registro expirados (cada 30 min)
-    setInterval(() => { try { db.limpiarCodigosRegistroExpirados(); } catch(_){} }, 30 * 60 * 1000);
+    // Limpieza periodica de codigos de registro expirados (cada 5 min)
+    setInterval(() => { try { db.limpiarCodigosRegistroExpirados(); } catch(_){} }, 5 * 60 * 1000);
 
     const { state, saveCreds } = await useMultiFileAuthState("sessions");
 

@@ -1034,6 +1034,34 @@ async def api_tg_send_recovery(request):
 
 
 # ─────────────────────────────────────────
+#   ENVIAR CODIGO DE VERIFICACION VIA BOT
+# ─────────────────────────────────────────
+
+async def api_tg_enviar_codigo_verificacion(request):
+    body = await request.json()
+    telegram_id = body.get("telegram_id", "")
+    code = body.get("code", "")
+    if not telegram_id or not code:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    if not aiogram_bot:
+        return web.json_response({"ok": False, "error": "Bot no disponible"}, status=503)
+    try:
+        await aiogram_bot.send_message(
+            int(telegram_id),
+            f"🔐 <b>Codigo de Verificacion</b>\n\n"
+            f"Tu codigo es: <code>{code}</code>\n\n"
+            f"⏰ Expira en <b>5 minutos</b>\n"
+            f"📋 Ingresalo en el panel web para completar tu registro/verificacion.\n\n"
+            f"⚠️ No compartas este codigo con nadie.",
+            parse_mode="HTML"
+        )
+        return web.json_response({"ok": True})
+    except Exception as e:
+        logger.error(f"Error enviando codigo de verificacion a {telegram_id}: {e}")
+        return web.json_response({"ok": False, "error": f"No se pudo enviar el codigo. Asegurate de haber iniciado el bot (@BotSpamJM_bot) primero."})
+
+
+# ─────────────────────────────────────────
 #   NOTIFICAR REGISTRO NUEVO AL ADMIN
 # ─────────────────────────────────────────
 
@@ -1149,6 +1177,9 @@ def create_app():
 
     # Recovery
     app.router.add_post("/api/tg/send_recovery", api_tg_send_recovery)
+
+    # Verificacion de registro
+    app.router.add_post("/api/tg/enviar_codigo_verificacion", api_tg_enviar_codigo_verificacion)
 
     # Notificar registro
     app.router.add_post("/api/tg/notificar_registro", api_tg_notificar_registro)
