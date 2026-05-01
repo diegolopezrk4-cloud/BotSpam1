@@ -779,8 +779,8 @@ poll();
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
             }
-            // Admin: listar usuarios del panel
-            if (url.pathname === "/api/admin/usuarios" && req.method === "GET") {
+            // Admin: listar usuarios del panel (verificacion status)
+            if (url.pathname === "/api/admin/panel_users" && req.method === "GET") {
                 const users = db.getAllPanelUsers();
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, users }));
