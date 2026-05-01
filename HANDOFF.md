@@ -1252,6 +1252,13 @@ CI: lint-and-check OK | docker-build OK
 - **Fix Backend**: Eliminado fallback a `botSock`. Ahora requiere `body.cuenta` obligatorio, con error descriptivo si falta o falla la conexion.
 - **Archivos**: `panel.html` (showAutoJoin, ejecutarAutoJoin), `index_wsp.js` (endpoint /api/autojoin)
 
+### BUG-FIX: 'sqlite3.Row' object has no attribute 'get' en Campanas TG (CRITICO)
+- **Donde**: `db.py` — todas las funciones que retornan filas de la base de datos TG
+- **Sintoma**: Al iniciar campanas TG o usar funciones que llaman `.get()` en filas de la DB, aparecia "Error interno: 'sqlite3.Row' object has no attribute 'get'"
+- **Causa**: `db.py` usaba `db.row_factory = aiosqlite.Row` que retorna objetos `Row` — estos soportan `row["key"]` pero NO `.get("key", default)`. Multiples partes del codigo (motor.py, bot.py, web_panel.py) usaban `.get()` para acceder con valores por defecto.
+- **Fix**: Creada funcion `_dict_factory(cursor, row)` que retorna diccionarios Python nativos. Reemplazadas TODAS las ocurrencias de `db.row_factory = aiosqlite.Row` por `db.row_factory = _dict_factory`. Los diccionarios soportan `.get()`, `[]`, `in`, etc.
+- **Archivo**: `db.py` (17 ocurrencias reemplazadas)
+
 ### Ya implementado en sync-servidor (verificado)
 - **TAREA 2**: Auto-restart de campanas en errores inesperados (catch block lineas 838-864)
 - **TAREA 3**: Botones "Iniciar Todas" / "Parar Todas" en campanas (linea 693 + funciones 2783-2784)
@@ -1264,6 +1271,7 @@ CI: lint-and-check OK | docker-build OK
 | `db_wsp.js` | getTodosUsuariosAdmin con LEFT JOIN panel_users + filtro verificado |
 | `panel.html` | showAutoJoin con selector de cuenta + validacion |
 | `index_wsp.js` | /api/autojoin requiere cuenta obligatoria, sin fallback a botSock |
+| `db.py` | row_factory cambiado de aiosqlite.Row a _dict_factory (fix .get()) |
 
 ### Verificacion de Sintaxis v12.5
 ```

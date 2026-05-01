@@ -10,6 +10,9 @@ def ahora_peru():
 DB_PATH = "titan.db"
 DB_TIMEOUT = 30
 
+def _dict_factory(cursor, row):
+    return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
+
 def _connect():
     return aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT)
 
@@ -154,7 +157,7 @@ async def init_db():
 # ─────────────────────────────────────────
 async def get_usuario(telegram_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute("SELECT * FROM usuarios WHERE telegram_id=?", (telegram_id,)) as cur:
             return await cur.fetchone()
 
@@ -201,7 +204,7 @@ async def tiene_membresia_activa(telegram_id):
 
 async def get_todos_usuarios():
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute("SELECT * FROM usuarios ORDER BY fecha_registro DESC") as cur:
             return await cur.fetchall()
 
@@ -210,7 +213,7 @@ async def get_todos_usuarios():
 # ─────────────────────────────────────────
 async def get_sesiones(user_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute("SELECT * FROM sesiones WHERE user_id=? AND activa=1", (user_id,)) as cur:
             return await cur.fetchall()
 
@@ -250,7 +253,7 @@ async def eliminar_sesion(user_id, nombre):
 # ─────────────────────────────────────────
 async def get_grupos(user_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute("SELECT * FROM grupos WHERE user_id=?", (user_id,)) as cur:
             return await cur.fetchall()
 
@@ -332,7 +335,7 @@ async def eliminar_todos_grupos(user_id):
 # ─────────────────────────────────────────
 async def get_campanas(user_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute("SELECT * FROM campanas WHERE user_id=?", (user_id,)) as cur:
             return await cur.fetchall()
 
@@ -347,7 +350,7 @@ async def crear_campana(user_id, nombre, mensaje, foto_path=None):
 
 async def get_campana_by_id(campana_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute("SELECT * FROM campanas WHERE id=?", (campana_id,)) as cur:
             return await cur.fetchone()
 
@@ -425,7 +428,7 @@ async def resetear_stats_campana(campana_id):
 # ─────────────────────────────────────────
 async def get_sesiones_campana(campana_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute(
             "SELECT sesion_nombre FROM campana_sesiones WHERE campana_id=?",
             (campana_id,)
@@ -445,7 +448,7 @@ async def agregar_sesion_campana(campana_id, sesion_nombre):
 # ─────────────────────────────────────────
 async def get_grupos_campana(campana_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute(
             "SELECT grupo_link FROM campana_grupos WHERE campana_id=?",
             (campana_id,)
@@ -475,7 +478,7 @@ async def limpiar_grupos_campana(campana_id):
 # ─────────────────────────────────────────
 async def get_campana_config(campana_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute(
             "SELECT * FROM campana_config WHERE campana_id=?", (campana_id,)
         ) as cur:
@@ -516,7 +519,7 @@ async def set_max_grupos(user_id, limite):
 # ─────────────────────────────────────────
 async def get_responder_config(user_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute(
             "SELECT * FROM responder_config WHERE user_id=?", (user_id,)
         ) as cur:
@@ -565,7 +568,7 @@ async def agregar_keywords(user_id, palabras, respuesta=""):
 
 async def get_keywords_full(user_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute(
             "SELECT id, palabra, respuesta FROM responder_keywords WHERE user_id=?", (user_id,)
         ) as cur:
@@ -588,7 +591,7 @@ async def limpiar_keywords(user_id):
 
 async def get_all_responder_activos():
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute(
             "SELECT * FROM responder_config WHERE activo=1"
         ) as cur:
@@ -615,7 +618,7 @@ async def registrar_respuesta(user_id, grupo_link, keyword):
 
 async def get_historial_envios(user_id, limite=50):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute(
             "SELECT grupo_link, resultado, datetime(fecha, '-5 hours') as fecha FROM historial_envios "
             "WHERE user_id=? ORDER BY fecha DESC LIMIT ?",
@@ -625,7 +628,7 @@ async def get_historial_envios(user_id, limite=50):
 
 async def get_stats_por_grupo(user_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute(
             "SELECT grupo_link, "
             "SUM(CASE WHEN resultado='enviado' THEN 1 ELSE 0 END) as enviados, "
@@ -639,7 +642,7 @@ async def get_stats_por_grupo(user_id):
 
 async def get_stats_respuestas(user_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute(
             "SELECT keyword, COUNT(*) as total, "
             "datetime(MAX(fecha), '-5 hours') as ultima "
@@ -651,7 +654,7 @@ async def get_stats_respuestas(user_id):
 
 async def get_stats_respuestas_por_grupo(user_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute(
             "SELECT grupo_link, COUNT(*) as total, "
             "datetime(MAX(fecha), '-5 hours') as ultima "
@@ -705,7 +708,7 @@ async def get_all_users_with_active_campaigns():
 # ─────────────────────────────────────────
 async def get_lista_negra_tg(user_id):
     async with _connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = _dict_factory
         async with db.execute(
             "SELECT * FROM lista_negra_tg WHERE user_id=? ORDER BY fecha DESC", (user_id,)
         ) as cur:
