@@ -438,6 +438,7 @@ poll();
                 const body = await readBody();
                 const campId = body.id || body.campana_id;
                 if (!body.u || !campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
+                if (!botSock || !botSock.user) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Bot WSP no conectado. Vincula una cuenta primero." })); }
                 const camp = db.getCampanaById(campId);
                 if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "campana no encontrada" })); }
                 motor.iniciarCampana(campId, body.u, botSock);

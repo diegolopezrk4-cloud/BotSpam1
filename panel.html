@@ -690,7 +690,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="section" id="sec-campanas">
       <h2>📋 Campanas</h2>
       <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Las campanas son envios continuos y automaticos. A diferencia del Envio Unico, una campana envia tu mensaje a los grupos en ciclos repetitivos con intervalos configurables. Ideal para mantener presencia constante en grupos.</p>
-      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearCampana()">➕ Crear Campana</button></div>
+      <div style="margin-bottom:15px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" onclick="showCrearCampana()">➕ Crear Campana</button><button class="btn btn-success" onclick="iniciarTodasCamp()">🚀 Iniciar Todas</button><button class="btn btn-danger" onclick="detenerTodasCamp()">⏹ Parar Todas</button></div>
       <div id="campanasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
@@ -2725,6 +2725,7 @@ let _campanaCountdownIntervals={};
 function getEstadoCampanaBadge(x){
   if(x.activa&&x.estado_detalle==='activa')return'<span class="badge badge-success">Activa</span>';
   if(x.estado_detalle==='en_reposo')return'<span class="badge" style="background:#f39c12;color:#fff">En reposo</span>';
+  if(x.estado_detalle==='reiniciando')return'<span class="badge" style="background:#e67e22;color:#fff">🔄 Reiniciando</span>';
   if(x.estado_detalle==='detenida_actualizacion')return'<span class="badge" style="background:#e67e22;color:#fff">Detenida (actualizacion)</span>';
   if(x.activa)return'<span class="badge badge-success">Activa</span>';
   return'<span class="badge badge-danger">Detenida</span>';
@@ -2777,6 +2778,8 @@ function showCrearCampana(){showModal(`<h3>➕ Crear Campana WSP</h3><div class=
 async function crearCamp(){const n=$('cN').value.trim(),m=$('cM').value.trim(),iv=parseInt($('cI').value)||60;if(!n||!m){toast('Completa','error');return}closeModal();const r=await api('/api/campanas/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n,mensaje:m,intervalo:iv})});toast(r.ok?'Creada':'Error',r.ok?'success':'error');loadCampanas()}
 async function iniciarCamp(id){const r=await api('/api/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast(r.ok?'Iniciada':'Error: '+(r.error||''),r.ok?'success':'error');loadCampanas()}
 async function detenerCamp(id){await api('/api/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:id})});toast('Detenida','success');loadCampanas()}
+async function iniciarTodasCamp(){const camps=Object.values(_wspCampanasData).filter(c=>!c.activa&&c.estado_detalle!=='en_reposo');if(!camps.length){toast('No hay campanas detenidas','info');return}for(const c of camps){await api('/api/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:c.id})});await new Promise(r=>setTimeout(r,2000))}toast(camps.length+' campana(s) iniciadas','success');loadCampanas()}
+async function detenerTodasCamp(){const camps=Object.values(_wspCampanasData).filter(c=>c.activa||c.estado_detalle==='en_reposo');if(!camps.length){toast('No hay campanas activas','info');return}for(const c of camps){await api('/api/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:c.id})})}toast(camps.length+' campana(s) detenidas','success');loadCampanas()}
 async function elimCamp(id){await api('/api/campanas/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});toast('Eliminada','success');loadCampanas()}
 async function showEditWspCamp(id){
   if(!requireMembresia())return;

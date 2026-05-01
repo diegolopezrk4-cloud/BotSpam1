@@ -837,10 +837,30 @@ function iniciarCampana(campanaId, userId, botSock) {
             }
         } catch (e) {
             console.error(`Error campana ${campanaId}: ${e.message}`);
+            // Auto-restart: la campana NO debe morir por errores inesperados
+            if (!cancelled) {
+                db.setCampanaEstadoDetalle(campanaId, 'reiniciando');
+                try {
+                    if (botSock && botSock.sendMessage) {
+                        await botSock.sendMessage(userId.includes('@') ? userId : userId + '@s.whatsapp.net', {
+                            text: `\u26A0\uFE0F Campana error inesperado. Reiniciando en 60s...\n\u{1F4CB} ${e.message}`
+                        });
+                    }
+                } catch (notifErr) {}
+                await delay(60000);
+                if (!cancelled) {
+                    delete tareasActivas[campanaId];
+                    delete campanaReposo[campanaId];
+                    iniciarCampana(campanaId, userId, botSock);
+                    return;
+                }
+            }
         } finally {
-            db.setCampanaActiva(campanaId, false, 'detenida');
-            delete tareasActivas[campanaId];
-            delete campanaReposo[campanaId];
+            if (tareasActivas[campanaId]) {
+                db.setCampanaActiva(campanaId, false, 'detenida');
+                delete tareasActivas[campanaId];
+                delete campanaReposo[campanaId];
+            }
         }
     })();
 
