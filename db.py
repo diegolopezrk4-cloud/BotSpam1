@@ -171,8 +171,17 @@ async def crear_usuario(telegram_id, username):
         await db.commit()
 
 async def activar_membresia(telegram_id, dias):
+    if dias >= 36500:
+        plan = "permanente"
+        async with _connect() as db:
+            await db.execute(
+                "UPDATE usuarios SET plan=?, fecha_expira=NULL, activo=1 WHERE telegram_id=?",
+                (plan, telegram_id)
+            )
+            await db.commit()
+        return
     expira = (ahora_peru() + timedelta(days=dias)).strftime("%Y-%m-%d %H:%M:%S")
-    plan = "diario" if dias == 1 else ("semanal" if dias == 7 else "mensual")
+    plan = "diario" if dias == 1 else ("semanal" if dias == 7 else ("mensual" if dias >= 30 else "semanal"))
     async with _connect() as db:
         await db.execute(
             "UPDATE usuarios SET plan=?, fecha_expira=?, activo=1 WHERE telegram_id=?",
