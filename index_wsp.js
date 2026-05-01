@@ -3818,6 +3818,21 @@ async function startBot() {
 
     botSock.ev.on("creds.update", saveCreds);
 
+    // Capture synced chats for bot account too
+    botSock.ev.on("messaging-history.set", ({ chats: syncedChats, messages: syncedMsgs }) => {
+        console.log(`[SYNC] Bot_Principal: messaging-history.set — ${syncedChats?.length||0} chats, ${syncedMsgs?.length||0} msgs`);
+        if (syncedChats && syncedChats.length) {
+            for (const c of syncedChats) {
+                if (!c.id || c.id === "status@broadcast") continue;
+                const isPersonal = c.id.endsWith("@s.whatsapp.net");
+                const isGroup = c.id.endsWith("@g.us");
+                if (!isPersonal && !isGroup) continue;
+                const chatName = c.name || c.subject || c.id.replace(/@.*$/, '');
+                try { db.saveSyncedChat("bot", "Bot_Principal", c.id, chatName, c.unreadCount || 0); } catch(e){}
+            }
+        }
+    });
+
     botSock.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect, qr } = update;
 

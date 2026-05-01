@@ -74,9 +74,35 @@ async function connectClientAccount(userId, nombre, telefono) {
         });
         sock.ev.on("creds.update", saveCreds);
 
-        // Capture synced chats from WhatsApp (recent conversations)
-        sock.ev.on("chats.set", ({ chats: syncedChats }) => {
-            for (const c of syncedChats) {
+        // Capture synced chats from WhatsApp via messaging-history.set (Baileys v6.7+)
+        sock.ev.on("messaging-history.set", ({ chats: syncedChats, messages: syncedMsgs }) => {
+            console.log(`[SYNC] ${nombre}: messaging-history.set recibido — ${syncedChats?.length||0} chats, ${syncedMsgs?.length||0} msgs`);
+            if (syncedChats && syncedChats.length) {
+                for (const c of syncedChats) {
+                    if (!c.id || c.id === "status@broadcast") continue;
+                    const isPersonal = c.id.endsWith("@s.whatsapp.net");
+                    const isGroup = c.id.endsWith("@g.us");
+                    if (!isPersonal && !isGroup) continue;
+                    const chatName = c.name || c.subject || c.id.replace(/@.*$/, '');
+                    try { db.saveSyncedChat(userId, nombre, c.id, chatName, c.unreadCount || 0); } catch(e){ console.error('[SYNC] Error guardando chat:', e.message); }
+                }
+            }
+            // Also save messages from history sync
+            if (syncedMsgs && syncedMsgs.length) {
+                for (const msg of syncedMsgs) {
+                    const jid = msg.key?.remoteJid;
+                    if (!jid || jid === "status@broadcast" || !jid.endsWith("@s.whatsapp.net")) continue;
+                    const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+                    if (text) {
+                        const dir = msg.key.fromMe ? 'out' : 'in';
+                        try { db.saveChatMessage(userId, nombre, jid, msg.pushName||'', text, dir); } catch(e){}
+                    }
+                }
+            }
+        });
+        sock.ev.on("chats.upsert", (chats) => {
+            console.log(`[SYNC] ${nombre}: chats.upsert recibido — ${chats?.length||0} chats`);
+            for (const c of chats) {
                 if (!c.id || c.id === "status@broadcast") continue;
                 const isPersonal = c.id.endsWith("@s.whatsapp.net");
                 const isGroup = c.id.endsWith("@g.us");
@@ -85,7 +111,7 @@ async function connectClientAccount(userId, nombre, telefono) {
                 try { db.saveSyncedChat(userId, nombre, c.id, chatName, c.unreadCount || 0); } catch(e){}
             }
         });
-        sock.ev.on("chats.upsert", (chats) => {
+        sock.ev.on("chats.update", (chats) => {
             for (const c of chats) {
                 if (!c.id || c.id === "status@broadcast") continue;
                 const isPersonal = c.id.endsWith("@s.whatsapp.net");
