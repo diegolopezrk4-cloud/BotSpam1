@@ -3789,38 +3789,47 @@ async function startBot() {
             console.log(`\u{1F4F1} Bot disponible como cuenta de spam: '${motor.BOT_NOMBRE}'`);
             console.log("\u{1F4F1} Listo para recibir mensajes.\n");
 
-            // Auto-restart campaigns that were stopped by update
+            // Auto-restart campaigns that were stopped by update (staggered to avoid connection conflicts)
             if (campanasDetenidas && campanasDetenidas.length) {
+                console.log(`[RESTART] ${campanasDetenidas.length} campana(s) pendientes de reinicio...`);
                 const porUsuario = {};
                 for (const c of campanasDetenidas) {
                     if (!porUsuario[c.user_id]) porUsuario[c.user_id] = [];
                     porUsuario[c.user_id].push(c);
                 }
-                for (const [uid, camps] of Object.entries(porUsuario)) {
-                    let reiniciadas = [];
-                    let fallidas = [];
-                    for (const camp of camps) {
-                        try {
-                            const campData = db.getCampanaById(camp.id);
-                            if (!campData) { fallidas.push(camp.nombre + " (no encontrada)"); continue; }
-                            const sesiones = db.getSesionesCampana(camp.id);
-                            const grupos = db.getGruposCampana(camp.id);
-                            if (!sesiones.length || !grupos.length) { fallidas.push(camp.nombre + " (sin cuentas/grupos)"); continue; }
-                            db.setCampanaActiva(camp.id, true);
-                            motor.iniciarCampana(camp.id, uid, botSock);
-                            reiniciadas.push(camp.nombre);
-                        } catch (e) {
-                            fallidas.push(camp.nombre + ` (${e.message})`);
+                // Stagger restarts with 10s delay between each to avoid WhatsApp connection conflicts
+                (async () => {
+                    for (const [uid, camps] of Object.entries(porUsuario)) {
+                        let reiniciadas = [];
+                        let fallidas = [];
+                        for (const camp of camps) {
+                            try {
+                                const campData = db.getCampanaById(camp.id);
+                                if (!campData) { fallidas.push(camp.nombre + " (no encontrada)"); continue; }
+                                const sesiones = db.getSesionesCampana(camp.id);
+                                const grupos = db.getGruposCampana(camp.id);
+                                if (!sesiones.length || !grupos.length) { fallidas.push(camp.nombre + " (sin cuentas/grupos)"); continue; }
+                                console.log(`[RESTART] Reiniciando campana '${camp.nombre}' (ID=${camp.id})...`);
+                                db.setCampanaActiva(camp.id, true);
+                                motor.iniciarCampana(camp.id, uid, botSock);
+                                reiniciadas.push(camp.nombre);
+                                // Wait 10s between each campaign restart to avoid simultaneous connections
+                                if (camps.indexOf(camp) < camps.length - 1) {
+                                    await delay(10000);
+                                }
+                            } catch (e) {
+                                fallidas.push(camp.nombre + ` (${e.message})`);
+                            }
                         }
+                        try {
+                            const jid = uid.includes("@") ? uid : uid + "@s.whatsapp.net";
+                            let msg = `\u{1F504} *Bot actualizado*\n\n`;
+                            if (reiniciadas.length) msg += `\u2705 ${reiniciadas.length} campana(s) reiniciadas automaticamente:\n${reiniciadas.map(n => `  \u2022 ${n}`).join("\n")}\n`;
+                            if (fallidas.length) msg += `\n\u26A0 ${fallidas.length} campana(s) no se pudieron reiniciar:\n${fallidas.map(n => `  \u2022 ${n}`).join("\n")}`;
+                            await botSock.sendMessage(jid, { text: msg });
+                        } catch (e) { console.log(`[Notif] No se pudo notificar a ${uid}: ${e.message}`); }
                     }
-                    try {
-                        const jid = uid.includes("@") ? uid : uid + "@s.whatsapp.net";
-                        let msg = `\u{1F504} *Bot actualizado*\n\n`;
-                        if (reiniciadas.length) msg += `\u2705 ${reiniciadas.length} campana(s) reiniciadas automaticamente:\n${reiniciadas.map(n => `  \u2022 ${n}`).join("\n")}\n`;
-                        if (fallidas.length) msg += `\n\u26A0 ${fallidas.length} campana(s) no se pudieron reiniciar:\n${fallidas.map(n => `  \u2022 ${n}`).join("\n")}`;
-                        await botSock.sendMessage(jid, { text: msg });
-                    } catch (e) { console.log(`[Notif] No se pudo notificar a ${uid}: ${e.message}`); }
-                }
+                })();
             }
 
             // Resolver JID del admin
