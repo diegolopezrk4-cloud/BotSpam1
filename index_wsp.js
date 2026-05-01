@@ -519,7 +519,7 @@ poll();
                     return res.end(JSON.stringify({ ok: false, error: "usuario no encontrado" }));
                 }
                 db.activarMembresia(user.wsp_id, dias);
-                const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : "mensual";
+                const plan = dias >= 36500 ? "permanente" : dias === 1 ? "diario" : dias === 7 ? "semanal" : dias >= 30 ? "mensual" : "semanal";
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, plan, wsp_id: user.wsp_id, nombre: user.nombre }));
             }

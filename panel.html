@@ -1935,11 +1935,11 @@ async function loadCuentas(){
   let h='<div class="table-wrap"><div class="table-header"><h3>Cuentas ('+s.length+')</h3></div><table><thead><tr><th>#</th><th>Nombre</th><th>Telefono</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
   s.forEach((x,i)=>{
     const b=ban.includes(x.nombre);
-    h+=`<tr><td>${i+1}</td><td><b>${x.nombre||'?'}</b></td><td>${x.telefono||'?'}</td><td><span class="badge ${b?'badge-danger':'badge-success'}">${b?'BANEADA':'Activa'}</span></td><td><button class="btn btn-danger btn-sm" onclick="eliminarCuenta('${x.nombre}')">🗑 Eliminar</button></td></tr>`;
+    h+=`<tr><td>${i+1}</td><td><b>${esc(x.nombre||'?')}</b></td><td>${esc(x.telefono||'?')}</td><td><span class="badge ${b?'badge-danger':'badge-success'}">${b?'BANEADA':'Activa'}</span></td><td><button class="btn btn-danger btn-sm" onclick="eliminarCuenta('${esc(x.nombre)}')">🗑 Eliminar</button></td></tr>`;
   });
   h+='</tbody></table></div>';$('cuentasContent').innerHTML=h;
 }
-function eliminarCuenta(n){showModal(`<h3>⚠ Eliminar Cuenta</h3><p>Eliminar <b>'${n}'</b>?<br>Se desconectara y borrara.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarElimCuenta('${n}')">Eliminar</button></div>`)}
+function eliminarCuenta(n){showModal(`<h3>⚠ Eliminar Cuenta</h3><p>Eliminar <b>'${esc(n)}'</b>?<br>Se desconectara y borrara.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-danger" onclick="confirmarElimCuenta('${esc(n)}')">Eliminar</button></div>`)}
 async function confirmarElimCuenta(n){if(!requireMembresia())return;closeModal();const r=await api('/api/desvincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,nombre:n})});toast(r.ok?'Cuenta eliminada':'Error','success');loadCuentas()}
 let wspQrPollTimer=null;
 function vincularCuentaWspQR(){
@@ -2517,12 +2517,12 @@ async function loadEnvios(){
   const [ms,hi]=await Promise.all([api('/api/mensajes?u='+userId),api('/api/envios_unicos?u='+userId)]);
   const m=(ms.ok?ms.mensajes:[])||[];
   if(!m.length){$('enviosContent').innerHTML='<div class="empty-state"><p>Crea un mensaje primero</p></div>'}
-  else{let h='<div class="grid">';m.forEach(x=>{h+=`<div class="card" style="cursor:pointer" onclick="enviarUnico(${x.id},'${(x.nombre||'').replace(/'/g,"\\'")}')"><div class="card-title">${x.nombre||'?'}</div><p style="font-size:12px;color:var(--text2)">${(x.texto||'').slice(0,80)}</p><button class="btn btn-primary btn-sm" style="margin-top:10px">📤 Enviar</button></div>`});h+='</div>';$('enviosContent').innerHTML=h}
+  else{let h='<div class="grid">';m.forEach(x=>{h+=`<div class="card" style="cursor:pointer" onclick="enviarUnico(${x.id},'${(x.nombre||'').replace(/'/g,"\\'")}')"><div class="card-title">${esc(x.nombre||'?')}</div><p style="font-size:12px;color:var(--text2)">${esc((x.texto||'').slice(0,80))}</p><button class="btn btn-primary btn-sm" style="margin-top:10px">📤 Enviar</button></div>`});h+='</div>';$('enviosContent').innerHTML=h}
   const e=(hi.ok?hi.envios:[])||[];
   if(!e.length){$('enviosHistorial').innerHTML='<div class="empty-state"><p>Sin envios</p></div>'}
-  else{let h='<table><thead><tr><th>Fecha</th><th>Mensaje</th><th>Grupos</th><th>OK</th><th>Error</th></tr></thead><tbody>';e.slice(0,20).forEach(x=>{h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td>${x.nombre||x.mensaje_id||'?'}</td><td>${x.total_grupos||'?'}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td></tr>`});h+='</tbody></table>';$('enviosHistorial').innerHTML=h}
+  else{let h='<table><thead><tr><th>Fecha</th><th>Mensaje</th><th>Grupos</th><th>OK</th><th>Error</th></tr></thead><tbody>';e.slice(0,20).forEach(x=>{h+=`<tr><td style="font-size:11px">${esc(x.fecha||'?')}</td><td>${esc(x.nombre||String(x.mensaje_id||'?'))}</td><td>${x.total_grupos||'?'}</td><td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td></tr>`});h+='</tbody></table>';$('enviosHistorial').innerHTML=h}
 }
-function enviarUnico(id,n){if(!requireMembresia())return;showModal(`<h3>📤 Enviar</h3><p>Enviar <b>"${n}"</b> a todos tus grupos?</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="confEnvio(${id})">Enviar</button></div>`)}
+function enviarUnico(id,n){if(!requireMembresia())return;showModal(`<h3>📤 Enviar</h3><p>Enviar <b>"${esc(n)}"</b> a todos tus grupos?</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="confEnvio(${id})">Enviar</button></div>`)}
 async function confEnvio(id){if(!requireMembresia())return;closeModal();toast('Enviando...','success');const r=await api('/api/enviar_unico',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,mensaje_id:id})});toast(r.ok?'Envio: '+(r.exitosos||0)+' ok, '+(r.fallidos||0)+' error':'Error: '+(r.error||''),r.ok?'success':'error');loadEnvios()}
 
 // --- PROGRAMADOS ---
@@ -2532,7 +2532,7 @@ async function loadProgramados(){
   const p=r.programados||[];
   if(!p.length){$('programadosContent').innerHTML='<div class="empty-state"><div class="icon">⏰</div><p>No hay envios programados.</p></div>';return}
   let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Mensaje</th><th>Hora</th><th>Repetir</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
-  p.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td>${x.nombre||x.mensaje_id}</td><td><b>${x.hora||'?'}</b></td><td>${x.repetir?'Diario':'Una vez'}</td><td><span class="badge ${x.activo?'badge-success':'badge-warn'}">${x.activo?'Activo':'Pausado'}</span></td><td><button class="btn btn-outline btn-sm" onclick="toggleProg(${x.id})">${x.activo?'⏸':'▶'}</button> <button class="btn btn-danger btn-sm" onclick="elimProg(${x.id})">🗑</button></td></tr>`});
+  p.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td>${esc(x.nombre||String(x.mensaje_id||''))}</td><td><b>${esc(x.hora||'?')}</b></td><td>${x.repetir?'Diario':'Una vez'}</td><td><span class="badge ${x.activo?'badge-success':'badge-warn'}">${x.activo?'Activo':'Pausado'}</span></td><td><button class="btn btn-outline btn-sm" onclick="toggleProg(${x.id})">${x.activo?'⏸':'▶'}</button> <button class="btn btn-danger btn-sm" onclick="elimProg(${x.id})">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('programadosContent').innerHTML=h;
 }
 function showCrearProgramado(){showModal(`<h3>➕ Programar</h3><div class="form-group"><label>ID Mensaje</label><input id="pI" type="number" placeholder="ID"></div><div class="form-group"><label>Hora (HH:MM)</label><input id="pH" placeholder="09:30"></div><div class="form-group"><label><input type="checkbox" id="pR"> Repetir diario</label></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearProg()">Programar</button></div>`)}
@@ -2702,7 +2702,7 @@ async function loadAutoResp(){
   const reg=r.reglas||[];
   if(!reg.length){$('autoRespContent').innerHTML='<div class="empty-state"><div class="icon">🤖</div><p>Sin reglas</p></div>';return}
   let h='<div class="table-wrap"><table><thead><tr><th>#</th><th>Palabra</th><th>Respuesta</th><th></th></tr></thead><tbody>';
-  reg.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${x.palabra||x.keyword||'?'}</b></td><td style="font-size:12px;color:var(--text2)">${(x.respuesta||x.response||'').slice(0,80)}</td><td><button class="btn btn-danger btn-sm" onclick="elimAR(${x.id})">🗑</button></td></tr>`});
+  reg.forEach((x,i)=>{h+=`<tr><td>${i+1}</td><td><b>${esc(x.palabra||x.keyword||'?')}</b></td><td style="font-size:12px;color:var(--text2)">${esc((x.respuesta||x.response||'').slice(0,80))}</td><td><button class="btn btn-danger btn-sm" onclick="elimAR(${x.id})">🗑</button></td></tr>`});
   h+='</tbody></table></div>';$('autoRespContent').innerHTML=h;
 }
 function showCrearAutoResp(){showModal(`<h3>➕ Auto-Respuesta</h3><div class="form-group"><label>Palabra clave</label><input id="arP" placeholder="Ej: precio, netflix"></div><div class="form-group"><label>Respuestas (separa con | para variaciones)</label><textarea id="arR" rows="4" placeholder="Ej: Netflix al mejor precio {usuario}|Netflix con el mejor servicio {usuario}|Hola {usuario}, Netflix disponible!"></textarea></div><p style="font-size:11px;color:var(--text2)">Usa {usuario} para insertar el nombre del contacto. Separa con | para que el bot rote entre respuestas.</p><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="crearAR()">Agregar</button></div>`)}
@@ -3096,7 +3096,7 @@ async function loadStats(){
     const env=x.enviados||0,ok=x.exitos||0,fail=x.fallidos||0;
     const t=x.tasa_exito||0;
     const c=t>=80?'badge-success':t>=50?'badge-warn':'badge-danger';
-    h+=`<tr><td style="font-size:11px">${(x.grupo_link||'?').slice(0,40)}</td><td>${env}</td><td style="color:var(--success)">${ok}</td><td style="color:var(--danger)">${fail}</td><td><span class="badge ${c}">${t}%</span></td></tr>`;
+    h+=`<tr><td style="font-size:11px">${esc((x.grupo_link||'?').slice(0,40))}</td><td>${env}</td><td style="color:var(--success)">${ok}</td><td style="color:var(--danger)">${fail}</td><td><span class="badge ${c}">${t}%</span></td></tr>`;
   });
   h+='</tbody></table></div>';$('statsContent').innerHTML=h;
 }
@@ -3597,7 +3597,7 @@ async function loadLogs(){
   let h='';
   logs.forEach(l=>{
     const color=colors[l.tipo]||'var(--text2)';
-    h+='<div style="color:'+color+';padding:2px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2);font-size:11px">['+l.fecha+']</span> <span style="font-weight:bold">['+l.tipo.toUpperCase()+']</span> '+l.mensaje+'</div>';
+    h+='<div style="color:'+color+';padding:2px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2);font-size:11px">['+esc(l.fecha)+']</span> <span style="font-weight:bold">['+esc(l.tipo.toUpperCase())+']</span> '+esc(l.mensaje)+'</div>';
   });
   $('logsContent').innerHTML=h;
 }
@@ -4138,8 +4138,8 @@ async function loadHistorial(tipo){
     const badge=x.resultado==='enviado'||x.resultado==='enviado_pending'||x.resultado==='enviado_personal'?'badge-success':x.resultado==='sin_whatsapp'?'badge-warn':'badge-danger';
     const entregaBadge=x.estado_entrega==='leido'?'badge-success':x.estado_entrega==='entregado'?'badge-info':x.estado_entrega==='rechazado'?'badge-danger':'';
     h+=`<tr><td style="font-size:11px">${x.fecha||'?'}</td><td><span class="badge ${x.tipo==='personal'?'badge-info':'badge-warn'}">${x.tipo==='personal'?'DM':'Grupo'}</span></td>`;
-    h+=`<td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${(x.destino||'').slice(0,50)}</td>`;
-    h+=`<td style="font-size:11px;color:var(--text2)">${(x.mensaje_preview||'').slice(0,30)}</td>`;
+    h+=`<td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc((x.destino||'').slice(0,50))}</td>`;
+    h+=`<td style="font-size:11px;color:var(--text2)">${esc((x.mensaje_preview||'').slice(0,30))}</td>`;
     h+=`<td style="color:var(--success)">${x.exitosos||0}</td><td style="color:var(--danger)">${x.fallidos||0}</td>`;
     h+=`<td><span class="badge ${badge}">${x.resultado||'?'}</span></td>`;
     h+=`<td>${x.estado_entrega?'<span class="badge '+entregaBadge+'">'+x.estado_entrega+'</span>':'-'}</td></tr>`;
@@ -4371,7 +4371,7 @@ function exportarActividadCSV(){
 async function loadAdminLogs(){
   if(!esAdmin)return;
   const r=await api('/api/actividad_admin?u='+userId);
-  if(!r.ok){$('adminLogsContent').innerHTML='<div class="empty-state"><p>Error: '+(r.error||'')+'</p></div>';return}
+  if(!r.ok){$('adminLogsContent').innerHTML='<div class="empty-state"><p>Error: '+esc(r.error||'')+'</p></div>';return}
   const logs=r.logs||[];
   if(!logs.length){$('adminLogsContent').innerHTML='<div class="empty-state"><div class="icon">📋</div><p>Sin logs</p></div>';return}
   let h='<div class="table-wrap"><div class="table-header"><h3>📋 '+logs.length+' registros</h3></div>';

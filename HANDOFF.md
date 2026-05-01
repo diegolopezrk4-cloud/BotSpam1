@@ -368,6 +368,24 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 **Plan Permanente:**
 66. **activarMembresia() no detectaba plan "permanente"** — Cuando `dias >= 36500`, las funciones `activarMembresia()`, `activarMembresiaByNumber()`, y `activarMembresiaByCodigo()` en `db_wsp.js` asignaban plan "mensual" en vez de "permanente" y seteaban `fecha_expira` con una fecha extrema en vez de NULL. Misma falta en `db.py`. Fix: todas las funciones ahora detectan `dias >= 36500` como "permanente" con `fecha_expira=NULL`. (`db_wsp.js:618-706, db.py:173-190`)
 
+#### Fixes de la Segunda Revision (Sincronizacion TG<->WSP + XSS restantes)
+
+**Sincronizacion TG<->WSP (Critico):**
+67. **plan_nombre sync enviaba "mensual" para planes permanentes** — En `bot.py`, cuando el admin activaba membresia con `dias>=36500`, `plan_nombre` se calculaba como "Mensual" y se enviaba via `sync_membresia_wsp()` al endpoint `/api/admin/membresia`. Como el endpoint usa `body.plan` si viene (en vez de recalcular de `dias`), el lado WSP recibia plan="mensual" para membresias permanentes. Fix: logica `plan_nombre` ahora incluye "Permanente" si `dias>=36500`. (`bot.py:2008,4014`)
+68. **`/desactivar` no sincronizaba con WSP** — El comando `/desactivar` usaba `aiosqlite` directo con query `UPDATE activo=0` sin pasar por `db.py` y **no sincronizaba** al lado WSP. El usuario quedaba desactivado en TG pero activo en WSP. Fix: usa `db._connect()`, pone `plan='desactivado'` y `fecha_expira=NULL`, y llama `sync_membresia_wsp()`. (`bot.py:4038-4042`)
+69. **`/ban` no sincronizaba con WSP** — Mismo problema que `/desactivar`: usaba `aiosqlite` directo, sin sync a WSP. Fix: usa `db._connect()` y llama `sync_membresia_wsp()` con plan "desactivado". (`bot.py:4056-4060`)
+70. **`/api/activar` devolvía plan incorrecto para permanentes** — El endpoint retornaba `plan="mensual"` para `dias>=36500` en la respuesta JSON. El bot TG (`/wspactivar`) mostraba plan incorrecto al admin. Fix: logica de plan en respuesta ahora incluye "permanente". (`index_wsp.js:522`)
+
+**XSS Adicionales en panel.html:**
+71. **XSS en loadCuentas()** — `x.nombre` y `x.telefono` sin escapar en tabla de cuentas WSP. `n` sin escapar en modal de confirmacion de eliminacion. Fix: `esc()` en tabla y modal. (`panel.html:1938,1942`)
+72. **XSS en loadAutoResp()** — `x.palabra` y `x.respuesta` sin escapar en tabla de auto-respuestas WSP. Fix: `esc()` en ambos. (`panel.html:2705`)
+73. **XSS en loadHistorial()** — `x.destino` y `x.mensaje_preview` sin escapar en tabla de historial de envios. Fix: `esc()` aplicado. (`panel.html:4141-4142`)
+74. **XSS en loadLogs()** — `l.fecha`, `l.tipo` y `l.mensaje` insertados directamente en innerHTML sin escapar en vista de logs. Fix: `esc()` en los tres. (`panel.html:3600`)
+75. **XSS en loadStats()** — `x.grupo_link` sin escapar en tabla de estadisticas de grupos. Fix: `esc()` aplicado. (`panel.html:3099`)
+76. **XSS en loadEnvios()** — `x.nombre`, `x.texto`, `x.fecha` sin escapar en cards y tabla de envios unicos. Modal de confirmacion con `n` sin escapar. Fix: `esc()` en todos. (`panel.html:2520,2523,2525`)
+77. **XSS en loadProgramados()** — `x.nombre`, `x.mensaje_id`, `x.hora` sin escapar en tabla de programados. Fix: `esc()` aplicado. (`panel.html:2535`)
+78. **XSS en loadAdminLogs error** — `r.error` sin escapar en mensaje de error de logs admin. Fix: `esc()` aplicado. (`panel.html:4374`)
+
 ## Notas Importantes para la Siguiente IA
 1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.
 2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).

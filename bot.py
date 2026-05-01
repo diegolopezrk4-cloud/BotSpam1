@@ -2005,7 +2005,7 @@ async def cb_admin_activar_pago(call: types.CallbackQuery):
     uid = int(partes[1])
     dias = int(partes[2])
     await db.activar_membresia(uid, dias)
-    plan_nombre = "Diario" if dias == 1 else "Semanal" if dias == 7 else "Mensual"
+    plan_nombre = "Permanente" if dias >= 36500 else "Diario" if dias == 1 else "Semanal" if dias == 7 else "Mensual" if dias >= 30 else "Semanal"
     asyncio.create_task(sync_membresia_wsp(uid, dias, plan_nombre.lower()))
     await safe_edit(
         call.message,
@@ -4011,7 +4011,7 @@ async def cmd_activar(msg: types.Message):
         uid  = int(partes[1])
         dias = int(partes[2])
         await db.activar_membresia(uid, dias)
-        plan_nombre = "Diario" if dias == 1 else "Semanal" if dias == 7 else "Mensual"
+        plan_nombre = "Permanente" if dias >= 36500 else "Diario" if dias == 1 else "Semanal" if dias == 7 else "Mensual" if dias >= 30 else "Semanal"
         asyncio.create_task(sync_membresia_wsp(uid, dias, plan_nombre.lower()))
         await msg.answer(f"✅ Membresia activada.\n👤 {uid}\n📦 {plan_nombre}\n⏳ {dias} dias")
         try:
@@ -4035,10 +4035,11 @@ async def cmd_desactivar(msg: types.Message):
         uid = int(partes[1])
     except ValueError:
         return await msg.answer("❌ El user_id debe ser un numero.")
-    import aiosqlite
-    async with aiosqlite.connect("titan.db") as d:
-        await d.execute("UPDATE usuarios SET activo=0 WHERE telegram_id=?", (uid,))
-        await d.commit()
+    async with db._connect() as conn:
+        await conn.execute("UPDATE usuarios SET activo=0, plan='desactivado', fecha_expira=NULL WHERE telegram_id=?", (uid,))
+        await conn.commit()
+    # Sync deactivation to WSP
+    asyncio.create_task(sync_membresia_wsp(uid, 0, "desactivado"))
     await msg.answer(f"✅ Membresia de {uid} desactivada.")
 
 @dp.message(Command("ban"))
@@ -4052,10 +4053,11 @@ async def cmd_ban(msg: types.Message):
         uid = int(partes[1])
     except ValueError:
         return await msg.answer("❌ El user_id debe ser un numero.")
-    import aiosqlite
-    async with aiosqlite.connect("titan.db") as d:
-        await d.execute("UPDATE usuarios SET activo=0, plan='baneado' WHERE telegram_id=?", (uid,))
-        await d.commit()
+    async with db._connect() as conn:
+        await conn.execute("UPDATE usuarios SET activo=0, plan='baneado' WHERE telegram_id=?", (uid,))
+        await conn.commit()
+    # Sync ban to WSP
+    asyncio.create_task(sync_membresia_wsp(uid, 0, "desactivado"))
     await msg.answer(f"🔨 Usuario {uid} baneado.")
     try:
         await bot.send_message(uid, "⛔ Tu acceso al bot ha sido suspendido.")
