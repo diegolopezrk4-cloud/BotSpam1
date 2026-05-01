@@ -178,6 +178,12 @@ function init() {
             code TEXT NOT NULL,
             created_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS registration_codes (
+            telegram_id TEXT NOT NULL,
+            code TEXT UNIQUE NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            used INTEGER DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS user_envio_config (
             user_id TEXT PRIMARY KEY,
             delay_seg INTEGER DEFAULT 10,
@@ -545,6 +551,19 @@ function init() {
             FOREIGN KEY(seller_id) REFERENCES sellers(id)
         );
     `);
+    // Migración: verificado column en panel_users (para verificacion de registro)
+    try {
+        db.prepare("SELECT verificado FROM panel_users LIMIT 1").get();
+    } catch (e) {
+        db.exec("ALTER TABLE panel_users ADD COLUMN verificado INTEGER DEFAULT 0");
+        // Admin siempre verificado
+        if (config.ADMIN_TELEGRAM_IDS) {
+            config.ADMIN_TELEGRAM_IDS.forEach(aid => {
+                db.prepare("UPDATE panel_users SET verificado = 1 WHERE telegram_id = ?").run(aid);
+            });
+        }
+        console.log("   Columna 'verificado' agregada a panel_users (existentes = 0, admin = 1)");
+    }
     console.log("\u2705 Base de datos WSP inicializada");
 }
 
@@ -1303,21 +1322,59 @@ function panelLogin(telegramId, password) {
             if (cfg.ADMIN_TELEGRAM_IDS && cfg.ADMIN_TELEGRAM_IDS.includes(String(telegramId))) esAdmin = true;
         } catch (e) {}
     }
-    return { ok: true, telegram_id: user.telegram_id, username: user.username, es_admin: esAdmin };
+    const verificado = esAdmin ? true : (user.verificado === 1);
+    return { ok: true, telegram_id: user.telegram_id, username: user.username, es_admin: esAdmin, verificado };
 }
 
 function panelRegistro(telegramId, password, username) {
     const bcrypt = require("bcryptjs");
-    const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(String(telegramId));
+    const tid = String(telegramId).trim();
+    // Validar que telegram_id sea numerico (solo digitos, 5-15 chars)
+    if (!/^\d{5,15}$/.test(tid)) return { ok: false, error: "El ID de Telegram debe ser un numero de 5-15 digitos" };
+    const existing = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(tid);
     if (existing) return { ok: false, error: "ya_registrado" };
     const hashed = bcrypt.hashSync(password, 10);
-    db.prepare("INSERT INTO panel_users (telegram_id, username, password) VALUES (?, ?, ?)").run(String(telegramId), username || '', hashed);
+    // Admin se registra verificado, clientes no
+    const esAdmin = config.ADMIN_TELEGRAM_IDS && config.ADMIN_TELEGRAM_IDS.includes(tid);
+    const verificado = esAdmin ? 1 : 0;
+    db.prepare("INSERT INTO panel_users (telegram_id, username, password, verificado) VALUES (?, ?, ?, ?)").run(tid, username || '', hashed, verificado);
     // Crear usuario principal si no existe y darle 1 dia demo
-    const user = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(String(telegramId));
+    const user = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(tid);
     if (!user) {
-        crearUsuario(String(telegramId), username || '');
-        activarMembresia(String(telegramId), 1);
+        crearUsuario(tid, username || '');
+        activarMembresia(tid, 1);
     }
+    return { ok: true, telegram_id: tid, verificado: verificado };
+}
+
+function verificarCuenta(telegramId, codigo) {
+    const tid = String(telegramId).trim();
+    const v = validarCodigoRegistro(codigo);
+    if (!v.ok) return v;
+    if (v.telegram_id !== tid) return { ok: false, error: "El codigo no corresponde a tu ID de Telegram" };
+    marcarCodigoRegistroUsado(codigo);
+    db.prepare("UPDATE panel_users SET verificado = 1 WHERE telegram_id = ?").run(tid);
+    return { ok: true };
+}
+
+function isUserVerificado(telegramId) {
+    const tid = String(telegramId).trim();
+    const esAdmin = config.ADMIN_TELEGRAM_IDS && config.ADMIN_TELEGRAM_IDS.includes(tid);
+    if (esAdmin) return true;
+    const user = db.prepare("SELECT verificado FROM panel_users WHERE telegram_id = ?").get(tid);
+    return user ? user.verificado === 1 : false;
+}
+
+function eliminarUsuarioPanel(telegramId) {
+    const tid = String(telegramId).trim();
+    // No permitir eliminar admin
+    const esAdmin = config.ADMIN_TELEGRAM_IDS && config.ADMIN_TELEGRAM_IDS.includes(tid);
+    if (esAdmin) return { ok: false, error: "No se puede eliminar al admin" };
+    const user = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(tid);
+    if (!user) return { ok: false, error: "Usuario no encontrado" };
+    db.prepare("DELETE FROM panel_users WHERE telegram_id = ?").run(tid);
+    db.prepare("DELETE FROM registration_codes WHERE telegram_id = ?").run(tid);
+    db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(tid);
     return { ok: true };
 }
 
@@ -1376,6 +1433,51 @@ function panelResetPassword(telegramId, code, newPass) {
     return { ok: true };
 }
 
+// --- REGISTRATION CODES (Verificacion de registro) ---
+function generarCodigoRegistro(telegramId) {
+    const crypto = require("crypto");
+    const tid = String(telegramId).trim();
+    // Invalidar codigos previos no usados de este usuario
+    db.prepare("DELETE FROM registration_codes WHERE telegram_id = ? AND used = 0").run(tid);
+    // Generar codigo unico REG-XXXXXX
+    let code;
+    for (let i = 0; i < 50; i++) {
+        code = "REG-" + crypto.randomBytes(3).toString("hex").toUpperCase().slice(0, 6);
+        const exists = db.prepare("SELECT 1 FROM registration_codes WHERE code = ?").get(code);
+        if (!exists) break;
+        if (i === 49) throw new Error("No se pudo generar codigo unico de registro");
+    }
+    db.prepare("INSERT INTO registration_codes (telegram_id, code) VALUES (?, ?)").run(tid, code);
+    return code;
+}
+
+function validarCodigoRegistro(code) {
+    const row = db.prepare("SELECT * FROM registration_codes WHERE code = ? AND used = 0").get(String(code).trim());
+    if (!row) return { ok: false, error: "Codigo invalido o ya usado" };
+    // Verificar que no haya expirado (5 minutos)
+    const created = new Date(row.created_at + "Z");
+    const now = new Date();
+    const diffMin = (now - created) / 60000;
+    if (diffMin > 5) {
+        db.prepare("DELETE FROM registration_codes WHERE code = ?").run(row.code);
+        return { ok: false, error: "Codigo expirado. Registrate de nuevo para recibir un codigo nuevo." };
+    }
+    return { ok: true, telegram_id: row.telegram_id, code: row.code };
+}
+
+function marcarCodigoRegistroUsado(code) {
+    db.prepare("UPDATE registration_codes SET used = 1 WHERE code = ?").run(String(code).trim());
+}
+
+function limpiarCodigosRegistroExpirados() {
+    db.prepare("DELETE FROM registration_codes WHERE used = 0 AND created_at < datetime('now', '-5 minutes')").run();
+    db.prepare("DELETE FROM registration_codes WHERE used = 1 AND created_at < datetime('now', '-1 day')").run();
+}
+
+function getAllPanelUsers() {
+    return db.prepare("SELECT telegram_id, username, verificado, fecha_registro FROM panel_users ORDER BY fecha_registro DESC").all();
+}
+
 function checkMembresia(userId) {
     const user = getUsuario(userId);
     const usu = user;
@@ -1386,12 +1488,14 @@ function checkMembresia(userId) {
             if (cfg.ADMIN_TELEGRAM_IDS && cfg.ADMIN_TELEGRAM_IDS.includes(String(userId))) esAdmin = true;
         } catch (e) {}
     }
-    if (!user) return { ok: true, activa: false, es_admin: esAdmin, membresia: null };
+    const verificado = isUserVerificado(userId);
+    if (!user) return { ok: true, activa: false, es_admin: esAdmin, verificado, membresia: null };
     const activo = user.activo && (user.plan === 'permanente' || !user.fecha_expira || new Date(user.fecha_expira) > new Date());
     return {
         ok: true,
         activa: activo || esAdmin,
         es_admin: esAdmin,
+        verificado,
         membresia: {
             plan: user.plan,
             fecha_expira: user.fecha_expira,
@@ -2069,4 +2173,7 @@ module.exports = {
     getSellerInvitesCount, getSellerInvites, registrarSellerInvite, isSellerUser,
     // Seller codes
     generarSellerCode, getSellerCodes, getSellerCodesPendientes, canjearSellerCode, eliminarSellerCode,
+    // Registration codes (verificacion de registro)
+    generarCodigoRegistro, validarCodigoRegistro, marcarCodigoRegistroUsado, limpiarCodigosRegistroExpirados,
+    verificarCuenta, isUserVerificado, eliminarUsuarioPanel, getAllPanelUsers,
 };

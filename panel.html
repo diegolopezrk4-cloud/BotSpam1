@@ -322,10 +322,10 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       <h4>📌 Como obtener tu ID de Telegram</h4>
       <ol>
         <li>Abre Telegram y busca el bot: <a href="https://t.me/BotSpamJM_bot" target="_blank">@BotSpamJM_bot</a></li>
-        <li>Inicia el bot con /start y usa el comando /miid para obtener tu <b>ID numerico</b></li>
+        <li>Inicia el bot con /start y usa el comando <b>/me</b> para obtener tu <b>ID numerico</b></li>
         <li>Copia ese numero y pegalo aqui abajo</li>
       </ol>
-      <p style="margin-top:10px;font-size:12px;color:var(--text2)">Tambien puedes contactar al creador para ayuda: <a href="https://t.me/JhonnyVip05" target="_blank">@JhonnyVip05</a></p>
+      <p style="margin-top:10px;font-size:12px;color:var(--text2)">Contacto para ayuda: <a href="https://t.me/JhonnyVip05" target="_blank">@JhonnyVip05</a></p>
     </div>
     <input type="text" id="regId" placeholder="Tu ID de Telegram (numerico)" autocomplete="off">
     <input type="text" id="regUsername" placeholder="Nombre de usuario" autocomplete="off">
@@ -341,6 +341,28 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div style="margin-top:12px"><button class="link-btn" onclick="showPlatformSelector()" style="font-size:12px">⬅ Cambiar plataforma</button></div>
     <div class="auth-error" id="regError"></div>
     <div class="auth-success" id="regSuccess"></div>
+  </div>
+</div>
+
+<!-- AUTH: VERIFICACION -->
+<div class="auth-container" id="authVerificar" style="display:none">
+  <div class="auth-card" style="max-width:500px">
+    <div class="logo">🔐</div>
+    <h1>Verificar Cuenta</h1>
+    <p class="subtitle">Te enviamos un codigo de verificacion a tu Telegram</p>
+    <div class="tg-id-help">
+      <h4>📌 Revisa tu Telegram</h4>
+      <p>El bot <a href="https://t.me/BotSpamJM_bot" target="_blank">@BotSpamJM_bot</a> te envio un codigo de verificacion.</p>
+      <p style="margin-top:5px">Ingresalo aqui abajo para activar tu cuenta.</p>
+      <p style="margin-top:5px;font-size:12px;color:var(--text2)">El codigo expira en 5 minutos.</p>
+    </div>
+    <input type="text" id="verifCodigo" placeholder="Codigo de verificacion (REG-XXXXXX)" autocomplete="off" style="text-transform:uppercase;letter-spacing:2px;font-size:16px;text-align:center">
+    <button class="btn-main" onclick="doVerificar()" id="btnVerificar">Verificar</button>
+    <div class="divider"></div>
+    <button class="link-btn" onclick="doReenviarCodigo()" id="btnReenviar">No recibi el codigo — Reenviar</button>
+    <button class="link-btn" onclick="doLogout()" style="margin-top:8px">Cerrar Sesion</button>
+    <div class="auth-error" id="verifError"></div>
+    <div class="auth-success" id="verifSuccess"></div>
   </div>
 </div>
 
@@ -1794,13 +1816,24 @@ async function doLogin(){
   localStorage.setItem('panel_uid',id);localStorage.setItem('panel_token',r.token);
   localStorage.setItem('panel_admin',esAdmin?'1':'0');
   localStorage.setItem('panel_seller',esSeller?'1':'0');
+  // Si no esta verificado, mostrar pantalla de verificacion y enviar codigo
+  // Usar === para evitar bloquear si el campo no existe (backwards compat)
+  if(r.verificado===false || r.verificado===0){
+    localStorage.setItem('panel_verificando','1');
+    // Enviar codigo automaticamente
+    api('/api/reenviar_codigo_verificacion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:id})});
+    showVerificacion();
+    return;
+  }
   showApp();
 }
 
 async function doRegister(){
   const id=$('regId').value.trim(),username=$('regUsername').value.trim(),pass=$('regPass').value,pass2=$('regPass2').value;
   hideMsg('regError');hideMsg('regSuccess');
-  if(!id||!username||!pass){showErr('regError','Completa todos los campos');return}
+  if(!id){showErr('regError','Ingresa tu ID de Telegram. Usa /me en el bot para obtenerlo.');return}
+  if(!/^\d{5,15}$/.test(id)){showErr('regError','El ID debe ser un numero de 5-15 digitos (sin +, sin espacios). Usa /me en el bot.');return}
+  if(!username||!pass){showErr('regError','Completa todos los campos');return}
   if(pass.length<4){showErr('regError','La contrasena debe tener minimo 4 caracteres');return}
   if(pass!==pass2){showErr('regError','Las contrasenas no coinciden');return}
   $('btnRegister').disabled=true;$('btnRegister').textContent='Registrando...';
@@ -1810,11 +1843,59 @@ async function doRegister(){
     const msgs={'ya_registrado':'Ya tienes cuenta. Inicia sesion.'};
     showErr('regError',msgs[r.error]||r.error||'Error');return;
   }
-  showMsg('regSuccess','Registro exitoso! Demo de 1 dia activado. Inicia sesion.');
-  setTimeout(()=>{showLogin();$('loginId').value=id},2000);
+  // Si es admin (verificado=1), ir directo al login
+  if(r.verificado){
+    showMsg('regSuccess','Registro exitoso! Demo de 1 dia activado. Inicia sesion.');
+    setTimeout(()=>{showLogin();$('loginId').value=id},2000);
+  } else {
+    // No verificado: guardar ID y mostrar pantalla de verificacion
+    localStorage.setItem('panel_uid',id);
+    localStorage.setItem('panel_verificando','1');
+    showVerificacion();
+  }
 }
 
-function doLogout(){localStorage.removeItem('panel_uid');localStorage.removeItem('panel_token');localStorage.removeItem('panel_admin');localStorage.removeItem('panel_seller');location.reload()}
+function showVerificacion(){
+  document.querySelectorAll('.auth-container').forEach(c=>c.style.display='none');
+  $('app').style.display='none';
+  $('authVerificar').style.display='flex';
+  hideMsg('verifError');hideMsg('verifSuccess');
+  if($('verifCodigo'))$('verifCodigo').value='';
+}
+
+async function doVerificar(){
+  const codigo=$('verifCodigo').value.trim().toUpperCase();
+  const tid=localStorage.getItem('panel_uid');
+  hideMsg('verifError');hideMsg('verifSuccess');
+  if(!codigo){showErr('verifError','Ingresa el codigo que te envio el bot por Telegram');return}
+  if(!tid){showErr('verifError','Error: no se encontro tu ID. Inicia sesion de nuevo.');return}
+  $('btnVerificar').disabled=true;$('btnVerificar').textContent='Verificando...';
+  const r=await api('/api/verificar_cuenta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:tid,codigo})});
+  $('btnVerificar').disabled=false;$('btnVerificar').textContent='Verificar';
+  if(!r.ok){showErr('verifError',r.error||'Codigo invalido o expirado');return}
+  localStorage.removeItem('panel_verificando');
+  showMsg('verifSuccess','Cuenta verificada! Redirigiendo...');
+  // Si tiene token, ir directo al panel; si no, ir al login
+  const hasToken=localStorage.getItem('panel_token');
+  if(hasToken){
+    userId=tid;
+    setTimeout(()=>showApp(),1500);
+  } else {
+    setTimeout(()=>{showLogin();$('loginId').value=tid},1500);
+  }
+}
+
+async function doReenviarCodigo(){
+  const tid=localStorage.getItem('panel_uid');
+  if(!tid){showErr('verifError','Error: no se encontro tu ID');return}
+  $('btnReenviar').disabled=true;$('btnReenviar').textContent='Enviando...';
+  const r=await api('/api/reenviar_codigo_verificacion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:tid})});
+  $('btnReenviar').disabled=false;$('btnReenviar').textContent='No recibi el codigo — Reenviar';
+  if(!r.ok){showErr('verifError',r.error==='ya_verificado'?'Tu cuenta ya esta verificada. Inicia sesion.':r.error||'Error');return}
+  showMsg('verifSuccess','Codigo reenviado! Revisa tu Telegram.');
+}
+
+function doLogout(){localStorage.removeItem('panel_uid');localStorage.removeItem('panel_token');localStorage.removeItem('panel_admin');localStorage.removeItem('panel_seller');localStorage.removeItem('panel_verificando');location.reload()}
 
 function showErr(id,msg){const el=$(id);el.style.display='block';el.textContent=msg;el.className='auth-error';el.style.display='block'}
 function showMsg(id,msg){const el=$(id);el.style.display='block';el.textContent=msg}
@@ -1822,14 +1903,21 @@ function hideMsg(id){$(id).style.display='none'}
 
 async function showApp(){
   $('authLogin').style.display='none';$('authRegister').style.display='none';$('platformSelector').style.display='none';$('authRecovery').style.display='none';
-  $('app').style.display='block';
-  $('sideUserId').textContent=userId;
-  if($('tgIdDisplay'))$('tgIdDisplay').textContent=userId;
   // Check admin
   esAdmin=localStorage.getItem('panel_admin')==='1';
-  // Verificar membresia
+  // Verificar membresia y verificacion
   const m=await api('/api/check_membresia?u='+userId);
   if(m.ok){
+    // Verificar si el usuario esta verificado (server-side check)
+    // Si verificado no existe en respuesta (server viejo), asumir verificado
+    if(m.verificado===false || m.verificado===0){
+      localStorage.setItem('panel_verificando','1');
+      // Enviar codigo automaticamente
+      api('/api/reenviar_codigo_verificacion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:userId})});
+      showVerificacion();
+      return;
+    }
+    localStorage.removeItem('panel_verificando');
     esAdmin=m.es_admin||esAdmin;
     membresiaActiva=m.activa;
     if(m.membresia){
@@ -1842,6 +1930,9 @@ async function showApp(){
       }
     }
   }
+  $('app').style.display='block';
+  $('sideUserId').textContent=userId;
+  if($('tgIdDisplay'))$('tgIdDisplay').textContent=userId;
   // Mostrar items admin
   if(esAdmin){
     document.querySelectorAll('.admin-only').forEach(el=>el.style.display='');
@@ -3655,6 +3746,7 @@ async function loadAdminUsuarios(){
     h+=`<button class="btn btn-sm btn-outline" onclick="showAdminTipo('${u.telegram_id}')" title="Tipo WSP/TG">\ud83d\udcf1</button>`;
     if(!u.es_admin)h+=`<button class="btn btn-sm btn-outline" onclick="adminSetAdmin('${u.telegram_id}',true)">+Admin</button>`;
     else h+=`<button class="btn btn-sm btn-danger" onclick="adminSetAdmin('${u.telegram_id}',false)">-Admin</button>`;
+    if(!u.es_admin)h+=`<button class="btn btn-sm btn-danger" onclick="adminEliminarUsuario('${u.telegram_id}')" title="Eliminar usuario">🗑️</button>`;
     h+=`</td></tr>`;
   });
   h+='</tbody></table></div>';
@@ -3708,6 +3800,14 @@ async function adminSetAdmin(tid,val){
   if(!confirm((val?'Hacer':'Quitar')+' admin a '+tid+'?'))return;
   const r=await api('/api/admin/set_admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_id:userId,telegram_id:tid,es_admin:val})});
   toast(r.ok?'Admin actualizado':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok)loadAdminUsuarios();
+}
+
+async function adminEliminarUsuario(tid){
+  if(!confirm('ELIMINAR usuario '+tid+'? Esta accion no se puede deshacer.'))return;
+  if(!confirm('Seguro? Se eliminara la cuenta del panel de este usuario.'))return;
+  const r=await api('/api/admin/eliminar_usuario',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:tid})});
+  toast(r.ok?'Usuario eliminado':'Error: '+(r.error||''),r.ok?'success':'error');
   if(r.ok)loadAdminUsuarios();
 }
 
