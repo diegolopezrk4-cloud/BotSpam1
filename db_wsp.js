@@ -1565,15 +1565,50 @@ function eliminarUsuarioPanel(telegramId) {
     const panelUser = db.prepare("SELECT 1 FROM panel_users WHERE telegram_id = ?").get(tid);
     const usuario = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(tid);
     if (!panelUser && !usuario) return { ok: false, error: "Usuario no encontrado" };
-    db.prepare("DELETE FROM panel_users WHERE telegram_id = ?").run(tid);
-    db.prepare("DELETE FROM usuarios WHERE wsp_id = ?").run(tid);
-    db.prepare("DELETE FROM registration_codes WHERE telegram_id = ?").run(tid);
-    db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(tid);
+    // Desactivar FK temporalmente para evitar constraint errors en cascada
+    try { db.exec("PRAGMA foreign_keys = OFF"); } catch(_){}
+    // Tablas de auth/session
+    try { db.prepare("DELETE FROM panel_users WHERE telegram_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM registration_codes WHERE telegram_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM recovery_codes WHERE telegram_id = ?").run(tid); } catch(_){}
     try { db.prepare("DELETE FROM active_sessions WHERE user_id = ?").run(tid); } catch(_){}
     try { db.prepare("DELETE FROM user_2fa WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM login_attempts WHERE telegram_id = ?").run(tid); } catch(_){}
+    // Config y datos del usuario
     try { db.prepare("DELETE FROM user_envio_config WHERE user_id = ?").run(tid); } catch(_){}
-    try { db.prepare("DELETE FROM sellers WHERE telegram_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM envio_progreso WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM push_subscriptions WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM vacation_mode WHERE user_id = ?").run(tid); } catch(_){}
+    // Sellers: borrar hijos ANTES que padres
     try { db.prepare("DELETE FROM seller_codes WHERE seller_id IN (SELECT id FROM sellers WHERE telegram_id = ?)").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM seller_invites WHERE seller_id IN (SELECT id FROM sellers WHERE telegram_id = ?)").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM sellers WHERE telegram_id = ?").run(tid); } catch(_){}
+    // Tickets: borrar mensajes ANTES que tickets
+    try { db.prepare("DELETE FROM ticket_messages WHERE ticket_id IN (SELECT id FROM tickets WHERE user_id = ?)").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM tickets WHERE user_id = ?").run(tid); } catch(_){}
+    // Pagos y comprobantes
+    try { db.prepare("DELETE FROM pagos WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM comprobantes WHERE user_id = ?").run(tid); } catch(_){}
+    // Webhooks, analytics, backups
+    try { db.prepare("DELETE FROM user_webhooks WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM account_health WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM scheduled_recurrent WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM ab_tests WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM audit_log WHERE user_id = ?").run(tid); } catch(_){}
+    // Datos de envio
+    try { db.prepare("DELETE FROM historial_envios WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM grupos WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM campanas WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM templates WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM blacklist WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM blacklist_numeros WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM auto_respuestas WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM programados_wsp WHERE user_id = ?").run(tid); } catch(_){}
+    try { db.prepare("DELETE FROM bot_logs WHERE user_id = ?").run(tid); } catch(_){}
+    // Tabla principal - al final
+    try { db.prepare("DELETE FROM usuarios WHERE wsp_id = ?").run(tid); } catch(_){}
+    // Reactivar FK
+    try { db.exec("PRAGMA foreign_keys = ON"); } catch(_){}
     return { ok: true };
 }
 
