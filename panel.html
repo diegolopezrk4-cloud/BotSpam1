@@ -1421,7 +1421,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
     <div class="section" id="sec-tgcampanas">
       <h2>📋 Campanas Telegram</h2>
       <p style="color:var(--text2);margin-bottom:15px;font-size:14px">Crea y gestiona campanas de envio para Telegram.</p>
-      <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearTgCampana()">➕ Nueva Campana</button></div>
+      <div style="margin-bottom:15px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" onclick="showCrearTgCampana()">➕ Nueva Campana</button><button class="btn btn-success" onclick="iniciarTodasTgCamp()">🚀 Iniciar Todas</button><button class="btn btn-danger" onclick="detenerTodasTgCamp()">⏹ Parar Todas</button></div>
       <div id="tgCampanasContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
@@ -2259,6 +2259,8 @@ async function detenerTgCampana(id){
   const r=await api('/api/tg/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id})});
   toast(r.ok?'Campana detenida':(r.error||'Error'),r.ok?'success':'error');loadTgCampanas();
 }
+async function iniciarTodasTgCamp(){if(!requireMembresia())return;const camps=Object.values(_tgCampanasData).filter(c=>!c.activa);if(!camps.length){toast('No hay campanas detenidas','info');return}for(const c of camps){await api('/api/tg/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id:c.id})});await new Promise(r=>setTimeout(r,2000))}toast(camps.length+' campana(s) TG iniciadas','success');loadTgCampanas()}
+async function detenerTodasTgCamp(){if(!requireMembresia())return;const camps=Object.values(_tgCampanasData).filter(c=>c.activa);if(!camps.length){toast('No hay campanas activas','info');return}for(const c of camps){await api('/api/tg/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,id:c.id})})}toast(camps.length+' campana(s) TG detenidas','success');loadTgCampanas()}
 async function showEditTgCampMsg(id){
   if(!requireMembresia())return;
   const d=_tgCampanasData[id]||{};

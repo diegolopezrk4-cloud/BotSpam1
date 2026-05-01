@@ -617,52 +617,56 @@ async def api_tg_campanas_del(request):
 # ─────────────────────────────────────────
 
 async def api_tg_iniciar(request):
-    body = await request.json()
-    user_id = int(body.get("u", 0))
-    campana_id = int(body.get("id", 0))
-    if not user_id or not campana_id:
-        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
-    campana = await db.get_campana_by_id(campana_id)
-    if not campana or int(campana["user_id"]) != user_id:
-        return web.json_response({"ok": False, "error": "Sin permiso"}, status=403)
+    try:
+        body = await request.json()
+        user_id = int(body.get("u", 0))
+        campana_id = int(body.get("id", 0))
+        if not user_id or not campana_id:
+            return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+        campana = await db.get_campana_by_id(campana_id)
+        if not campana or int(campana["user_id"]) != user_id:
+            return web.json_response({"ok": False, "error": "Sin permiso"}, status=403)
 
-    # Verify membership before allowing campaign launch
-    if not es_admin(user_id):
-        usuario = await db.get_usuario(user_id)
-        if not usuario or not usuario.get("activo"):
-            return web.json_response({"ok": False, "error": "Membresia inactiva o expirada. Renueva tu plan."}, status=403)
-        fecha_exp = usuario.get("fecha_expira")
-        if fecha_exp:
-            from datetime import datetime as dt
-            try:
-                exp = dt.fromisoformat(fecha_exp.replace("Z", "+00:00")) if "Z" in str(fecha_exp) else dt.strptime(str(fecha_exp), "%Y-%m-%d %H:%M:%S")
-                if exp < dt.utcnow():
-                    return web.json_response({"ok": False, "error": "Membresia expirada. Renueva tu plan."}, status=403)
-            except Exception:
-                pass
+        # Verify membership before allowing campaign launch
+        if not es_admin(user_id):
+            usuario = await db.get_usuario(user_id)
+            if not usuario or not usuario.get("activo"):
+                return web.json_response({"ok": False, "error": "Membresia inactiva o expirada. Renueva tu plan."}, status=403)
+            fecha_exp = usuario.get("fecha_expira")
+            if fecha_exp:
+                from datetime import datetime as dt
+                try:
+                    exp = dt.fromisoformat(fecha_exp.replace("Z", "+00:00")) if "Z" in str(fecha_exp) else dt.strptime(str(fecha_exp), "%Y-%m-%d %H:%M:%S")
+                    if exp < dt.utcnow():
+                        return web.json_response({"ok": False, "error": "Membresia expirada. Renueva tu plan."}, status=403)
+                except Exception:
+                    pass
 
-    grupos_campana = await db.get_grupos_campana(campana_id)
-    if not grupos_campana:
-        grupos_user = await db.get_grupos(user_id)
-        if not grupos_user:
-            return web.json_response({"ok": False, "error": "Sin grupos. Agrega grupos primero."})
-        for g in grupos_user:
-            await db.agregar_grupo_campana(campana_id, g["link"])
+        grupos_campana = await db.get_grupos_campana(campana_id)
+        if not grupos_campana:
+            grupos_user = await db.get_grupos(user_id)
+            if not grupos_user:
+                return web.json_response({"ok": False, "error": "Sin grupos. Agrega grupos primero."})
+            for g in grupos_user:
+                await db.agregar_grupo_campana(campana_id, g["link"])
 
-    sesiones_campana = await db.get_sesiones_campana(campana_id)
-    if not sesiones_campana:
-        sesiones_user = await db.get_sesiones(user_id)
-        if not sesiones_user:
-            return web.json_response({"ok": False, "error": "Sin cuentas. Agrega cuentas primero."})
-        for s in sesiones_user:
-            await db.agregar_sesion_campana(campana_id, s["nombre"])
+        sesiones_campana = await db.get_sesiones_campana(campana_id)
+        if not sesiones_campana:
+            sesiones_user = await db.get_sesiones(user_id)
+            if not sesiones_user:
+                return web.json_response({"ok": False, "error": "Sin cuentas. Agrega cuentas primero."})
+            for s in sesiones_user:
+                await db.agregar_sesion_campana(campana_id, s["nombre"])
 
-    loop = asyncio.get_event_loop()
-    resultado = iniciar_campana(campana_id, user_id, loop, aiogram_bot)
-    if resultado:
-        return web.json_response({"ok": True, "msg": f"Campana '{campana['nombre']}' INICIADA!"})
-    else:
-        return web.json_response({"ok": False, "error": "La campana ya esta en ejecucion."})
+        loop = asyncio.get_event_loop()
+        resultado = iniciar_campana(campana_id, user_id, loop, aiogram_bot)
+        if resultado:
+            return web.json_response({"ok": True, "msg": f"Campana '{campana['nombre']}' INICIADA!"})
+        else:
+            return web.json_response({"ok": False, "error": "La campana ya esta en ejecucion."})
+    except Exception as e:
+        print(f"[ERROR] api_tg_iniciar: {e}")
+        return web.json_response({"ok": False, "error": f"Error interno: {str(e)}"}, status=500)
 
 
 async def api_tg_detener(request):
