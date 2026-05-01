@@ -1232,11 +1232,11 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             const total = jids.length;
             let enviados = 0;
             let errores = 0;
-            // Anti-ban: wider random delay range (5-15s base, increases after every 20 messages)
-            const DELAY_MIN = 5000;
-            const DELAY_MAX = 15000;
-            // Anti-ban: if no batch config, auto-batch every 15 messages with 3-5 min pause
-            if (!batchSize) { batchSize = 15; delayMinutes = delayMinutes || 3; }
+            // Anti-ban v2: wider delay range + typing simulation + random long pauses
+            const DELAY_MIN = 15000;
+            const DELAY_MAX = 45000;
+            // Anti-ban: if no batch config, auto-batch every 5 messages with 10 min pause
+            if (!batchSize) { batchSize = 5; delayMinutes = delayMinutes >= 10 ? delayMinutes : 10; }
             const DELAY_ENTRE_LOTES = batchSize ? delayMinutes * 60 * 1000 : 0;
             const displayName = grupoNombre || grupoJid || "seleccionados";
 
@@ -1244,7 +1244,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             const resumeInfo = startIndex > 0 ? `\n🔄 Reanudando desde #${startIndex + 1}` : "";
             try {
                 await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 5-15 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 10 / 60)} min`,
+                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u{1F6E1} Anti-ban v2: delay 15-45s + typing + pausas aleatorias${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 30 / 60)} min`,
                 });
             } catch (e) {}
 
@@ -1314,6 +1314,16 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
 
                     const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
                     console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid}`);
+
+                    // Anti-ban: simulate typing before sending (looks human)
+                    try {
+                        await botSock.presenceSubscribe(jid);
+                        await delay(500 + Math.random() * 1000);
+                        await botSock.sendPresenceUpdate("composing", jid);
+                        await delay(2000 + Math.random() * 3000);
+                        await botSock.sendPresenceUpdate("paused", jid);
+                    } catch (e) {}
+
                     let result;
                     if (imagenPath && fs.existsSync(imagenPath)) {
                         result = await botSock.sendMessage(jid, {
@@ -1377,9 +1387,15 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                 }
 
                 if (!cancelled) {
-                    // Anti-ban: progressive delay — add 0.5s per 20 messages sent
-                    const progressiveExtra = Math.floor(enviados / 20) * 500;
-                    const cooldown = DELAY_MIN + Math.floor(Math.random() * (DELAY_MAX - DELAY_MIN)) + progressiveExtra;
+                    // Anti-ban v2: progressive delay — add 3s per 5 messages sent
+                    const progressiveExtra = Math.floor(enviados / 5) * 3000;
+                    let cooldown = DELAY_MIN + Math.floor(Math.random() * (DELAY_MAX - DELAY_MIN)) + progressiveExtra;
+                    // Anti-ban v2: random long pause (20% chance of 60-120s extra pause)
+                    if (Math.random() < 0.2) {
+                        const longPause = 60000 + Math.floor(Math.random() * 60000);
+                        console.log(`[EnvioMiembros] Anti-ban: pausa larga aleatoria ${Math.round(longPause/1000)}s`);
+                        cooldown += longPause;
+                    }
                     await delay(cooldown);
                 }
             }

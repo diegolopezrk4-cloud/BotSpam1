@@ -844,15 +844,15 @@ table tr:hover { background: rgba(108,92,231,0.05); }
       </div>
       <div style="background:var(--bg);padding:15px;border-radius:10px;margin-bottom:15px;border:1px solid var(--border)">
         <h4 style="margin:0 0 10px 0">⏰ Envio por Lotes (Anti-Baneo)</h4>
-        <p style="color:var(--text2);font-size:12px;margin-bottom:10px">Divide el envio en lotes para evitar que WhatsApp te banee. Deja vacio para enviar sin pausas.</p>
+        <p style="color:var(--text2);font-size:12px;margin-bottom:10px">🛡 Anti-ban v2: Divide en lotes pequeños con pausas largas. Default: 5 por lote, 10 min pausa, delay 15-45s + typing simulado.</p>
         <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
           <div class="form-group" style="margin:0">
             <label>Miembros por lote</label>
-            <input type="number" id="emBatchSize" placeholder="Ej: 15" min="1" value="">
+            <input type="number" id="emBatchSize" placeholder="Ej: 5" min="1" value="">
           </div>
           <div class="form-group" style="margin:0">
             <label>Minutos entre lotes</label>
-            <input type="number" id="emDelayMinutes" placeholder="Ej: 5" min="1" value="5">
+            <input type="number" id="emDelayMinutes" placeholder="Ej: 10" min="1" value="10">
           </div>
         </div>
       </div>
@@ -5037,10 +5037,12 @@ async function adminPagosTab(tab){
     const r=await api('/api/admin/comprobantes?u='+userId+'&filter='+filter);
     const comps=r.ok?r.comprobantes:[];
     if(!comps.length){el.innerHTML='<div class="empty-state"><p>No hay comprobantes '+filter+'</p></div>';return}
-    let h='<div class="table-wrap"><table><thead><tr><th>ID</th><th>Usuario</th><th>Plan</th><th>Metodo</th><th>Monto</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>';
+    let h='<div class="table-wrap"><table><thead><tr><th>ID</th><th>Usuario</th><th>Plan</th><th>Metodo</th><th>Monto</th><th>Estado</th><th>Fecha</th><th>Comprobante</th><th>Acciones</th></tr></thead><tbody>';
     comps.forEach(c=>{
       const badge=c.estado==='aprobado'?'badge-success':c.estado==='rechazado'?'badge-danger':'badge-warning';
+      const imgBtn=c.imagen_path?`<button class="btn btn-sm btn-outline" onclick="verComprobante(${c.id})" title="Ver comprobante">🖼 Ver</button>`:'<span style="color:var(--text2);font-size:11px">Sin imagen</span>';
       h+=`<tr><td>${c.id}</td><td>${esc(c.user_id)}</td><td>${esc(c.plan_key)}</td><td>${esc(c.metodo_pago)}</td><td>${esc(c.monto)}</td><td><span class="badge ${badge}">${esc(c.estado)}</span></td><td style="font-size:11px">${c.fecha_creado||'-'}</td>
+      <td>${imgBtn}</td>
       <td>${c.estado==='pendiente'?`<button class="btn btn-sm btn-success" onclick="aprobarComprobante(${c.id})">Aprobar</button> <button class="btn btn-sm btn-danger" onclick="rechazarComprobante(${c.id})">Rechazar</button>`:'-'}</td></tr>`;
     });
     h+='</tbody></table></div>';el.innerHTML=h;
@@ -5078,6 +5080,12 @@ async function rechazarComprobante(id){
   const r=await api('/api/admin/comprobante/rechazar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,admin_id:userId})});
   toast(r.ok?'Comprobante rechazado':'Error: '+(r.error||''),r.ok?'success':'error');
   if(r.ok)loadAdminPagos();
+}
+
+function verComprobante(id){
+  showModal(`<h3>🖼 Comprobante #${id}</h3>
+    <div style="text-align:center;padding:10px"><img src="/api/comprobante/imagen?id=${id}" style="max-width:100%;max-height:70vh;border-radius:8px;border:1px solid var(--border)" onerror="this.parentElement.innerHTML='<p style=color:var(--danger)>No se pudo cargar la imagen</p>'"></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button></div>`);
 }
 
 // --- METODOS DE PAGO ADMIN CRUD ---

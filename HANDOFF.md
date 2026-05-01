@@ -1252,6 +1252,25 @@ CI: lint-and-check OK | docker-build OK
 - **Fix Backend**: Eliminado fallback a `botSock`. Ahora requiere `body.cuenta` obligatorio, con error descriptivo si falta o falla la conexion.
 - **Archivos**: `panel.html` (showAutoJoin, ejecutarAutoJoin), `index_wsp.js` (endpoint /api/autojoin)
 
+### MEJORA: Ver comprobante de pago en admin
+- **Donde**: `panel.html` — tabla de pagos admin (Pendientes / Todos los Comprobantes)
+- **Antes**: La tabla mostraba ID, Usuario, Plan, Metodo, Monto, Estado, Fecha, Acciones — pero NO habia forma de ver la imagen del comprobante
+- **Fix**: Agregada columna "Comprobante" con boton "🖼 Ver" que abre modal con la imagen full-size (usa endpoint existente `/api/comprobante/imagen?id=X`). Si no hay imagen muestra "Sin imagen".
+- **Funcion nueva**: `verComprobante(id)` — muestra modal con la imagen del comprobante
+- **Archivo**: `panel.html`
+
+### MEJORA: Anti-ban v2 para envio a miembros WSP
+- **Donde**: `motor_wsp.js` funcion `enviarASeleccionados()`, `panel.html` seccion envio a miembros
+- **Problema**: Los clientes eran baneados al enviar DM a miembros de grupo incluso con delays de 10 min entre lotes
+- **Mejoras implementadas**:
+  1. **Delay base aumentado**: 15-45s entre mensajes (antes 5-15s)
+  2. **Lote default reducido**: 5 mensajes por lote (antes 15)
+  3. **Pausa entre lotes aumentada**: 10 min minimo (antes 3 min)
+  4. **Simulacion de typing**: `presenceSubscribe` + `composing` + `paused` antes de cada mensaje — WSP ve actividad humana
+  5. **Delay progresivo agresivo**: +3s por cada 5 mensajes enviados (antes +0.5s por cada 20)
+  6. **Pausas largas aleatorias**: 20% de probabilidad de pausa extra de 60-120s entre mensajes (simula comportamiento humano)
+- **Archivos**: `motor_wsp.js`, `panel.html` (textos y defaults actualizados)
+
 ### BUG-FIX: git reset --hard restauraba DB antigua (cuentas borradas reaparecian)
 - **Donde**: `.gitignore` + archivos rastreados por git
 - **Sintoma**: Despues de actualizar con `git reset --hard`, las cuentas borradas reaparecian y las nuevas se perdian.
