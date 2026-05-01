@@ -618,9 +618,14 @@ function getUsuarioByCodigo(codigo) {
 function activarMembresiaByCodigo(codigo, dias) {
     const user = db.prepare("SELECT * FROM usuarios WHERE codigo = ?").get(codigo);
     if (!user) return null;
-    const expira = expiraPeru(dias);
-    const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : "mensual";
-    db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, user.wsp_id);
+    const isPermanent = dias >= 36500;
+    const expira = isPermanent ? null : expiraPeru(dias);
+    const plan = isPermanent ? "permanente" : dias === 1 ? "diario" : dias === 7 ? "semanal" : dias >= 30 ? "mensual" : "semanal";
+    if (isPermanent) {
+        db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = NULL, activo = 1 WHERE wsp_id = ?").run(plan, user.wsp_id);
+    } else {
+        db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, user.wsp_id);
+    }
     const num = user.wsp_id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
     let altJid = null;
     if (user.wsp_id.endsWith("@lid")) altJid = num + "@s.whatsapp.net";
@@ -628,7 +633,11 @@ function activarMembresiaByCodigo(codigo, dias) {
     if (altJid) {
         const altUser = db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(altJid);
         if (altUser) {
-            db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, altJid);
+            if (isPermanent) {
+                db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = NULL, activo = 1 WHERE wsp_id = ?").run(plan, altJid);
+            } else {
+                db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, altJid);
+            }
         }
     }
     return { plan, wspId: user.wsp_id, nombre: user.nombre };
@@ -655,14 +664,36 @@ function banByCodigo(codigo) {
 }
 
 function activarMembresia(wspId, dias) {
+    if (dias >= 36500) {
+        db.prepare("UPDATE usuarios SET plan = 'permanente', fecha_expira = NULL, activo = 1 WHERE wsp_id = ?").run(wspId);
+        return;
+    }
     const expira = expiraPeru(dias);
-    const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : "mensual";
+    const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : dias >= 30 ? "mensual" : "semanal";
     db.prepare("UPDATE usuarios SET plan = ?, fecha_expira = ?, activo = 1 WHERE wsp_id = ?").run(plan, expira, wspId);
 }
 
 function activarMembresiaByNumber(phoneNumber, dias) {
+    if (dias >= 36500) {
+        const withLid = phoneNumber + "@lid";
+        const withWsp = phoneNumber + "@s.whatsapp.net";
+        let activated = false;
+        if (db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(withLid)) {
+            db.prepare("UPDATE usuarios SET plan = 'permanente', fecha_expira = NULL, activo = 1 WHERE wsp_id = ?").run(withLid);
+            activated = true;
+        }
+        if (db.prepare("SELECT 1 FROM usuarios WHERE wsp_id = ?").get(withWsp)) {
+            db.prepare("UPDATE usuarios SET plan = 'permanente', fecha_expira = NULL, activo = 1 WHERE wsp_id = ?").run(withWsp);
+            activated = true;
+        }
+        if (!activated) {
+            db.prepare("INSERT OR IGNORE INTO usuarios (wsp_id, nombre) VALUES (?, '')").run(withWsp);
+            db.prepare("UPDATE usuarios SET plan = 'permanente', fecha_expira = NULL, activo = 1 WHERE wsp_id = ?").run(withWsp);
+        }
+        return "permanente";
+    }
     const expira = expiraPeru(dias);
-    const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : "mensual";
+    const plan = dias === 1 ? "diario" : dias === 7 ? "semanal" : dias >= 30 ? "mensual" : "semanal";
     const withLid = phoneNumber + "@lid";
     const withWsp = phoneNumber + "@s.whatsapp.net";
     let activated = false;

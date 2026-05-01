@@ -338,6 +338,36 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 47. **readBody sin limite** — El parser JSON del API no tenia limite de tamaño. Fix: max 10MB.
 48. **Proxy sin X-Forwarded-For** — panel_server.js no pasaba IP del cliente a los backends. Fix: header `x-forwarded-for` en ambos proxies.
 
+#### Fixes de la Revision Completa (Sesion de Bugfix Detallado)
+
+**XSS (Seguridad Critica):**
+49. **XSS en loadMensajes()** — `x.nombre` y `x.texto` se insertaban en innerHTML sin escapar. Fix: `esc()` aplicado. (`panel.html:2504`)
+50. **XSS en editarMensaje()** — `m.nombre` y `m.texto` se inyectaban en atributo `value=""` y textarea sin escapar, permitiendo breakout con `"`. Fix: `esc()` en ambos. (`panel.html:2509`)
+51. **XSS en renderChatsPersonales()** — `nombre`, `numero` y `jid` sin escapar en tabla y onclick handler. Fix: `esc()` en todos. (`panel.html:2807-2811`)
+52. **XSS en loadListaNegra()** — `numero` de blacklist sin escapar en tabla y onclick. Fix: `esc()` aplicado. (`panel.html:2690`)
+53. **XSS en cargarGruposCuenta()** — `g.jid` e `info` (nombre de grupo) sin escapar en options de select. Fix: `esc()` en value y text. (`panel.html:2943`)
+54. **XSS en cargarChatsPersonales error** — `r.error` insertado directamente en innerHTML. Fix: `esc()` aplicado. (`panel.html:2798`)
+55. **XSS en cargarMiembros error** — `r.error` insertado directamente en innerHTML. Fix: `esc()` aplicado. (`panel.html:2967`)
+56. **XSS en loadSellersAdmin** — `s.telegram_id`, `s.nombre`, y error msg sin escapar. Fix: `esc()` en todos. (`panel.html:3720,3734-3735`)
+57. **XSS en loadAdminUsuarios** — `u.telegram_id` y `u.username` sin escapar en tabla admin. Fix: `esc()` aplicado. (`panel.html:3645`)
+58. **XSS en adminContent error** — `r.error` sin escapar. Fix: `esc()` aplicado. (`panel.html:3633`)
+59. **XSS en verificarResult** — `r.error` sin escapar. Fix: `esc()` aplicado. (`panel.html:4209`)
+60. **XSS en filtrarGruposPanel** — Link/JID sin escapar en tabla de grupos. Fix: `esc()` aplicado. (`panel.html:2423`)
+61. **XSS en showEditTgMsg** — `nombre` y `texto` params sin escapar al insertar en modal. Fix: `esc()` en modal, removido doble-escape del caller. (`panel.html:2022,2033`)
+62. **XSS en sellerPanel** — `inv.invitado_telegram_id`, `c.codigo`, `usadoPor` sin escapar. Fix: `esc()` en todos. (`panel.html:3831,3843,3867,3868`)
+
+**Funcionalidad:**
+63. **eliminarChatPersonal enviaba parametro incorrecto** — Panel enviaba `{jid}` al endpoint `/api/chat_personal_eliminar` que espera `{numero}`. El chat nunca se eliminaba realmente de la BD. Fix: extraer numero del JID antes de enviar. (`panel.html:2816-2821`)
+
+**Memory Leak:**
+64. **Responder event listeners nunca se limpiaban** — `iniciarResponder()` registraba handlers `messages.upsert` en sockets pero `detenerResponder()` solo ponia `cancelled=true` sin hacer `sock.ev.off()`. Los handlers seguian ejecutandose silenciosamente. Fix: array `registeredHandlers` para trackear handlers, cleanup con `sock.ev.off()` en finally. (`motor_wsp.js:892-1002`)
+
+**Timezone Bug:**
+65. **Scheduler fecha comparison usaba toISOString() incorrectamente** — `peruTime.toISOString()` convertia la fecha de Peru de vuelta a UTC, causando que a las 10:30 PM Peru (UTC-5) se detectara la fecha de manana (3:30 AM UTC del dia siguiente). Los envios programados podian ejecutarse doble o no ejecutarse. Fix: usar `getFullYear()/getMonth()/getDate()` directamente. (`motor_wsp.js:1407-1413`)
+
+**Plan Permanente:**
+66. **activarMembresia() no detectaba plan "permanente"** — Cuando `dias >= 36500`, las funciones `activarMembresia()`, `activarMembresiaByNumber()`, y `activarMembresiaByCodigo()` en `db_wsp.js` asignaban plan "mensual" en vez de "permanente" y seteaban `fecha_expira` con una fecha extrema en vez de NULL. Misma falta en `db.py`. Fix: todas las funciones ahora detectan `dias >= 36500` como "permanente" con `fecha_expira=NULL`. (`db_wsp.js:618-706, db.py:173-190`)
+
 ## Notas Importantes para la Siguiente IA
 1. **panel.html** es monolitico (~4580 lineas). Todo HTML, CSS y JS en un archivo. No separar.
 2. Los endpoints API se agregan en `index_wsp.js` **ANTES** de la linea `// Endpoint no encontrado` (buscar esa cadena).
@@ -353,5 +383,5 @@ Bot de WhatsApp + Telegram para envio masivo, gestion de grupos, campanas automa
 
 ## Comando de Actualizacion
 ```bash
-cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777523595-fix-bugs-features && npm install && bash start.sh
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777643844-bugfixes && npm install && bash start.sh
 ```

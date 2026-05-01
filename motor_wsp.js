@@ -893,6 +893,7 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
     if (responderActivos[userId]) return false;
 
     let cancelled = false;
+    const registeredHandlers = []; // Track handlers for cleanup
     const task = {
         running: true,
         cancel: () => { cancelled = true; },
@@ -925,7 +926,7 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
             const autoRespCounters = {};
 
             for (const { nombre, sock } of socks) {
-                sock.ev.on("messages.upsert", async ({ messages }) => {
+                const handler = async ({ messages }) => {
                     if (cancelled) return;
                     for (const msg of messages) {
                         if (!msg.message || msg.key.fromMe) continue;
@@ -975,7 +976,9 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
                             }
                         }
                     }
-                });
+                };
+                sock.ev.on("messages.upsert", handler);
+                registeredHandlers.push({ sock, handler });
             }
 
             while (!cancelled) {
@@ -984,6 +987,10 @@ function iniciarResponder(userId, contacto, palabras, botSock) {
         } catch (e) {
             console.error(`Responder error ${userId}: ${e.message}`);
         } finally {
+            // Cleanup: remove all registered event handlers
+            for (const { sock, handler } of registeredHandlers) {
+                try { sock.ev.off("messages.upsert", handler); } catch (e) {}
+            }
             delete responderActivos[userId];
         }
     })();
@@ -1400,9 +1407,9 @@ function iniciarSchedulerMiembros(botSock) {
                     // Check if already sent today
                     if (prog.ultimo_envio) {
                         const lastSend = new Date(prog.ultimo_envio + "Z");
-                        const hoyPeru = peruTime.toISOString().split("T")[0];
+                        const hoyPeru = peruTime.getFullYear() + "-" + String(peruTime.getMonth() + 1).padStart(2, "0") + "-" + String(peruTime.getDate()).padStart(2, "0");
                         const lastSendPeru = new Date(lastSend.toLocaleString("en-US", { timeZone: config.TIMEZONE }));
-                        const lastSendDate = lastSendPeru.toISOString().split("T")[0];
+                        const lastSendDate = lastSendPeru.getFullYear() + "-" + String(lastSendPeru.getMonth() + 1).padStart(2, "0") + "-" + String(lastSendPeru.getDate()).padStart(2, "0");
                         if (lastSendDate === hoyPeru) continue;
                     }
                     // Execute the scheduled send
