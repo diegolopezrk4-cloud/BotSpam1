@@ -871,6 +871,7 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                 // Reporte de ciclo
                 if (!cancelled) {
+                    try {
                     const c = db.getCampanaById(campanaId);
                     gruposLinks = db.getGruposCampana(campanaId);
 
@@ -884,16 +885,20 @@ function iniciarCampana(campanaId, userId, botSock) {
                     }
 
                     // Envios diarios por cuenta
-                    const enviosDia = db.getEnviosDiariosTotal(userId);
                     let enviosDiaMsg = "";
-                    if (enviosDia.length) {
-                        enviosDiaMsg = "\n\u{1F4CA} Envios hoy: " + enviosDia.map(e => `${e.cuenta_nombre}=${e.total}`).join(", ");
-                    }
+                    try {
+                        const enviosDia = db.getEnviosDiariosTotal(userId);
+                        if (enviosDia.length) {
+                            enviosDiaMsg = "\n\u{1F4CA} Envios hoy: " + enviosDia.map(e => `${e.cuenta_nombre}=${e.total}`).join(", ");
+                        }
+                    } catch (_) {}
 
                     const esperaSeg = numCuentas === 1 ? 600 : (conf.espera_ciclo || 600);
                     const esperaMin = Math.round(esperaSeg / 60);
 
-                    await notificarUsuario(botSock, userId, `\u23F8 *${campana.nombre}* — Ciclo #${ciclo} completado\n\u2705 ${c.enviados} enviados | \u274C ${c.errores} errores\n\u{1F310} ${gruposLinks.length} grupo(s) activos\n\n\u{1F6D1} *Estado: EN REPOSO*\n\u23F0 Reanuda en ${esperaMin} minuto(s)${reporteExtra}${enviosDiaMsg}`);
+                    const enviados = c ? c.enviados : '?';
+                    const errores = c ? c.errores : '?';
+                    await notificarUsuario(botSock, userId, `\u23F8 *${campana.nombre}* — Ciclo #${ciclo} completado\n\u2705 ${enviados} enviados | \u274C ${errores} errores\n\u{1F310} ${gruposLinks.length} grupo(s) activos\n\n\u{1F6D1} *Estado: EN REPOSO*\n\u23F0 Reanuda en ${esperaMin} minuto(s)${reporteExtra}${enviosDiaMsg}`);
 
                     db.setCampanaEstadoDetalle(campanaId, `en_reposo|${Math.floor(Date.now()/1000)}|${esperaSeg}`);
 
@@ -904,6 +909,15 @@ function iniciarCampana(campanaId, userId, botSock) {
                         await notificarUsuario(botSock, userId, `\u25B6 *${campana.nombre}* — Reanudando ciclo #${ciclo + 1}...`);
                     }
                     delayMultiplier = Math.max(1.0, delayMultiplier - 0.5);
+                    } catch (cicloErr) {
+                        console.error(`[Campana ${campanaId}] Error en reporte de ciclo: ${cicloErr.message}`);
+                        db.agregarLog(userId, 'error', `Campana ${campanaId} error ciclo: ${cicloErr.message}`);
+                        // Don't let cycle report errors kill the campaign - wait and continue
+                        if (!cancelled) {
+                            const esperaFallback = numCuentas === 1 ? 600 : (conf.espera_ciclo || 600);
+                            await delay(esperaFallback * 1000);
+                        }
+                    }
                 }
             }
         } catch (e) {

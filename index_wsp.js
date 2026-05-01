@@ -679,52 +679,7 @@ poll();
                 }
             }
 
-            // GET /api/chat/contactos — Lista de contactos con historial de chat
-            if (url.pathname === "/api/chat/contactos" && req.method === "GET") {
-                const userId = url.searchParams.get("u");
-                const cuenta = url.searchParams.get("cuenta");
-                if (!userId || !cuenta) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o cuenta" })); }
-                try {
-                    const contacts = db.getChatContacts(userId, cuenta);
-                    res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, contacts }));
-                } catch(e) {
-                    res.writeHead(500);
-                    return res.end(JSON.stringify({ ok: false, error: e.message }));
-                }
-            }
 
-            // GET /api/chat/synced — Lista de chats sincronizados desde WhatsApp
-            if (url.pathname === "/api/chat/synced" && req.method === "GET") {
-                const userId = url.searchParams.get("u");
-                const cuenta = url.searchParams.get("cuenta");
-                const tipo = url.searchParams.get("tipo") || null;
-                if (!userId || !cuenta) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o cuenta" })); }
-                try {
-                    const chats = db.getSyncedChats(userId, cuenta, tipo);
-                    res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, chats }));
-                } catch(e) {
-                    res.writeHead(500);
-                    return res.end(JSON.stringify({ ok: false, error: e.message }));
-                }
-            }
-
-            // GET /api/chat/mensajes — Historial de mensajes de un chat
-            if (url.pathname === "/api/chat/mensajes" && req.method === "GET") {
-                const userId = url.searchParams.get("u");
-                const cuenta = url.searchParams.get("cuenta");
-                const jid = url.searchParams.get("jid");
-                if (!userId || !cuenta || !jid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, cuenta o jid" })); }
-                try {
-                    const messages = db.getChatMessages(userId, cuenta, jid, 50);
-                    res.writeHead(200);
-                    return res.end(JSON.stringify({ ok: true, messages: messages.reverse() }));
-                } catch(e) {
-                    res.writeHead(500);
-                    return res.end(JSON.stringify({ ok: false, error: e.message }));
-                }
-            }
 
             // GET /api/chats_personales — List personal chats for Envio Personal
             if (url.pathname === "/api/chats_personales" && req.method === "GET") {
@@ -3834,17 +3789,36 @@ async function startBot() {
             console.log(`\u{1F4F1} Bot disponible como cuenta de spam: '${motor.BOT_NOMBRE}'`);
             console.log("\u{1F4F1} Listo para recibir mensajes.\n");
 
-            // Notify users whose campaigns were stopped by update
+            // Auto-restart campaigns that were stopped by update
             if (campanasDetenidas && campanasDetenidas.length) {
                 const porUsuario = {};
                 for (const c of campanasDetenidas) {
                     if (!porUsuario[c.user_id]) porUsuario[c.user_id] = [];
-                    porUsuario[c.user_id].push(c.nombre);
+                    porUsuario[c.user_id].push(c);
                 }
-                for (const [uid, nombres] of Object.entries(porUsuario)) {
+                for (const [uid, camps] of Object.entries(porUsuario)) {
+                    let reiniciadas = [];
+                    let fallidas = [];
+                    for (const camp of camps) {
+                        try {
+                            const campData = db.getCampanaById(camp.id);
+                            if (!campData) { fallidas.push(camp.nombre + " (no encontrada)"); continue; }
+                            const sesiones = db.getSesionesCampana(camp.id);
+                            const grupos = db.getGruposCampana(camp.id);
+                            if (!sesiones.length || !grupos.length) { fallidas.push(camp.nombre + " (sin cuentas/grupos)"); continue; }
+                            db.setCampanaActiva(camp.id, true);
+                            motor.iniciarCampana(camp.id, uid, botSock);
+                            reiniciadas.push(camp.nombre);
+                        } catch (e) {
+                            fallidas.push(camp.nombre + ` (${e.message})`);
+                        }
+                    }
                     try {
                         const jid = uid.includes("@") ? uid : uid + "@s.whatsapp.net";
-                        await botSock.sendMessage(jid, { text: `\u26A0\uFE0F *Bot actualizado*\n\nSe detuvo automaticamente ${nombres.length} campana(s) por actualizacion del sistema:\n${nombres.map(n => `  \u2022 ${n}`).join("\n")}\n\nPuedes reiniciarlas desde el panel.` });
+                        let msg = `\u{1F504} *Bot actualizado*\n\n`;
+                        if (reiniciadas.length) msg += `\u2705 ${reiniciadas.length} campana(s) reiniciadas automaticamente:\n${reiniciadas.map(n => `  \u2022 ${n}`).join("\n")}\n`;
+                        if (fallidas.length) msg += `\n\u26A0 ${fallidas.length} campana(s) no se pudieron reiniciar:\n${fallidas.map(n => `  \u2022 ${n}`).join("\n")}`;
+                        await botSock.sendMessage(jid, { text: msg });
                     } catch (e) { console.log(`[Notif] No se pudo notificar a ${uid}: ${e.message}`); }
                 }
             }

@@ -208,7 +208,6 @@ def kb_inline_menu(user_id: int = 0):
         [InlineKeyboardButton(text="🗑 Eliminar", callback_data="sec_eliminar"),
          InlineKeyboardButton(text="📖 Comandos", callback_data="sec_cmds")],
         [InlineKeyboardButton(text="📊 Dashboard", callback_data="sec_dashboard")],
-        [InlineKeyboardButton(text="💬 Ver Chats TG", callback_data="tg_ver_chats")],
     ]
     if es_admin(user_id):
         kb.append([InlineKeyboardButton(text="👑 Admin Panel", callback_data="sec_admin")])
@@ -3040,8 +3039,7 @@ async def cb_wsp_backup_import(call: types.CallbackQuery, state: FSMContext):
 class BackupImportState(StatesGroup):
     esperando_archivo = State()
 
-class ChatTGState(StatesGroup):
-    esperando_respuesta = State()
+
 
 
 @dp.message(BackupImportState.esperando_archivo)
@@ -3113,178 +3111,6 @@ async def cb_wsp_sesiones(call: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=botones)
     await safe_edit(call.message, texto, reply_markup=kb)
     await safe_answer(call)
-
-
-# --- VER CHATS TG ---
-@dp.callback_query(F.data == "tg_ver_chats")
-async def cb_tg_ver_chats(call: types.CallbackQuery):
-    if not await verificar_membresia_cb(call):
-        return
-    sesiones = await db.get_sesiones(call.from_user.id)
-    if not sesiones:
-        botones = [kb_volver()]
-        kb = InlineKeyboardMarkup(inline_keyboard=botones)
-        await safe_edit(call.message, "❌ No tienes cuentas TG vinculadas.\nVincula una cuenta con /cuentas", reply_markup=kb)
-        await safe_answer(call)
-        return
-    if len(sesiones) == 1:
-        await cb_tg_chats_cuenta(call, cuenta_override=sesiones[0]['nombre'])
-        return
-    # Cache sessions for index-based lookup
-    if not hasattr(cb_tg_ver_chats, '_accounts'):
-        cb_tg_ver_chats._accounts = {}
-    cb_tg_ver_chats._accounts[call.from_user.id] = sesiones
-    texto = "💬 VER CHATS TELEGRAM\n\nElige la cuenta para ver chats personales:"
-    botones = []
-    for i, s in enumerate(sesiones):
-        botones.append([InlineKeyboardButton(
-            text=f"📱 {s['nombre']} — {s.get('telefono', '?')}",
-            callback_data=f"tg_chats_cuenta:{i}"
-        )])
-    botones.append([kb_volver()])
-    kb = InlineKeyboardMarkup(inline_keyboard=botones)
-    await safe_edit(call.message, texto, reply_markup=kb)
-    await safe_answer(call)
-
-
-@dp.callback_query(F.data.startswith("tg_chats_cuenta:"))
-async def cb_tg_chats_cuenta(call: types.CallbackQuery, cuenta_override=None):
-    if not await verificar_membresia_cb(call):
-        return
-    if cuenta_override:
-        cuenta = cuenta_override
-    else:
-        idx = int(call.data.split(":", 1)[1])
-        accounts = getattr(cb_tg_ver_chats, '_accounts', {}).get(call.from_user.id, [])
-        if idx >= len(accounts):
-            await call.answer("❌ Cuenta no encontrada. Intenta de nuevo.", show_alert=True)
-            return
-        cuenta = accounts[idx]['nombre']
-    await safe_edit(call.message, f"⏳ Cargando chats de '{cuenta}'...")
-    await safe_answer(call)
-
-    path = get_session_path(call.from_user.id, cuenta)
-    client = TelegramClient(path, API_ID, API_HASH)
-    try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            botones = [kb_volver()]
-            kb = InlineKeyboardMarkup(inline_keyboard=botones)
-            await safe_edit(call.message, f"❌ Cuenta '{cuenta}' no autorizada.\nVinculala de nuevo con /cuentas", reply_markup=kb)
-            return
-        dialogs = []
-        async for d in client.iter_dialogs():
-            if d.is_user and not d.entity.bot:
-                nombre = d.name or str(d.entity.id)
-                last_msg = ""
-                if d.message and d.message.text:
-                    last_msg = d.message.text[:50]
-                dialogs.append({
-                    "id": d.entity.id,
-                    "nombre": nombre,
-                    "last_msg": last_msg,
-                    "unread": d.unread_count,
-                    "_cuenta": cuenta,
-                })
-            if len(dialogs) >= 50:
-                break
-    except Exception as e:
-        botones = [kb_volver()]
-        kb = InlineKeyboardMarkup(inline_keyboard=botones)
-        await safe_edit(call.message, f"❌ Error: {e}", reply_markup=kb)
-        return
-    finally:
-        await client.disconnect()
-
-    if not dialogs:
-        botones = [kb_volver()]
-        kb = InlineKeyboardMarkup(inline_keyboard=botones)
-        await safe_edit(call.message, "📭 No se encontraron chats personales.", reply_markup=kb)
-        return
-
-    texto = f"💬 CHATS TG ({len(dialogs)}):\n📱 Cuenta: {cuenta}\n\n"
-    botones = []
-    for i, c in enumerate(dialogs[:30], 1):
-        nombre = c["nombre"]
-        if len(nombre) > 22:
-            nombre = nombre[:22] + "..."
-        unread = f" ({c['unread']} nuevos)" if c.get('unread') else ""
-        last = f" - {c['last_msg']}" if c.get('last_msg') else ""
-        if len(last) > 30:
-            last = last[:30] + "..."
-        texto += f"{i}. {nombre}{unread}{last}\n"
-        botones.append([InlineKeyboardButton(
-            text=f"💬 {nombre}{unread}",
-            callback_data=f"tg_chat:{i-1}"
-        )])
-    if len(texto) > 4000:
-        texto = texto[:4000] + "\n(truncado)"
-    botones = botones[:8]
-    botones.append([InlineKeyboardButton(text="🔙 Volver", callback_data="tg_ver_chats")])
-    kb = InlineKeyboardMarkup(inline_keyboard=botones)
-    if not hasattr(cb_tg_chats_cuenta, '_cache'):
-        cb_tg_chats_cuenta._cache = {}
-    cb_tg_chats_cuenta._cache[call.from_user.id] = dialogs
-    await safe_edit(call.message, texto, reply_markup=kb)
-
-
-@dp.callback_query(F.data.startswith("tg_chat:"))
-async def cb_tg_chat_seleccionado(call: types.CallbackQuery, state: FSMContext):
-    if not await verificar_membresia_cb(call):
-        return
-    parts = call.data.split(":")
-    idx = int(parts[1])
-    dialogs = getattr(cb_tg_chats_cuenta, '_cache', {}).get(call.from_user.id, [])
-    if idx >= len(dialogs):
-        await call.answer("❌ Chat no encontrado. Intenta de nuevo.", show_alert=True)
-        return
-    chat = dialogs[idx]
-    nombre = chat["nombre"]
-    chat_id = chat["id"]
-    cuenta = chat.get("_cuenta", "principal")
-    texto = (
-        f"💬 CHAT CON: {nombre}\n"
-        f"🔑 Cuenta: {cuenta}\n\n"
-        f"Escribe tu mensaje para enviar a este chat.\n\n"
-        f"Envia /cancelar para cancelar."
-    )
-    await state.update_data(tg_chat_id=chat_id, tg_chat_nombre=nombre, tg_chat_cuenta=cuenta)
-    await state.set_state(ChatTGState.esperando_respuesta)
-    await call.message.answer(texto, reply_markup=ReplyKeyboardRemove())
-    await safe_answer(call)
-
-
-@dp.message(ChatTGState.esperando_respuesta)
-async def recibir_respuesta_chat_tg(msg: types.Message, state: FSMContext):
-    if msg.text and msg.text.startswith("/"):
-        await state.clear()
-        return await msg.answer("❌ Cancelado.", reply_markup=kb_menu_principal(msg.from_user.id))
-    if not msg.text:
-        return await msg.answer("❌ Solo puedes enviar texto por ahora.")
-    data = await state.get_data()
-    chat_id = data.get("tg_chat_id")
-    nombre = data.get("tg_chat_nombre")
-    cuenta = data.get("tg_chat_cuenta")
-    if not chat_id or not cuenta:
-        await state.clear()
-        return await msg.answer("❌ Error: datos de chat perdidos.", reply_markup=kb_menu_principal(msg.from_user.id))
-    path = get_session_path(msg.from_user.id, cuenta)
-    client = TelegramClient(path, API_ID, API_HASH)
-    try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            await state.clear()
-            return await msg.answer("❌ Cuenta no autorizada.", reply_markup=kb_menu_principal(msg.from_user.id))
-        await client.send_message(chat_id, msg.text)
-        await msg.answer(
-            f"✅ Mensaje enviado a {nombre}!\n\n"
-            f"Escribe otro mensaje o /cancelar para salir."
-        )
-    except Exception as e:
-        await state.clear()
-        await msg.answer(f"❌ Error al enviar: {e}", reply_markup=kb_menu_principal(msg.from_user.id))
-    finally:
-        await client.disconnect()
 
 
 # --- CUENTAS WSP ---
