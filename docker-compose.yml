@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  wsp-api:
+    build: .
+    container_name: botspam-wsp
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./wsp_titan.db:/app/wsp_titan.db
+      - ./client_sessions:/app/client_sessions
+      - ./backups:/app/backups
+      - ./comprobantes:/app/comprobantes
+    environment:
+      - NODE_ENV=production
+    command: node index_wsp.js
+
+  panel:
+    build: .
+    container_name: botspam-panel
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    depends_on:
+      - wsp-api
+    environment:
+      - NODE_ENV=production
+    command: node panel_server.js
+
+  tg-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    container_name: botspam-tg
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./titan.db:/app/titan.db
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python bot.py

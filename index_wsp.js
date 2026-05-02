@@ -250,6 +250,28 @@ poll();
             req.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve({}); } });
         });
 
+        // Helper: obtener IP del cliente
+        const getClientIp = () => req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress || "";
+
+        // Helper: validar sesion (token auth)
+        // Endpoints publicos que NO requieren token:
+        const PUBLIC_ENDPOINTS = [
+            "/api/status", "/api/panel_login", "/api/panel_registro",
+            "/api/panel_recuperar_solicitar", "/api/panel_recuperar_reset",
+            "/api/canjear_codigo", "/api/check_membresia",
+            "/api/pagos/webhook", "/api/metodos_pago", "/api/metodo_pago/qr",
+            "/api/health", "/api/push/vapid-key"
+        ];
+        const isPublicEndpoint = PUBLIC_ENDPOINTS.includes(url.pathname) || url.pathname === "/api/status";
+
+        function authenticateRequest(body) {
+            if (isPublicEndpoint) return { authenticated: true, userId: null };
+            const token = req.headers["authorization"]?.replace("Bearer ", "") || url.searchParams.get("token") || body?._token;
+            const session = db.validateSession(token);
+            if (!session) return { authenticated: false, userId: null };
+            return { authenticated: true, userId: session.telegram_id, token };
+        }
+
         try {
             // GET /api/status — Estado del bot WSP
             if (url.pathname === "/api/status") {
@@ -336,6 +358,12 @@ poll();
                 const userId = url.searchParams.get("u");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const campanas = db.getCampanas(userId).map(c => {
+                    // Fix stuck campaigns: DB says active but no task running
+                    if ((c.activa || c.estado_detalle === 'en_reposo') && !motor.isCampanaRunning(c.id)) {
+                        db.setCampanaActiva(c.id, false, 'detenida');
+                        c.activa = 0;
+                        c.estado_detalle = 'detenida';
+                    }
                     const conf = db.getCampanaConfig(c.id);
                     const grupos = db.getGruposCampana(c.id);
                     const sesiones = db.getSesionesCampana(c.id);
@@ -418,7 +446,20 @@ poll();
                 if (!body.u || !campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o id" })); }
                 const camp = db.getCampanaById(campId);
                 if (!camp) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "campana no encontrada" })); }
-                motor.iniciarCampana(campId, body.u, botSock);
+                // Use user's own account for notifications; campaign connects its own sessions via getOrConnectClient
+                let notifSock = botSock;
+                if (!notifSock || !notifSock.user) {
+                    // Try to get the user's first connected account for notifications
+                    const sesiones = db.getSesionesCampana(campId);
+                    if (sesiones.length) {
+                        try { notifSock = await motor.getOrConnectClient(body.u, sesiones[0]); } catch (e) {}
+                    }
+                }
+                if (!notifSock) {
+                    // Still start the campaign even without a notification socket
+                    console.log(`[iniciar] Sin socket de notificacion para ${body.u}, la campana usara sus propias cuentas`);
+                }
+                motor.iniciarCampana(campId, body.u, notifSock);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campana: camp.nombre }));
             }
@@ -431,6 +472,28 @@ poll();
                 motor.detenerCampana(campId);
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // GET /api/campana_reposo?id=CAMP_ID — Estado de reposo de una campaña (countdown)
+            if (url.pathname === "/api/campana_reposo" && req.method === "GET") {
+                const campId = url.searchParams.get("id");
+                if (!campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
+                const campIdInt = parseInt(campId);
+                const reposo = motor.getCampanaReposo(campIdInt);
+                if (!reposo) {
+                    // If DB shows active/en_reposo but no task is running, fix the stuck state
+                    const camp = db.getCampanaById(campIdInt);
+                    if (camp && (camp.activa || camp.estado_detalle === 'en_reposo') && !motor.isCampanaRunning(campIdInt)) {
+                        db.setCampanaActiva(campIdInt, false, 'detenida');
+                        console.log(`[campana_reposo] Campana ${campIdInt} estaba stuck en_reposo sin tarea activa, marcada como detenida`);
+                    }
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, en_reposo: false }));
+                }
+                const transcurrido = Math.floor((Date.now() - reposo.inicio) / 1000);
+                const restante = Math.max(0, reposo.duracion_seg - transcurrido);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, en_reposo: true, restante_seg: restante, duracion_seg: reposo.duracion_seg }));
             }
 
             // GET /api/historial?u=USER_ID — Historial de envíos
@@ -705,20 +768,85 @@ poll();
             if (url.pathname === "/api/panel_registro" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.telegram_id || !body.password) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o password" })); }
-                const r = db.panelRegistro(body.telegram_id, body.password, body.username || '');
-                // Sync 1-day demo to TG database
+                const tid = String(body.telegram_id).trim();
+                if (!/^\d{5,15}$/.test(tid)) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "El ID de Telegram debe ser un numero de 5-15 digitos. Usa /me en el bot para obtenerlo." })); }
+                const r = db.panelRegistro(tid, body.password, body.username || '');
                 if (r.ok) {
+                    // Sync 1-day demo to TG database
                     try {
-                        const http = require("http");
-                        const syncData = JSON.stringify({ telegram_id: body.telegram_id, dias: 1, plan: "demo", username: body.username || "" });
+                        const syncData = JSON.stringify({ telegram_id: tid, dias: 1, plan: "demo", username: body.username || "" });
                         const syncReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
                         syncReq.on("error", () => {});
                         syncReq.write(syncData);
                         syncReq.end();
                     } catch (_) {}
+                    // Notificar al admin de nuevo registro via TG bot
+                    try {
+                        const notifData = JSON.stringify({ telegram_id: tid, username: body.username || '' });
+                        const notifReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/notificar_registro", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(notifData) } });
+                        notifReq.on("error", () => {});
+                        notifReq.write(notifData);
+                        notifReq.end();
+                    } catch (_) {}
+                    // Si no es admin, generar codigo y enviarlo via TG bot automaticamente
+                    if (!r.verificado) {
+                        try {
+                            const code = db.generarCodigoRegistro(tid);
+                            const codeData = JSON.stringify({ telegram_id: tid, code });
+                            const codeReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/enviar_codigo_verificacion", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(codeData) } });
+                            codeReq.on("error", () => {});
+                            codeReq.write(codeData);
+                            codeReq.end();
+                        } catch (_) {}
+                    }
                 }
                 res.writeHead(200);
                 return res.end(JSON.stringify(r));
+            }
+            // Verificar cuenta con codigo
+            if (url.pathname === "/api/verificar_cuenta" && req.method === "POST") {
+                const body = await readBody();
+                const tid = String(body.telegram_id || "").trim();
+                const codigo = String(body.codigo || "").trim();
+                if (!tid || !codigo) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id o codigo" })); }
+                const r = db.verificarCuenta(tid, codigo);
+                res.writeHead(200);
+                return res.end(JSON.stringify(r));
+            }
+            // Reenviar codigo de verificacion (para usuarios ya registrados no verificados)
+            if (url.pathname === "/api/reenviar_codigo_verificacion" && req.method === "POST") {
+                const body = await readBody();
+                const tid = String(body.telegram_id || "").trim();
+                if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                if (db.isUserVerificado(tid)) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "ya_verificado" })); }
+                try {
+                    const code = db.generarCodigoRegistro(tid);
+                    const codeData = JSON.stringify({ telegram_id: tid, code });
+                    const codeReq = http.request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/enviar_codigo_verificacion", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(codeData) } });
+                    codeReq.on("error", () => {});
+                    codeReq.write(codeData);
+                    codeReq.end();
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true }));
+                } catch (e) {
+                    res.writeHead(500);
+                    return res.end(JSON.stringify({ ok: false, error: e.message }));
+                }
+            }
+            // Admin: eliminar usuario
+            if (url.pathname === "/api/admin/eliminar_usuario" && req.method === "POST") {
+                const body = await readBody();
+                const tid = String(body.telegram_id || "").trim();
+                if (!tid) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta telegram_id" })); }
+                const r = db.eliminarUsuarioPanel(tid);
+                res.writeHead(200);
+                return res.end(JSON.stringify(r));
+            }
+            // Admin: listar usuarios del panel (verificacion status)
+            if (url.pathname === "/api/admin/panel_users" && req.method === "GET") {
+                const users = db.getAllPanelUsers();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, users }));
             }
             if (url.pathname === "/api/panel_cambiar_password" && req.method === "POST") {
                 const body = await readBody();
@@ -879,13 +1007,27 @@ poll();
                 if (!template) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "mensaje no encontrado" })); }
                 const grupos = db.getGrupos(body.u);
                 if (!grupos.length) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "no tienes grupos" })); }
-                if (!botSock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                // Use user's account if botSock not available
+                let sock = botSock;
+                if (!sock || !sock.user) {
+                    if (body.cuenta) {
+                        try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (e) {}
+                    }
+                    if (!sock) {
+                        // Try first available account
+                        const cuentas = db.getCuentas(body.u);
+                        for (const c of cuentas) {
+                            try { sock = await motor.getOrConnectClient(body.u, c.nombre); break; } catch (e) {}
+                        }
+                    }
+                }
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP. Vincula una cuenta primero." })); }
                 let exitosos = 0, fallidos = 0;
                 for (const g of grupos) {
                     try {
-                        const groupJid = await motor.resolveGroupJid(botSock, g.link);
+                        const groupJid = await motor.resolveGroupJid(sock, g.link);
                         if (!groupJid) { db.registrarEnvio(body.u, 0, g.link, "error"); fallidos++; continue; }
-                        const result = motor.sendToGroup ? await motor.sendToGroup(botSock, groupJid, template.mensaje, template.imagen_path) : null;
+                        const result = motor.sendToGroup ? await motor.sendToGroup(sock, groupJid, template.mensaje, template.imagen_path) : null;
                         if (result && result.sent) {
                             db.registrarEnvio(body.u, 0, g.link, "enviado");
                             exitosos++;
@@ -1075,10 +1217,17 @@ poll();
                     let sock;
                     if (cuenta) {
                         sock = await motor.getOrConnectClient(userId, cuenta);
-                    } else if (botSock) {
-                        sock = botSock;
                     } else {
-                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                        // Try user's own accounts first, then global botSock
+                        const sesiones = db.getSesiones(userId);
+                        for (const s of sesiones) {
+                            try {
+                                sock = await motor.getOrConnectClient(userId, s.nombre);
+                                if (sock && sock.user) break;
+                            } catch (e) {}
+                        }
+                        if (!sock && botSock) sock = botSock;
+                        if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP. Selecciona una cuenta vinculada." })); }
                     }
                     const meta = await sock.groupMetadata(grupoJid);
                     const miembros = (meta.participants || []).map(p => {
@@ -1194,19 +1343,24 @@ poll();
                 if (!body.u || !body.grupo || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, grupo o mensaje" })); }
                 try {
                     let sock;
+                    let cuentaUsada = body.cuenta || null;
                     if (body.cuenta) {
                         sock = await motor.getOrConnectClient(body.u, body.cuenta);
-                    } else if (botSock) {
-                        sock = botSock;
                     } else {
-                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                        // Try user's own accounts first, then global botSock
+                        const sesiones = db.getSesiones(body.u);
+                        for (const s of sesiones) {
+                            try {
+                                sock = await motor.getOrConnectClient(body.u, s.nombre);
+                                if (sock && sock.user) { cuentaUsada = s.nombre; break; }
+                            } catch (e) {}
+                        }
+                        if (!sock && botSock) sock = botSock;
+                        if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP. Selecciona una cuenta vinculada." })); }
                     }
                     const meta = await sock.groupMetadata(body.grupo);
                     const rawParticipants = meta.participants || [];
 
-                    // Use p.jid (phone-based JID resolved by Baileys from phone_number attr)
-                    // p.id may be @lid which can't receive DMs in Baileys 6.x
-                    // p.jid is always @s.whatsapp.net (resolved from attrs.phone_number)
                     const myJid = sock.user?.id || "";
                     const myNum = jidToNumber(myJid);
                     // Load blacklist (groups + individual numbers) to skip
@@ -1216,14 +1370,16 @@ poll();
                     blNumeros.forEach(b => blNums.add(b.numero));
                     const seen = new Set();
                     const jids = [];
+                    let lidSkipped = 0;
                     for (const p of rawParticipants) {
+                        // Prefer phone-based JID; fall back to p.id
                         let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
                         if (!jid) continue;
                         if (jid.includes(":") && (jid.endsWith("@s.whatsapp.net") || jid.endsWith("@lid"))) {
                             const suffix = jid.endsWith("@s.whatsapp.net") ? "@s.whatsapp.net" : "@lid";
                             jid = jid.split(":")[0] + suffix;
                         }
-                        if (jid.endsWith("@lid")) continue;
+                        if (jid.endsWith("@lid")) { lidSkipped++; continue; }
                         const num = jidToNumber(jid);
                         if (!num || !/^\d{7,15}$/.test(num)) continue;
                         if (num === myNum) continue;
@@ -1237,8 +1393,9 @@ poll();
                         jids.push(jid);
                     }
                     if (!jids.length) {
+                        const lidMsg = lidSkipped > 0 ? ` (${lidSkipped} miembros con formato LID no soportado)` : "";
                         res.writeHead(200);
-                        return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros validos para enviar (todos filtrados)" }));
+                        return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros validos para enviar (todos filtrados)" + lidMsg }));
                     }
                     const grupoNombre = meta.subject || body.grupo;
                     const envioConfig = db.getUserEnvioConfig(body.u);
@@ -1255,7 +1412,7 @@ poll();
                         const buf = Buffer.from(body.imagen_b64, "base64");
                         fs.writeFileSync(imagenPath, buf);
                     }
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo, startIndex);
+                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo, startIndex, cuentaUsada);
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, total: jids.length, filtered: rawParticipants.length - jids.length, batch_size: batchSize || jids.length, delay_minutes: batchSize ? delayMinutes : 0, grupo_nombre: grupoNombre }));
                 } catch (e) {
@@ -1436,17 +1593,24 @@ poll();
                 }
                 try {
                     let sock;
+                    let cuentaUsada = body.cuenta || null;
                     if (body.cuenta) {
                         sock = await motor.getOrConnectClient(body.u, body.cuenta);
-                    } else if (botSock) {
-                        sock = botSock;
                     } else {
-                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                        const sesiones = db.getSesiones(body.u);
+                        for (const s of sesiones) {
+                            try {
+                                sock = await motor.getOrConnectClient(body.u, s.nombre);
+                                if (sock && sock.user) { cuentaUsada = s.nombre; break; }
+                            } catch (e) {}
+                        }
+                        if (!sock && botSock) sock = botSock;
+                        if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP. Selecciona una cuenta vinculada." })); }
                     }
                     const envioConfig = db.getUserEnvioConfig(body.u);
                     const batchSize = parseInt(body.batch_size) || envioConfig.lote_tamano || 0;
                     const delayMinutes = parseInt(body.delay_minutes) || Math.ceil((envioConfig.lote_pausa_seg || 300) / 60);
-                    motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice, cuentaUsada);
                     res.writeHead(200);
                     return res.end(JSON.stringify({
                         ok: true,
@@ -1644,12 +1808,13 @@ poll();
                     res.writeHead(400);
                     return res.end(JSON.stringify({ ok: false, error: "falta u o links" }));
                 }
-                let sock;
-                if (body.cuenta) {
-                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (e) {}
+                if (!body.cuenta) {
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: "Selecciona una cuenta WSP primero" }));
                 }
-                if (!sock) sock = botSock;
-                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "bot no conectado" })); }
+                let sock;
+                try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (e) {}
+                if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "No se pudo conectar la cuenta '" + body.cuenta + "'. Verifica que este vinculada." })); }
                 const stats = [];
                 for (const link of body.links) {
                     try {
@@ -1923,7 +2088,7 @@ poll();
                     const envioConfig = db.getUserEnvioConfig(body.u);
                     const batchSize = body.batch_size || envioConfig.lote_tamano || 0;
                     const delayMinutes = body.delay_minutes || Math.ceil((envioConfig.lote_pausa_seg || 300) / 60);
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo);
+                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo, 0, body.cuenta || null);
                     db.agregarLog(body.u, 'promo', `Promo enviada a ${jids.length} miembros de ${grupoNombre} + escucha activada`);
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, message: `promo enviada a ${jids.length} miembros y escucha activada`, total: jids.length, grupo_nombre: grupoNombre }));
@@ -2326,6 +2491,890 @@ poll();
                 return res.end(JSON.stringify({ ok: true, plan: planLabel, seller: result.seller_nombre }));
             }
 
+
+            // ═══════════════════════════════════════════
+            //   NUEVAS SECCIONES (portadas de mejoras branch)
+            // ═══════════════════════════════════════════
+
+            if (url.pathname === "/api/admin/auditoria" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const userId = url.searchParams.get("filter_user");
+                const limit = parseInt(url.searchParams.get("limit")) || 100;
+                const logs = userId ? db.getAuditLogByUser(userId, limit) : db.getAuditLog(limit);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, logs }));
+            }
+
+            // ═══════════════════════════════════════════
+            //   PAGOS — Binance Pay
+            // ═══════════════════════════════════════════
+
+            // Helper: Binance Pay API request signing
+            function binancePaySign(timestamp, nonce, bodyStr) {
+                const crypto = require("crypto");
+                const payload = `${timestamp}\n${nonce}\n${bodyStr}\n`;
+                return crypto.createHmac("sha512", config.BINANCE_PAY.API_SECRET).update(payload).digest("hex").toUpperCase();
+            }
+
+            function generateNonce(len = 32) {
+                const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+                let result = "";
+                for (let i = 0; i < len; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+                return result;
+            }
+
+            async function binancePayRequest(endpoint, body) {
+                const https = require("https");
+                const bp = config.BINANCE_PAY;
+                if (!bp.API_KEY || !bp.API_SECRET) {
+                    return { ok: false, error: "Binance Pay no configurado. Falta API_KEY y API_SECRET en config_wsp.js" };
+                }
+                const timestamp = Date.now();
+                const nonce = generateNonce();
+                const bodyStr = JSON.stringify(body);
+                const signature = binancePaySign(timestamp, nonce, bodyStr);
+                return new Promise((resolve) => {
+                    const url = new URL(`${bp.BASE_URL}${endpoint}`);
+                    const options = {
+                        hostname: url.hostname,
+                        port: 443,
+                        path: url.pathname,
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "BinancePay-Timestamp": timestamp,
+                            "BinancePay-Nonce": nonce,
+                            "BinancePay-Certificate-SN": bp.API_KEY,
+                            "BinancePay-Signature": signature,
+                            "Content-Length": Buffer.byteLength(bodyStr),
+                        },
+                    };
+                    const req2 = https.request(options, (resp) => {
+                        let data = "";
+                        resp.on("data", (c) => (data += c));
+                        resp.on("end", () => {
+                            try { resolve(JSON.parse(data)); } catch (_) { resolve({ status: "FAIL", code: "PARSE_ERROR", errorMessage: data }); }
+                        });
+                    });
+                    req2.on("error", (e) => resolve({ status: "FAIL", code: "NETWORK_ERROR", errorMessage: e.message }));
+                    req2.write(bodyStr);
+                    req2.end();
+                });
+            }
+
+            // GET /api/pagos/planes — Lista planes disponibles con precios USDT
+            if (url.pathname === "/api/pagos/planes" && req.method === "GET") {
+                const planes = {};
+                for (const [key, plan] of Object.entries(config.PLANES)) {
+                    planes[key] = { dias: plan.dias, precio: plan.precio, precio_usdt: plan.precio_usdt, emoji: plan.emoji };
+                }
+                const binanceConfigured = !!(config.BINANCE_PAY.API_KEY && config.BINANCE_PAY.API_SECRET);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, planes, binance_enabled: binanceConfigured, currency: config.BINANCE_PAY.CURRENCY }));
+            }
+
+            // POST /api/pagos/crear — Crear orden de pago en Binance Pay
+            if (url.pathname === "/api/pagos/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta plan" })); }
+                const plan = config.PLANES[body.plan];
+                if (!plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan invalido" })); }
+                if (!plan.precio_usdt) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan sin precio USDT" })); }
+                const bp = config.BINANCE_PAY;
+                if (!bp.API_KEY || !bp.API_SECRET) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Binance Pay no configurado" })); }
+
+                const merchantTradeNo = `JD${Date.now()}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+                const userId = req._authUser || body.u;
+
+                // Create local record
+                const pago = db.crearPago(userId, merchantTradeNo, body.plan, plan.dias, plan.precio_usdt);
+
+                // Create Binance Pay order
+                const orderReq = {
+                    env: { terminalType: "WEB" },
+                    merchantTradeNo: merchantTradeNo,
+                    orderAmount: plan.precio_usdt.toFixed(2),
+                    currency: bp.CURRENCY,
+                    goods: {
+                        goodsType: "02",
+                        goodsCategory: "Z000",
+                        referenceGoodsId: body.plan,
+                        goodsName: `${bp.MERCHANT_NAME} — Plan ${body.plan} (${plan.dias} dias)`,
+                    },
+                    passThroughInfo: JSON.stringify({ user_id: userId, plan: body.plan, merchant_trade_no: merchantTradeNo }),
+                    orderExpireTime: bp.ORDER_EXPIRY_MINUTES * 60 * 1000,
+                    returnUrl: body.return_url || "",
+                    cancelUrl: body.cancel_url || "",
+                };
+
+                const result = await binancePayRequest("/binancepay/openapi/v2/order", orderReq);
+
+                if (result.status === "SUCCESS" && result.data) {
+                    db.actualizarPagoPrepay(
+                        merchantTradeNo,
+                        result.data.prepayId,
+                        result.data.checkoutUrl,
+                        result.data.qrcodeLink,
+                        result.data.universalUrl,
+                        result.data.deeplink
+                    );
+                    db.registrarAuditoria(userId, 'pago_creado', `Plan: ${body.plan}, Monto: ${plan.precio_usdt} USDT, Order: ${merchantTradeNo}`, getClientIp());
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({
+                        ok: true,
+                        merchant_trade_no: merchantTradeNo,
+                        prepay_id: result.data.prepayId,
+                        checkout_url: result.data.checkoutUrl,
+                        qrcode_url: result.data.qrcodeLink,
+                        universal_url: result.data.universalUrl,
+                        deep_link: result.data.deeplink,
+                        expiry_time: result.data.expireTime,
+                        plan: body.plan,
+                        monto_usdt: plan.precio_usdt,
+                    }));
+                } else {
+                    // Binance API error — mark local record
+                    db.marcarPagoCancelado(merchantTradeNo);
+                    console.error("[BinancePay] Create order error:", JSON.stringify(result));
+                    res.writeHead(502);
+                    return res.end(JSON.stringify({ ok: false, error: result.errorMessage || "Error al crear orden en Binance Pay", code: result.code }));
+                }
+            }
+
+            // POST /api/pagos/webhook — Binance Pay webhook notification (public, no auth)
+            if (url.pathname === "/api/pagos/webhook" && req.method === "POST") {
+                const body = await readBody();
+                console.log("[BinancePay Webhook]", JSON.stringify(body));
+
+                // Verify it's a payment notification
+                if (body.bizType !== "PAY" || !body.bizStatus) {
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ returnCode: "SUCCESS", returnMessage: null }));
+                }
+
+                if (body.bizStatus === "PAY_SUCCESS") {
+                    let data;
+                    try { data = typeof body.data === "string" ? JSON.parse(body.data) : body.data; } catch (_) { data = {}; }
+
+                    const merchantTradeNo = data.merchantTradeNo;
+                    if (!merchantTradeNo) {
+                        res.writeHead(200);
+                        return res.end(JSON.stringify({ returnCode: "SUCCESS", returnMessage: null }));
+                    }
+
+                    const pago = db.getPago(merchantTradeNo);
+                    if (!pago || pago.estado !== "pending") {
+                        res.writeHead(200);
+                        return res.end(JSON.stringify({ returnCode: "SUCCESS", returnMessage: null }));
+                    }
+
+                    // Mark as paid
+                    const pagoActualizado = db.marcarPagoPagado(merchantTradeNo, data.transactionId || "");
+
+                    // Auto-activate membership
+                    if (pagoActualizado) {
+                        db.activarMembresia(pagoActualizado.user_id, pagoActualizado.plan_dias);
+                        db.registrarAuditoria(pagoActualizado.user_id, 'pago_confirmado', `Plan: ${pagoActualizado.plan_key}, Monto: ${pagoActualizado.monto_usdt} USDT, TxID: ${data.transactionId || 'N/A'}`, "binance_webhook");
+
+                        // Sync membership activation to TG
+                        try {
+                            const syncData = JSON.stringify({ telegram_id: pagoActualizado.user_id, dias: pagoActualizado.plan_dias, plan: pagoActualizado.plan_key });
+                            const syncReq = require("http").request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                            syncReq.on("error", () => {});
+                            syncReq.write(syncData);
+                            syncReq.end();
+                        } catch (_) {}
+                    }
+                } else if (body.bizStatus === "PAY_CLOSED") {
+                    let data;
+                    try { data = typeof body.data === "string" ? JSON.parse(body.data) : body.data; } catch (_) { data = {}; }
+                    if (data.merchantTradeNo) {
+                        db.marcarPagoExpirado(data.merchantTradeNo);
+                    }
+                }
+
+                // Always return SUCCESS to Binance
+                res.writeHead(200);
+                return res.end(JSON.stringify({ returnCode: "SUCCESS", returnMessage: null }));
+            }
+
+            // GET /api/pagos/estado — Check payment status
+            if (url.pathname === "/api/pagos/estado" && req.method === "GET") {
+                const merchantTradeNo = url.searchParams.get("order");
+                if (!merchantTradeNo) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta order" })); }
+                const pago = db.getPago(merchantTradeNo);
+                if (!pago) { res.writeHead(404); return res.end(JSON.stringify({ ok: false, error: "Orden no encontrada" })); }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, pago: { estado: pago.estado, plan_key: pago.plan_key, plan_dias: pago.plan_dias, monto_usdt: pago.monto_usdt, checkout_url: pago.checkout_url, fecha_creado: pago.fecha_creado, fecha_pagado: pago.fecha_pagado } }));
+            }
+
+            // GET /api/pagos/historial — User payment history
+            if (url.pathname === "/api/pagos/historial" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const pagos = db.getPagosUsuario(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, pagos }));
+            }
+
+            // GET /api/admin/pagos — Admin: all payments + stats
+            if (url.pathname === "/api/admin/pagos" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const limit = parseInt(url.searchParams.get("limit")) || 100;
+                const pagos = db.getTodosPagosAdmin(limit);
+                const stats = db.getPagosStats();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, pagos, stats }));
+            }
+
+            // POST /api/pagos/consultar — Query order status from Binance
+            if (url.pathname === "/api/pagos/consultar" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.merchant_trade_no) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta merchant_trade_no" })); }
+                const result = await binancePayRequest("/binancepay/openapi/v2/order/query", { merchantTradeNo: body.merchant_trade_no });
+                if (result.status === "SUCCESS" && result.data) {
+                    // Update local status if Binance says PAID
+                    if (result.data.status === "PAID") {
+                        const pago = db.getPago(body.merchant_trade_no);
+                        if (pago && pago.estado === "pending") {
+                            const pagoActualizado = db.marcarPagoPagado(body.merchant_trade_no, result.data.transactionId || "");
+                            if (pagoActualizado) {
+                                db.activarMembresia(pagoActualizado.user_id, pagoActualizado.plan_dias);
+                                try {
+                                    const syncData = JSON.stringify({ telegram_id: pagoActualizado.user_id, dias: pagoActualizado.plan_dias, plan: pagoActualizado.plan_key });
+                                    const syncReq = require("http").request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                                    syncReq.on("error", () => {});
+                                    syncReq.write(syncData);
+                                    syncReq.end();
+                                } catch (_) {}
+                            }
+                        }
+                    } else if (result.data.status === "EXPIRED" || result.data.status === "CANCELED") {
+                        db.marcarPagoExpirado(body.merchant_trade_no);
+                    }
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, binance_status: result.data.status, local_pago: db.getPago(body.merchant_trade_no) }));
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: false, error: result.errorMessage || "Error consultando Binance" }));
+            }
+
+            // ═══════════════════════════════════════════
+            //   COMPROBANTES — Pago Manual
+            // ═══════════════════════════════════════════
+
+            // GET /api/metodos_pago — Lista metodos de pago activos (para clientes)
+            if (url.pathname === "/api/metodos_pago" && req.method === "GET") {
+                const metodos = db.getMetodosPagoActivos();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, metodos }));
+            }
+
+            // POST /api/comprobante/subir — Cliente sube comprobante de pago
+            if (url.pathname === "/api/comprobante/subir" && req.method === "POST") {
+                // Parse multipart form data manually
+                const contentType = req.headers["content-type"] || "";
+                if (!contentType.includes("multipart/form-data")) {
+                    // JSON fallback (for base64 image)
+                    const body = await readBody();
+                    if (!body.plan || !body.metodo_pago) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta plan o metodo_pago" })); }
+                    const plan = config.PLANES[body.plan];
+                    if (!plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan invalido" })); }
+                    const userId = req._authUser || body.u;
+                    let imagenPath = null;
+                    if (body.imagen_base64) {
+                        const fname = `comprobantes/${userId}_${Date.now()}.jpg`;
+                        const buf = Buffer.from(body.imagen_base64, "base64");
+                        fs.writeFileSync(fname, buf);
+                        imagenPath = fname;
+                    }
+                    const comp = db.crearComprobante(userId, body.plan, plan.dias, body.metodo_pago, body.monto || plan.precio, imagenPath, body.nota || '');
+                    db.registrarAuditoria(userId, 'comprobante_subido', `Plan: ${body.plan}, Metodo: ${body.metodo_pago}`, getClientIp());
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, comprobante: comp }));
+                }
+                // Multipart parsing
+                const boundary = contentType.split("boundary=")[1];
+                if (!boundary) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Bad multipart boundary" })); }
+                const rawBody = await new Promise((resolve) => {
+                    const chunks = [];
+                    let size = 0;
+                    req.on("data", (c) => { size += c.length; if (size > 10 * 1024 * 1024) { req.destroy(); resolve(null); } chunks.push(c); });
+                    req.on("end", () => resolve(Buffer.concat(chunks)));
+                });
+                if (!rawBody) { res.writeHead(413); return res.end(JSON.stringify({ ok: false, error: "Archivo muy grande (max 10MB)" })); }
+                const parts = rawBody.toString("binary").split("--" + boundary);
+                const fields = {};
+                let fileBuffer = null, fileExt = "jpg";
+                for (const part of parts) {
+                    if (part.includes("Content-Disposition")) {
+                        const nameMatch = part.match(/name="([^"]+)"/);
+                        const filenameMatch = part.match(/filename="([^"]+)"/);
+                        if (nameMatch) {
+                            const val = part.split("\r\n\r\n").slice(1).join("\r\n\r\n").replace(/\r\n$/, "");
+                            if (filenameMatch) {
+                                fileBuffer = Buffer.from(val, "binary");
+                                const ext = filenameMatch[1].split(".").pop().toLowerCase();
+                                if (["jpg","jpeg","png","webp","gif"].includes(ext)) fileExt = ext;
+                            } else {
+                                fields[nameMatch[1]] = val;
+                            }
+                        }
+                    }
+                }
+                if (!fields.plan || !fields.metodo_pago) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta plan o metodo_pago" })); }
+                const plan = config.PLANES[fields.plan];
+                if (!plan) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Plan invalido" })); }
+                const userId = req._authUser || fields.u;
+                let imagenPath = null;
+                if (fileBuffer && fileBuffer.length > 0) {
+                    imagenPath = `comprobantes/${userId}_${Date.now()}.${fileExt}`;
+                    fs.writeFileSync(imagenPath, fileBuffer);
+                }
+                const comp = db.crearComprobante(userId, fields.plan, plan.dias, fields.metodo_pago, fields.monto || plan.precio, imagenPath, fields.nota || '');
+                db.registrarAuditoria(userId, 'comprobante_subido', `Plan: ${fields.plan}, Metodo: ${fields.metodo_pago}`, getClientIp());
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, comprobante: comp }));
+            }
+
+            // GET /api/comprobante/historial — Historial de comprobantes del usuario
+            if (url.pathname === "/api/comprobante/historial" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta u" })); }
+                const comprobantes = db.getComprobantesUsuario(userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, comprobantes }));
+            }
+
+            // GET /api/comprobante/imagen — Servir imagen del comprobante
+            if (url.pathname === "/api/comprobante/imagen" && req.method === "GET") {
+                const id = parseInt(url.searchParams.get("id"));
+                if (!id) { res.writeHead(400); return res.end("Falta id"); }
+                const comp = db.getComprobante(id);
+                if (!comp || !comp.imagen_path) { res.writeHead(404); return res.end("No encontrado"); }
+                // Admin or owner can view (accept u param for img tag requests that don't send auth header)
+                const requesterId = url.searchParams.get("u") || req._authUser;
+                const isAdmin = checkAdmin(requesterId);
+                if (!isAdmin && String(comp.user_id) !== String(requesterId)) { res.writeHead(403); return res.end("No autorizado"); }
+                try {
+                    const imgData = fs.readFileSync(comp.imagen_path);
+                    const ext = comp.imagen_path.split(".").pop().toLowerCase();
+                    const mimeTypes = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+                    res.writeHead(200, { "Content-Type": mimeTypes[ext] || "image/jpeg" });
+                    return res.end(imgData);
+                } catch (_) { res.writeHead(404); return res.end("Imagen no encontrada en disco"); }
+            }
+
+            // GET /api/metodo_pago/qr — Servir imagen QR del metodo de pago
+            if (url.pathname === "/api/metodo_pago/qr" && req.method === "GET") {
+                const id = parseInt(url.searchParams.get("id"));
+                if (!id) { res.writeHead(400); return res.end("Falta id"); }
+                const metodos = db.getMetodosPago();
+                const metodo = metodos.find(m => m.id === id);
+                if (!metodo || !metodo.qr_imagen) { res.writeHead(404); return res.end("No encontrado"); }
+                try {
+                    const imgData = fs.readFileSync(metodo.qr_imagen);
+                    const ext = metodo.qr_imagen.split(".").pop().toLowerCase();
+                    const mimeTypes = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+                    res.writeHead(200, { "Content-Type": mimeTypes[ext] || "image/png" });
+                    return res.end(imgData);
+                } catch (_) { res.writeHead(404); return res.end("Imagen QR no encontrada"); }
+            }
+
+            // GET /api/admin/comprobantes — Admin: todos los comprobantes
+            if (url.pathname === "/api/admin/comprobantes" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const filter = url.searchParams.get("filter") || "all";
+                const limit = parseInt(url.searchParams.get("limit")) || 100;
+                let comprobantes;
+                if (filter === "pendientes") comprobantes = db.getComprobantesPendientes();
+                else comprobantes = db.getTodosComprobantes(limit);
+                const stats = db.getComprobantesStats();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, comprobantes, stats }));
+            }
+
+            // POST /api/admin/comprobante/aprobar — Admin aprueba comprobante
+            if (url.pathname === "/api/admin/comprobante/aprobar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                const comp = db.aprobarComprobante(parseInt(body.id), body.admin_id);
+                if (comp && comp.estado === "aprobado") {
+                    // Auto-activate membership
+                    db.activarMembresia(comp.user_id, comp.plan_dias);
+                    db.registrarAuditoria(body.admin_id, 'comprobante_aprobado', `Comprobante #${comp.id}, User: ${comp.user_id}, Plan: ${comp.plan_key}`, getClientIp());
+                    // Sync to TG
+                    try {
+                        const syncData = JSON.stringify({ telegram_id: comp.user_id, dias: comp.plan_dias, plan: comp.plan_key });
+                        const syncReq = require("http").request({ hostname: "127.0.0.1", port: 3002, path: "/api/tg/sync_membresia", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(syncData) } });
+                        syncReq.on("error", () => {});
+                        syncReq.write(syncData);
+                        syncReq.end();
+                    } catch (_) {}
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, msg: "Comprobante aprobado y membresia activada" }));
+                }
+                res.writeHead(400);
+                return res.end(JSON.stringify({ ok: false, error: "No se pudo aprobar" }));
+            }
+
+            // POST /api/admin/comprobante/rechazar — Admin rechaza comprobante
+            if (url.pathname === "/api/admin/comprobante/rechazar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                db.rechazarComprobante(parseInt(body.id), body.admin_id, body.nota || "");
+                db.registrarAuditoria(body.admin_id, 'comprobante_rechazado', `Comprobante #${body.id}`, getClientIp());
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ═══════════════════════════════════════════
+            //   METODOS DE PAGO — Admin CRUD
+            // ═══════════════════════════════════════════
+
+            // GET /api/admin/metodos_pago — Admin: lista todos los metodos
+            if (url.pathname === "/api/admin/metodos_pago" && req.method === "GET") {
+                const adminId = url.searchParams.get("u");
+                if (!checkAdmin(adminId)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const metodos = db.getMetodosPago();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, metodos }));
+            }
+
+            // POST /api/admin/metodos_pago/crear — Admin crea metodo de pago
+            if (url.pathname === "/api/admin/metodos_pago/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.tipo || !body.nombre || !body.valor) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta tipo, nombre o valor" })); }
+                let qrPath = null;
+                if (body.qr_imagen_base64) {
+                    const buf = Buffer.from(body.qr_imagen_base64, 'base64');
+                    if (!fs.existsSync('comprobantes')) fs.mkdirSync('comprobantes', { recursive: true });
+                    qrPath = `comprobantes/qr_${Date.now()}.png`;
+                    fs.writeFileSync(qrPath, buf);
+                }
+                const m = db.crearMetodoPago(body.tipo, body.nombre, body.valor, body.instrucciones || "", qrPath);
+                db.registrarAuditoria(body.admin_id, 'metodo_pago_creado', `Tipo: ${body.tipo}, Nombre: ${body.nombre}`, getClientIp());
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, metodo: m }));
+            }
+
+            // POST /api/admin/metodos_pago/editar — Admin edita metodo
+            if (url.pathname === "/api/admin/metodos_pago/editar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                let qrPath = undefined;
+                const oldMetodo = db.getMetodosPago().find(m => m.id === parseInt(body.id));
+                if (body.qr_imagen_base64) {
+                    const buf = Buffer.from(body.qr_imagen_base64, 'base64');
+                    if (!fs.existsSync('comprobantes')) fs.mkdirSync('comprobantes', { recursive: true });
+                    qrPath = `comprobantes/qr_${Date.now()}.png`;
+                    fs.writeFileSync(qrPath, buf);
+                    if (oldMetodo && oldMetodo.qr_imagen) try { fs.unlinkSync(oldMetodo.qr_imagen); } catch (_) {}
+                } else if (body.qr_imagen_eliminar) {
+                    if (oldMetodo && oldMetodo.qr_imagen) try { fs.unlinkSync(oldMetodo.qr_imagen); } catch (_) {}
+                    qrPath = null;
+                }
+                db.editarMetodoPago(parseInt(body.id), body.nombre, body.valor, body.instrucciones || "", !!body.activo, qrPath);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // POST /api/admin/metodos_pago/eliminar — Admin elimina metodo
+            if (url.pathname === "/api/admin/metodos_pago/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.id) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta id" })); }
+                const oldMetodo = db.getMetodosPago().find(m => m.id === parseInt(body.id));
+                if (oldMetodo && oldMetodo.qr_imagen) try { fs.unlinkSync(oldMetodo.qr_imagen); } catch (_) {}
+                db.eliminarMetodoPago(parseInt(body.id));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // ══════════════════════════════════════════════
+            //   MEJORAS FUTURAS — Endpoints Nuevos
+            // ══════════════════════════════════════════════
+
+            // === 3. Push Notifications ===
+            if (url.pathname === "/api/push/subscribe" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.subscription) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta subscription" })); }
+                const sub = body.subscription;
+                db.savePushSubscription(auth.userId, sub.endpoint, sub.keys?.p256dh || '', sub.keys?.auth || '');
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/push/unsubscribe" && req.method === "POST") {
+                const body = await readBody();
+                if (body.endpoint) db.deletePushSubscription(body.endpoint);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/push/vapid-key" && req.method === "GET") {
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, key: config.VAPID?.PUBLIC_KEY || '' }));
+            }
+
+            // === 5. Tickets / Soporte ===
+            if (url.pathname === "/api/tickets" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const tickets = db.getTicketsUsuario(auth.userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, tickets }));
+            }
+            if (url.pathname === "/api/tickets/crear" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.asunto || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta asunto o mensaje" })); }
+                const ticketId = db.crearTicket(auth.userId, body.asunto, body.mensaje);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ticket_id: ticketId }));
+            }
+            if (url.pathname === "/api/tickets/mensajes" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const ticketId = parseInt(url.searchParams.get("ticket_id"));
+                if (!ticketId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta ticket_id" })); }
+                const mensajes = db.getTicketMessages(ticketId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, mensajes }));
+            }
+            if (url.pathname === "/api/tickets/responder" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.ticket_id || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta ticket_id o mensaje" })); }
+                db.responderTicket(parseInt(body.ticket_id), auth.userId, checkAdmin(auth.userId), body.mensaje);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/tickets/cerrar" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                db.cerrarTicket(parseInt(body.ticket_id));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/admin/tickets" && req.method === "GET") {
+                const u = url.searchParams.get("u"); if (!checkAdmin(u)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const estado = url.searchParams.get("estado") || 'todos';
+                const tickets = db.getTicketsTodos(estado);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, tickets }));
+            }
+
+            // === 6+7. Account Health + Ban Detection ===
+            if (url.pathname === "/api/account_health" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const health = db.getAccountsHealth(auth.userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, accounts: health }));
+            }
+            if (url.pathname === "/api/account_health/best" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const best = db.getBestAccount(auth.userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, best }));
+            }
+            if (url.pathname === "/api/account_health/unpause" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                db.unpauseAccount(auth.userId, body.cuenta);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // === 8. Templates con Variables ===
+            if (url.pathname === "/api/templates/preview" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const texto = body.texto || '';
+                const vars = body.variables || {};
+                const now = new Date().toLocaleString("sv-SE", { timeZone: config.TIMEZONE });
+                const nombres = ["Ana","Luis","Maria","Carlos","Sofia","Juan","Laura","Pedro","Elena","Diego"];
+                let result = texto
+                    .replace(/\{nombre\}/gi, vars.nombre || nombres[Math.floor(Math.random() * nombres.length)])
+                    .replace(/\{fecha\}/gi, vars.fecha || now.split(' ')[0])
+                    .replace(/\{hora\}/gi, vars.hora || now.split(' ')[1]?.slice(0,5) || '')
+                    .replace(/\{random\}/gi, () => Math.floor(Math.random() * 10000).toString())
+                    .replace(/\{dia\}/gi, ['Domingo','Lunes','Martes','Miercoles','Jueves','Viernes','Sabado'][new Date().getDay()])
+                    .replace(/\{saludo\}/gi, () => { const h = parseInt(now.split(' ')[1]?.slice(0,2) || '12'); return h < 12 ? 'Buenos dias' : h < 18 ? 'Buenas tardes' : 'Buenas noches'; });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, preview: result }));
+            }
+
+            // === 10. Dashboard de Sellers ===
+            if (url.pathname === "/api/seller/dashboard" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const seller = db.getSeller(auth.userId);
+                if (!seller) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No eres seller" })); }
+                const dashboard = db.getSellerDashboard(seller.id);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, ...dashboard }));
+            }
+
+            // === 11. Modo Vacaciones ===
+            if (url.pathname === "/api/vacation" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const v = db.getVacationMode(auth.userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, vacation: v || { activo: 0 } }));
+            }
+            if (url.pathname === "/api/vacation/toggle" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const current = db.getVacationMode(auth.userId);
+                const activar = !(current?.activo);
+                if (activar) {
+                    const campanas = db.getCampanas(auth.userId).filter(c => c.activa);
+                    const ids = campanas.map(c => c.id);
+                    for (const id of ids) db.setCampanaActiva(id, false);
+                    db.setVacationMode(auth.userId, true, ids);
+                } else {
+                    const pausadas = JSON.parse(current?.campanas_pausadas || '[]');
+                    for (const id of pausadas) db.setCampanaActiva(id, true);
+                    db.setVacationMode(auth.userId, false, []);
+                }
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, activo: activar }));
+            }
+
+            // === 12. Programacion Recurrente ===
+            if (url.pathname === "/api/recurrent" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const jobs = db.getScheduledRecurrent(auth.userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, jobs }));
+            }
+            if (url.pathname === "/api/recurrent/crear" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                db.crearScheduledRecurrent(auth.userId, body.nombre || '', body.tipo || 'envio_grupo', JSON.stringify(body.config || {}), body.cron_expr || '0 9 * * 1-5', body.dias_semana || '1,2,3,4,5', body.hora || '09:00');
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/recurrent/toggle" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                db.toggleScheduledRecurrent(parseInt(body.id));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/recurrent/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                db.deleteScheduledRecurrent(parseInt(body.id));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // === 13. A/B Testing ===
+            if (url.pathname === "/api/abtest" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const tests = db.getABTests(auth.userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, tests }));
+            }
+            if (url.pathname === "/api/abtest/crear" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.nombre || !body.mensaje_a || !body.mensaje_b) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Faltan campos" })); }
+                db.crearABTest(auth.userId, body.nombre, body.mensaje_a, body.mensaje_b, body.imagen_a, body.imagen_b);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/abtest/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                db.deleteABTest(parseInt(body.id));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+
+            // === 14. Auto-limpieza de Grupos Muertos ===
+            if (url.pathname === "/api/grupos/muertos" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const dias = parseInt(url.searchParams.get("dias") || "30");
+                const muertos = db.getGruposMuertos(auth.userId, dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, grupos: muertos }));
+            }
+            if (url.pathname === "/api/grupos/muertos/limpiar" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const dias = parseInt(body.dias || 30);
+                const eliminados = db.eliminarGruposMuertos(auth.userId, dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, eliminados }));
+            }
+
+            // === 15. Auto Backup ===
+            if (url.pathname === "/api/admin/backups" && req.method === "GET") {
+                const u = url.searchParams.get("u"); if (!checkAdmin(u)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const backups = db.getAutoBackups();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, backups }));
+            }
+            if (url.pathname === "/api/admin/backup/crear" && req.method === "POST") {
+                const body = await readBody();
+                if (!checkAdmin(body.admin_id)) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                try {
+                    const backupDir = config.AUTO_BACKUP?.DIR || './backups';
+                    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+                    const filename = `backup_${new Date().toISOString().replace(/[:.]/g, '-')}.db`;
+                    const src = config.DB_PATH || './wsp_titan.db';
+                    fs.copyFileSync(src, path.join(backupDir, filename));
+                    const stats = fs.statSync(path.join(backupDir, filename));
+                    db.registrarAutoBackup(filename, stats.size);
+                    res.writeHead(200);
+                    return res.end(JSON.stringify({ ok: true, filename }));
+                } catch (e) { res.writeHead(500); return res.end(JSON.stringify({ ok: false, error: e.message })); }
+            }
+
+            // === 16. Google Sheets Export ===
+            if (url.pathname === "/api/export/csv" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const tipo = url.searchParams.get("tipo") || "grupos";
+                let csv = '';
+                if (tipo === 'grupos') {
+                    const grupos = db.getGrupos(auth.userId);
+                    csv = 'Link,Nombre,Seccion,Tamano\n' + grupos.map(g => `"${g.link}","${(g.nombre||'').replace(/"/g,'""')}","${g.seccion||''}",${g.size||0}`).join('\n');
+                } else if (tipo === 'historial') {
+                    const hist = db.getHistorialEnvios(auth.userId, 1000);
+                    csv = 'Fecha,Grupo,Resultado,Tipo\n' + hist.map(h => `"${h.fecha}","${(h.grupo_nombre||'').replace(/"/g,'""')}","${h.resultado}","${h.tipo_envio||'grupo'}"`).join('\n');
+                } else if (tipo === 'campanas') {
+                    const camps = db.getCampanas(auth.userId);
+                    csv = 'ID,Nombre,Activa,Enviados,Errores\n' + camps.map(c => `${c.id},"${(c.nombre||'').replace(/"/g,'""')}",${c.activa},${c.enviados},${c.errores}`).join('\n');
+                }
+                res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${tipo}_export.csv"` });
+                return res.end(csv);
+            }
+
+            // === 18. Rate Limiting Adaptativo ===
+            if (url.pathname === "/api/adaptive_rate" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const health = db.getAccountsHealth(auth.userId);
+                const adaptiveConfig = config.ADAPTIVE_RATE || {};
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, config: adaptiveConfig, accounts: health }));
+            }
+
+            // === 19. Webhooks ===
+            if (url.pathname === "/api/webhooks" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const webhooks = db.getUserWebhooks(auth.userId);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, webhooks }));
+            }
+            if (url.pathname === "/api/webhooks/crear" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                if (!body.url) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "Falta URL" })); }
+                const secret = Math.random().toString(36).substring(2, 15);
+                db.crearUserWebhook(auth.userId, body.url, body.eventos || 'envio_completado,campana_terminada', secret);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, secret }));
+            }
+            if (url.pathname === "/api/webhooks/editar" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                db.editarUserWebhook(parseInt(body.id), body.url, body.eventos, body.activo !== false);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/webhooks/eliminar" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                db.eliminarUserWebhook(parseInt(body.id));
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true }));
+            }
+            if (url.pathname === "/api/webhooks/test" && req.method === "POST") {
+                const body = await readBody();
+                const auth = authenticateRequest(body); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                try {
+                    const testPayload = JSON.stringify({ event: 'test', timestamp: new Date().toISOString(), user_id: auth.userId });
+                    const urlObj = new URL(body.url);
+                    const options = { hostname: urlObj.hostname, port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80), path: urlObj.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(testPayload) } };
+                    const lib = urlObj.protocol === 'https:' ? require('https') : http;
+                    const webhookReq = lib.request(options, (r) => { res.writeHead(200); res.end(JSON.stringify({ ok: true, status: r.statusCode })); });
+                    webhookReq.on('error', (e) => { res.writeHead(200); res.end(JSON.stringify({ ok: false, error: e.message })); });
+                    webhookReq.write(testPayload);
+                    webhookReq.end();
+                } catch (e) { res.writeHead(500); return res.end(JSON.stringify({ ok: false, error: e.message })); }
+                return;
+            }
+
+            // === 4. Analytics Avanzado ===
+            if (url.pathname === "/api/analytics/envios_hora" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const dias = parseInt(url.searchParams.get("dias") || "7");
+                const data = db.getDb().prepare(`
+                    SELECT CAST(strftime('%H', fecha) AS INTEGER) as hora, COUNT(*) as total,
+                        SUM(CASE WHEN resultado LIKE '%enviado%' THEN 1 ELSE 0 END) as exitosos
+                    FROM historial_envios WHERE user_id = ? AND fecha >= datetime('now', '-' || ? || ' days')
+                    GROUP BY hora ORDER BY hora
+                `).all(auth.userId, dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
+            }
+            if (url.pathname === "/api/analytics/envios_dia" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const dias = parseInt(url.searchParams.get("dias") || "30");
+                const data = db.getDb().prepare(`
+                    SELECT date(fecha) as dia, COUNT(*) as total,
+                        SUM(CASE WHEN resultado LIKE '%enviado%' THEN 1 ELSE 0 END) as exitosos,
+                        SUM(CASE WHEN resultado LIKE '%error%' OR resultado LIKE '%fallo%' THEN 1 ELSE 0 END) as fallidos
+                    FROM historial_envios WHERE user_id = ? AND fecha >= datetime('now', '-' || ? || ' days')
+                    GROUP BY dia ORDER BY dia
+                `).all(auth.userId, dias);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
+            }
+            if (url.pathname === "/api/analytics/top_grupos" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const limit = parseInt(url.searchParams.get("limit") || "20");
+                const data = db.getDb().prepare(`
+                    SELECT grupo_nombre, COUNT(*) as total_envios,
+                        SUM(CASE WHEN resultado LIKE '%enviado%' THEN 1 ELSE 0 END) as exitosos,
+                        ROUND(CAST(SUM(CASE WHEN resultado LIKE '%enviado%' THEN 1 ELSE 0 END) AS REAL) / MAX(COUNT(*), 1) * 100, 1) as tasa
+                    FROM historial_envios WHERE user_id = ? AND grupo_nombre IS NOT NULL
+                    GROUP BY grupo_nombre ORDER BY total_envios DESC LIMIT ?
+                `).all(auth.userId, limit);
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, data }));
+            }
+            if (url.pathname === "/api/analytics/cuentas" && req.method === "GET") {
+                const auth = authenticateRequest(); if (!auth.authenticated) { res.writeHead(401); return res.end(JSON.stringify({ ok: false, error: "No autorizado" })); }
+                const health = db.getAccountsHealth(auth.userId);
+                const sesiones = db.getSesiones(auth.userId);
+                const combined = sesiones.map(s => {
+                    const h = health.find(a => a.cuenta === s.nombre);
+                    return { ...s, envios_ok: h?.envios_ok || 0, envios_fail: h?.envios_fail || 0, pausada: h?.pausada || 0, tasa: h ? (h.envios_ok + h.envios_fail > 0 ? Math.round(h.envios_ok / (h.envios_ok + h.envios_fail) * 100) : 100) : 100 };
+                });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, cuentas: combined }));
+            }
+
+            // === 23. Health Check / Monitoreo ===
+            if (url.pathname === "/api/health" && req.method === "GET") {
+                const uptime = process.uptime();
+                const memUsage = process.memoryUsage();
+                res.writeHead(200);
+                return res.end(JSON.stringify({
+                    ok: true, status: 'healthy', uptime_seconds: Math.floor(uptime),
+                    memory_mb: Math.round(memUsage.rss / 1048576),
+                    heap_used_mb: Math.round(memUsage.heapUsed / 1048576),
+                    bot_status: botStatus, timestamp: new Date().toISOString()
+                }));
+            }
+
             // Endpoint no encontrado
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
@@ -2400,10 +3449,26 @@ server.listen(QR_PORT, "0.0.0.0", () => {
 // --- INICIO DEL BOT ---
 async function startBot() {
     db.init();
+    db.initDefaultMetodosPago();
     db.setAdminJids(adminJids);
+    // Marcar campanas activas como detenidas por actualizacion antes de reconectar
+    const campanasPrevias = db.marcarCampanasDetenidaPorActualizacion();
     fs.mkdirSync("sessions", { recursive: true });
     fs.mkdirSync(config.SESSIONS_DIR, { recursive: true });
     fs.mkdirSync("media", { recursive: true });
+    fs.mkdirSync("comprobantes", { recursive: true });
+
+    // Periodic cleanup: every 30 minutes
+    setInterval(() => {
+        try {
+            db.limpiarRecoveryCodes();
+            db.limpiarSessionsExpiradas();
+            db.limpiarLoginAttempts();
+        } catch (e) { console.error("Cleanup error:", e.message); }
+    }, 30 * 60 * 1000);
+
+    // Limpieza periodica de codigos de registro expirados (cada 5 min)
+    setInterval(() => { try { db.limpiarCodigosRegistroExpirados(); } catch(_){} }, 5 * 60 * 1000);
 
     const { state, saveCreds } = await useMultiFileAuthState("sessions");
 
@@ -2462,6 +3527,42 @@ async function startBot() {
                 }
             } catch (e) {
                 console.log(`   (No se pudo resolver admin JID: ${e.message})`);
+            }
+
+            // Auto-restart escalonado de campanas que estaban activas antes del reinicio
+            if (campanasPrevias && campanasPrevias.length > 0) {
+                console.log(`\u{1F504} Auto-restarting ${campanasPrevias.length} campana(s) en 30s...`);
+                setTimeout(async () => {
+                    let reiniciadas = 0;
+                    let fallidas = 0;
+                    for (const cId of campanasPrevias) {
+                        try {
+                            const camp = db.getCampanaById(cId);
+                            if (!camp) { fallidas++; continue; }
+                            const sesiones = db.getSesionesCampana(cId);
+                            const grupos = db.getGruposCampana(cId);
+                            if (!sesiones.length || !grupos.length) {
+                                db.setCampanaActiva(cId, false, 'detenida');
+                                fallidas++;
+                                continue;
+                            }
+                            motor.iniciarCampana(cId, camp.user_id, botSock);
+                            reiniciadas++;
+                            // 10s delay entre cada campana para evitar code 440
+                            await new Promise(r => setTimeout(r, 10000));
+                        } catch (e) {
+                            console.error(`   Error reiniciando campana ${cId}: ${e.message}`);
+                            fallidas++;
+                        }
+                    }
+                    console.log(`\u2705 Auto-restart: ${reiniciadas} reiniciadas, ${fallidas} fallidas`);
+                    try {
+                        const adminId = config.ADMIN_NUMBER + "@s.whatsapp.net";
+                        await botSock.sendMessage(adminId, {
+                            text: `\u{1F504} *Auto-restart de campanas*\n\u2705 Reiniciadas: ${reiniciadas}\n\u274C Fallidas: ${fallidas}`,
+                        });
+                    } catch (e) {}
+                }, 30000);
             }
         }
 
@@ -4703,6 +5804,119 @@ async function showReporteDiario(jid) {
     texto += `\n\n*0.* \u{1F519} Volver al menu`;
     return await send(jid, texto);
 }
+
+// ══════════════════════════════════════════════
+//   MEJORAS FUTURAS — Background Services
+// ══════════════════════════════════════════════
+
+// 8. Template variable processing helper
+function processTemplateVariables(text, vars) {
+    if (!text) return text;
+    const now = new Date().toLocaleString("sv-SE", { timeZone: config.TIMEZONE });
+    const nombres = ["Ana","Luis","Maria","Carlos","Sofia","Juan","Laura","Pedro","Elena","Diego"];
+    return text
+        .replace(/\{nombre\}/gi, vars?.nombre || nombres[Math.floor(Math.random() * nombres.length)])
+        .replace(/\{fecha\}/gi, vars?.fecha || now.split(' ')[0])
+        .replace(/\{hora\}/gi, vars?.hora || now.split(' ')[1]?.slice(0,5) || '')
+        .replace(/\{random\}/gi, () => Math.floor(Math.random() * 10000).toString())
+        .replace(/\{dia\}/gi, ['Domingo','Lunes','Martes','Miercoles','Jueves','Viernes','Sabado'][new Date().getDay()])
+        .replace(/\{saludo\}/gi, () => { const h = parseInt(now.split(' ')[1]?.slice(0,2) || '12'); return h < 12 ? 'Buenos dias' : h < 18 ? 'Buenas tardes' : 'Buenas noches'; });
+}
+
+// 15. Auto Backup Scheduler
+function startAutoBackupScheduler() {
+    if (!config.AUTO_BACKUP?.ENABLED) return;
+    const checkEvery = 60 * 60 * 1000;
+    setInterval(() => {
+        const now = new Date().toLocaleString("sv-SE", { timeZone: config.TIMEZONE });
+        const hour = parseInt(now.split(' ')[1]?.split(':')[0] || '0');
+        const minute = parseInt(now.split(' ')[1]?.split(':')[1] || '0');
+        if (hour === (config.AUTO_BACKUP.HOUR || 3) && minute < 5) {
+            try {
+                const backupDir = config.AUTO_BACKUP.DIR || './backups';
+                if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+                const filename = `auto_backup_${new Date().toISOString().replace(/[:.]/g, '-')}.db`;
+                fs.copyFileSync(config.DB_PATH || './wsp_titan.db', path.join(backupDir, filename));
+                const stats = fs.statSync(path.join(backupDir, filename));
+                db.registrarAutoBackup(filename, stats.size);
+                db.deleteOldBackups(config.AUTO_BACKUP.KEEP_DAYS || 7);
+                const oldFiles = fs.readdirSync(backupDir).filter(f => f.startsWith('auto_backup_'));
+                const keepDate = new Date(Date.now() - (config.AUTO_BACKUP.KEEP_DAYS || 7) * 86400000);
+                for (const f of oldFiles) {
+                    const fPath = path.join(backupDir, f);
+                    const fStat = fs.statSync(fPath);
+                    if (fStat.mtime < keepDate) fs.unlinkSync(fPath);
+                }
+                console.log(`\u{1F4BE} Auto backup creado: ${filename}`);
+            } catch (e) { console.error("Error en auto backup:", e.message); }
+        }
+    }, checkEvery);
+    console.log(`\u{1F4BE} Auto backup programado: ${config.AUTO_BACKUP.HOUR || 3}:${String(config.AUTO_BACKUP.MINUTE || 0).padStart(2, '0')} (cada dia, mantiene ${config.AUTO_BACKUP.KEEP_DAYS || 7} dias)`);
+}
+
+// 12. Cron-like Scheduler for Recurrent Jobs
+function startCronScheduler() {
+    setInterval(() => {
+        try {
+            const jobs = db.getActiveRecurrentJobs();
+            const now = new Date().toLocaleString("sv-SE", { timeZone: config.TIMEZONE });
+            const currentHour = now.split(' ')[1]?.slice(0, 5) || '00:00';
+            const currentDay = new Date().getDay();
+            for (const job of jobs) {
+                const dias = (job.dias_semana || '').split(',').map(Number);
+                if (!dias.includes(currentDay)) continue;
+                if (job.hora !== currentHour) continue;
+                if (job.ultimo_run) {
+                    const lastRun = new Date(job.ultimo_run);
+                    const diff = Date.now() - lastRun.getTime();
+                    if (diff < 23 * 3600000) continue;
+                }
+                db.updateScheduledRecurrentRun(job.id);
+                console.log(`\u23F0 Ejecutando job recurrente #${job.id}: ${job.nombre}`);
+            }
+        } catch (e) { console.error("Error en cron scheduler:", e.message); }
+    }, config.CRON_CHECK_INTERVAL_MS || 60000);
+}
+
+// 19. Webhook Dispatcher
+function dispatchWebhook(evento, data) {
+    try {
+        const webhooks = db.getActiveWebhooksForEvent(evento);
+        for (const wh of webhooks) {
+            const payload = JSON.stringify({ event: evento, data, timestamp: new Date().toISOString() });
+            try {
+                const urlObj = new URL(wh.url);
+                const options = { hostname: urlObj.hostname, port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80), path: urlObj.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), 'X-Webhook-Secret': wh.secret || '' } };
+                const lib = urlObj.protocol === 'https:' ? require('https') : http;
+                const req = lib.request(options);
+                req.on('error', () => {});
+                req.write(payload);
+                req.end();
+            } catch (_) {}
+        }
+    } catch (_) {}
+}
+
+// 23. Health Monitoring
+function startHealthMonitor() {
+    const interval = config.MONITORING?.HEALTH_CHECK_INTERVAL_MS || 60000;
+    setInterval(() => {
+        const mem = process.memoryUsage();
+        if (mem.rss > 500 * 1048576) {
+            console.warn("\u26A0\uFE0F Memoria alta: " + Math.round(mem.rss / 1048576) + "MB");
+            if (config.MONITORING?.ALERT_WEBHOOK_URL) {
+                dispatchWebhook('alert_memory', { rss_mb: Math.round(mem.rss / 1048576) });
+            }
+        }
+    }, interval);
+}
+
+// Start all background services
+setTimeout(() => {
+    startAutoBackupScheduler();
+    startCronScheduler();
+    startHealthMonitor();
+}, 5000);
 
 // --- INICIAR ---
 startBot().catch(e => {

@@ -466,8 +466,9 @@ Confirmo que entiendo la arquitectura:
 
 ## Comando de Actualizacion
 ```bash
-cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/1777615385-fix-campaigns-chats-layout && npm install && bash start.sh
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/v12.5-fixes && npm install && bash start.sh
 ```
+> **NOTA:** Cambiar `devin/v12.5-fixes` por la rama que se cree en la siguiente sesion.
 
 ---
 
@@ -1229,92 +1230,167 @@ CI: lint-and-check OK | docker-build OK
 
 ---
 
-## Cambios v12.5 — Fixes de Campanas + Filtro Verificacion (PR actual)
+## Cambios v12.5 — PENDIENTES (Para la siguiente IA)
 
-### BUG-FIX: botSock.sendMessage sin try/catch crasheaba campanas (CRITICO)
-- **Donde**: `motor_wsp.js` — `iniciarCampana()` lineas 522 y 543
-- **Sintoma**: Si `botSock` era null o la conexion WSP fallaba al enviar notificacion, toda la funcion `iniciarCampana` crasheaba con error no capturado. Los clientes veian error al iniciar campanas.
-- **Causa**: Dos llamadas a `botSock.sendMessage()` (cuando no hay cuentas/grupos asignados, y cuando no se pudo conectar ninguna cuenta) NO estaban envueltas en try/catch. Todas las demas llamadas SI lo estaban.
-- **Fix**: Envueltas ambas llamadas en `try { if (botSock) await botSock.sendMessage(...); } catch (e) {}`. La campana retorna normalmente incluso si la notificacion falla.
-- **Archivo**: `motor_wsp.js` (lineas 522, 543)
+### CONTEXTO IMPORTANTE
+- **Rama base correcta:** `sync-servidor` (contiene el codigo real del servidor del usuario)
+- **NO usar `main`** — main esta desactualizado, le faltan 8 secciones completas (Pagar Membresia, Soporte, Analytics, Webhooks, Auditoria, Pagos Admin, Tickets Admin, Backups Auto)
+- **PR #39 es OBSOLETO** — fue creado basado en main, cerrar y crear uno nuevo desde `sync-servidor`
+- El usuario subio su codigo actual a `sync-servidor` el 2026-05-01
 
-### MEJORA: Filtro de usuarios no verificados en admin panel
-- **Donde**: `db_wsp.js` — `getTodosUsuariosAdmin()` linea 1860
-- **Sintoma**: Admin veia TODOS los usuarios incluyendo los que no habian verificado su cuenta (basura/spam de registros incompletos)
-- **Fix**: LEFT JOIN con `panel_users` para obtener campo `verificado`. Filtro `.filter(u => u.verificado === 1 || u.es_admin === 1)` para solo mostrar usuarios verificados y admins.
-- **Archivo**: `db_wsp.js`
+### TAREA 1: Fix error de campanas al iniciar (PRIORIDAD ALTA)
 
-### BUG-FIX: Auto-unirse a grupos fallaba (sin selector de cuenta)
-- **Donde**: `panel.html` — `showAutoJoin()` / `ejecutarAutoJoin()` + `index_wsp.js` — endpoint `/api/autojoin`
-- **Sintoma**: Al usar "Auto-unirse" para unirse a grupos por link, fallaba porque no se enviaba la cuenta del usuario. El backend caia en fallback a `botSock` (null o cuenta incorrecta).
-- **Causa**: El modal de auto-unirse NO tenia selector de cuenta — enviaba solo `{u, links}` sin `cuenta`. El backend usaba `botSock` como fallback, que es la conexion del admin, no del usuario.
-- **Fix Frontend**: Agregado dropdown de cuenta en el modal (toma las opciones de `wspDetectCuenta`). Pre-selecciona la cuenta activa. Valida que se seleccione una cuenta antes de enviar.
-- **Fix Backend**: Eliminado fallback a `botSock`. Ahora requiere `body.cuenta` obligatorio, con error descriptivo si falta o falla la conexion.
-- **Archivos**: `panel.html` (showAutoJoin, ejecutarAutoJoin), `index_wsp.js` (endpoint /api/autojoin)
+**Problema:** Los clientes del usuario reciben error al intentar iniciar una campana WSP.
 
-### MEJORA: Ver comprobante de pago en admin
-- **Donde**: `panel.html` — tabla de pagos admin (Pendientes / Todos los Comprobantes)
-- **Antes**: La tabla mostraba ID, Usuario, Plan, Metodo, Monto, Estado, Fecha, Acciones — pero NO habia forma de ver la imagen del comprobante
-- **Fix**: Agregada columna "Comprobante" con boton "🖼 Ver" que abre modal con la imagen full-size (usa endpoint existente `/api/comprobante/imagen?id=X`). Si no hay imagen muestra "Sin imagen".
-- **Funcion nueva**: `verComprobante(id)` — muestra modal con la imagen del comprobante
-- **Archivo**: `panel.html`
+**Archivos relevantes:**
+- `motor_wsp.js` → funcion `iniciarCampana()` (linea 500)
+- `index_wsp.js` → endpoint `POST /api/iniciar` (linea 437)
+- `panel.html` → funcion `iniciarCamp(id)` (linea 2778)
 
-### MEJORA: Anti-ban v2 para envio a miembros WSP
-- **Donde**: `motor_wsp.js` funcion `enviarASeleccionados()`, `panel.html` seccion envio a miembros
-- **Problema**: Los clientes eran baneados al enviar DM a miembros de grupo incluso con delays de 10 min entre lotes
-- **Mejoras implementadas**:
-  1. **Delay base aumentado**: 15-45s entre mensajes (antes 5-15s)
-  2. **Lote default reducido**: 5 mensajes por lote (antes 15)
-  3. **Pausa entre lotes aumentada**: 10 min minimo (antes 3 min)
-  4. **Simulacion de typing**: `presenceSubscribe` + `composing` + `paused` antes de cada mensaje — WSP ve actividad humana
-  5. **Delay progresivo agresivo**: +3s por cada 5 mensajes enviados (antes +0.5s por cada 20)
-  6. **Pausas largas aleatorias**: 20% de probabilidad de pausa extra de 60-120s entre mensajes (simula comportamiento humano)
-- **Archivos**: `motor_wsp.js`, `panel.html` (textos y defaults actualizados)
+**Posible causa:** `botSock` es null cuando el bot WSP no esta conectado. El endpoint en `index_wsp.js:443` pasa `botSock` a `motor.iniciarCampana()`, y dentro del motor se usa `botSock.sendMessage()` para enviar notificaciones al usuario. Si botSock es null → crash.
 
-### BUG-FIX: git reset --hard restauraba DB antigua (cuentas borradas reaparecian)
-- **Donde**: `.gitignore` + archivos rastreados por git
-- **Sintoma**: Despues de actualizar con `git reset --hard`, las cuentas borradas reaparecian y las nuevas se perdian.
-- **Causa**: Los archivos `wsp_titan.db-shm` y `wsp_titan.db-wal` (journals de SQLite WAL) estaban rastreados en git. El patron `*.db` en .gitignore NO los cubria. Al hacer `git reset --hard`, se restauraban los journals viejos, corrompiendo/revirtiendo la base de datos.
-- **Fix**: (1) `git rm --cached` para dejar de rastrear los archivos WAL. (2) Agregados `*.db-shm`, `*.db-wal`, `*.db-journal` al `.gitignore`.
-- **Archivos**: `.gitignore`
+**Fix necesario en `motor_wsp.js` funcion `iniciarCampana()`:**
+- Wrappear TODOS los `await botSock.sendMessage(...)` dentro de `iniciarCampana` en try/catch individual
+- Agregar guard al inicio: verificar que botSock existe antes de usarlo para notificaciones
+- Las notificaciones NO deben ser obligatorias — si botSock falla, la campana debe continuar igual
 
-### BUG-FIX: 'sqlite3.Row' object has no attribute 'get' en Campanas TG (CRITICO)
-- **Donde**: `db.py` — todas las funciones que retornan filas de la base de datos TG
-- **Sintoma**: Al iniciar campanas TG o usar funciones que llaman `.get()` en filas de la DB, aparecia "Error interno: 'sqlite3.Row' object has no attribute 'get'"
-- **Causa**: `db.py` usaba `db.row_factory = aiosqlite.Row` que retorna objetos `Row` — estos soportan `row["key"]` pero NO `.get("key", default)`. Multiples partes del codigo (motor.py, bot.py, web_panel.py) usaban `.get()` para acceder con valores por defecto.
-- **Fix**: Creada funcion `_dict_factory(cursor, row)` que retorna diccionarios Python nativos. Reemplazadas TODAS las ocurrencias de `db.row_factory = aiosqlite.Row` por `db.row_factory = _dict_factory`. Los diccionarios soportan `.get()`, `[]`, `in`, etc.
-- **Archivo**: `db.py` (17 ocurrencias reemplazadas)
+**Fix en `index_wsp.js` endpoint `/api/iniciar`:**
+- Antes de llamar `motor.iniciarCampana(campId, body.u, botSock)`, verificar que `botSock` no sea null
+- Si es null, retornar error descriptivo: `{ ok: false, error: "Bot WSP no conectado. Vincula una cuenta primero." }`
 
-### Ya implementado en sync-servidor (verificado)
-- **TAREA 2**: Auto-restart de campanas en errores inesperados (catch block lineas 838-864)
-- **TAREA 3**: Botones "Iniciar Todas" / "Parar Todas" en campanas (linea 693 + funciones 2783-2784)
-- **TAREA 5**: Badge "reiniciando" en getEstadoCampanaBadge (linea 2730)
+**Verificacion:**
+- Probar iniciar campana con bot desconectado — debe dar error claro, no crash
+- Probar iniciar campana con bot conectado — debe funcionar normal
 
-### Archivos Modificados en v12.5
-| Archivo | Cambios |
-|---|---|
-| `motor_wsp.js` | try/catch en 2 sendMessage de iniciarCampana (lineas 522, 543) |
-| `db_wsp.js` | getTodosUsuariosAdmin con LEFT JOIN panel_users + filtro verificado |
-| `panel.html` | showAutoJoin con selector de cuenta + validacion |
-| `index_wsp.js` | /api/autojoin requiere cuenta obligatoria, sin fallback a botSock |
-| `db.py` | row_factory cambiado de aiosqlite.Row a _dict_factory (fix .get()) |
-| `.gitignore` | Agregados *.db-shm, *.db-wal, *.db-journal |
+### TAREA 2: Auto-restart de campanas en errores inesperados
 
-### Verificacion de Sintaxis v12.5
-```
-node -c motor_wsp.js   OK
-node -c index_wsp.js   OK
-node -c db_wsp.js      OK
-node -c panel_server.js OK
-python3 ast.parse bot.py OK
-python3 ast.parse web_panel.py OK
+**Problema:** Si ocurre un error que escapa del loop principal (catch en linea 838 de motor_wsp.js), la campana se detiene permanentemente.
+
+**Fix en `motor_wsp.js` lineas 838-844:**
+
+```javascript
+// CAMBIAR ESTO:
+} catch (e) {
+    console.error(`Error campana ${campanaId}: ${e.message}`);
+} finally {
+    db.setCampanaActiva(campanaId, false, 'detenida');
+    delete tareasActivas[campanaId];
+    delete campanaReposo[campanaId];
+}
+
+// POR ESTO:
+} catch (e) {
+    console.error(`Error campana ${campanaId}: ${e.message}`);
+    // Auto-restart: la campana NO debe morir por errores
+    if (!cancelled) {
+        db.setCampanaEstadoDetalle(campanaId, 'reiniciando');
+        try {
+            await botSock.sendMessage(userId + '@s.whatsapp.net', {
+                text: `⚠️ Campana error inesperado. Reiniciando en 60s...\n📋 ${e.message}`
+            });
+        } catch (notifErr) {}
+        await delay(60000);
+        if (!cancelled) {
+            delete tareasActivas[campanaId];
+            delete campanaReposo[campanaId];
+            iniciarCampana(campanaId, userId, botSock);
+            return; // Evitar que finally detenga la campana
+        }
+    }
+} finally {
+    // Solo ejecutar si NO se hizo auto-restart
+    if (tareasActivas[campanaId]) {
+        db.setCampanaActiva(campanaId, false, 'detenida');
+        delete tareasActivas[campanaId];
+        delete campanaReposo[campanaId];
+    }
+}
 ```
 
-### Comando de actualizacion
+**IMPORTANTE:** El `finally` debe verificar si la tarea sigue activa antes de limpiar, porque si se hizo auto-restart ya se elimino tareasActivas[campanaId] y se re-creo.
+
+### TAREA 3: Botones "Iniciar Todas" / "Parar Todas" en campanas WSP
+
+**Problema:** No existen estos botones en la seccion de campanas.
+
+**Fix en `panel.html`:**
+
+1. En la seccion `sec-campanas` (linea 690-695), cambiar el div de botones:
+
+```html
+<!-- ANTES: -->
+<div style="margin-bottom:15px"><button class="btn btn-primary" onclick="showCrearCampana()">➕ Crear Campana</button></div>
+
+<!-- DESPUES: -->
+<div style="margin-bottom:15px;display:flex;gap:8px;flex-wrap:wrap">
+  <button class="btn btn-primary" onclick="showCrearCampana()">➕ Crear Campana</button>
+  <button class="btn btn-success" onclick="iniciarTodasCamp()">🚀 Iniciar Todas</button>
+  <button class="btn btn-danger" onclick="detenerTodasCamp()">⏹ Parar Todas</button>
+</div>
+```
+
+2. Agregar funciones JS (despues de `detenerCamp` en linea ~2779):
+
+```javascript
+async function iniciarTodasCamp(){
+  const camps=Object.values(_wspCampanasData).filter(c=>!c.activa&&c.estado_detalle!=='en_reposo');
+  if(!camps.length){toast('No hay campanas detenidas','info');return}
+  for(const c of camps){
+    await api('/api/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:c.id})});
+    await new Promise(r=>setTimeout(r,2000)); // 2s entre cada inicio para evitar conflictos
+  }
+  toast(camps.length+' campana(s) iniciadas','success');
+  loadCampanas();
+}
+async function detenerTodasCamp(){
+  const camps=Object.values(_wspCampanasData).filter(c=>c.activa||c.estado_detalle==='en_reposo');
+  if(!camps.length){toast('No hay campanas activas','info');return}
+  for(const c of camps){
+    await api('/api/detener',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,campana_id:c.id})});
+  }
+  toast(camps.length+' campana(s) detenidas','success');
+  loadCampanas();
+}
+```
+
+### TAREA 4: Verificar filtro de usuarios no verificados en admin panel
+
+**Verificar en `db_wsp.js`** la funcion `getTodosUsuariosAdmin()`:
+- Debe filtrar usuarios no verificados: `.filter(u => u.verificado === 1 || u.es_admin === 1)`
+- Si no tiene ese filtro, AGREGARLO
+- Verificar que `getAllPanelUsers()` (usado en endpoint `/api/admin/panel_users`) tambien excluye no verificados de la lista principal (o al menos los marca)
+
+### TAREA 5: Badge "reiniciando" en panel
+
+Agregar al `getEstadoCampanaBadge()` en `panel.html` un case para `reiniciando`:
+```javascript
+if(x.estado_detalle==='reiniciando') return '<span class="badge" style="background:#e67e22;color:white">🔄 Reiniciando</span>';
+```
+
+### Pasos para ejecutar
+
 ```bash
-cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && cp wsp_titan.db wsp_titan.db.bak 2>/dev/null; cp titan.db titan.db.bak 2>/dev/null; git fetch origin && git reset --hard origin/devin/1777671083-v12.5-fixes && cp wsp_titan.db.bak wsp_titan.db 2>/dev/null; cp titan.db.bak titan.db 2>/dev/null; npm install && bash start.sh
+# 1. Preparar rama
+git fetch origin
+git checkout origin/sync-servidor -b devin/v12.5-fixes
+
+# 2. Hacer los fixes (tareas 1-5)
+
+# 3. Verificar sintaxis
+node -c motor_wsp.js && node -c index_wsp.js && node -c db_wsp.js && node -c panel_server.js
+
+# 4. Commit y push
+git add motor_wsp.js index_wsp.js panel.html db_wsp.js HANDOFF.md
+git commit -m "v12.5: fix campanas error/auto-restart, botones iniciar/parar todas"
+git push origin devin/v12.5-fixes
+
+# 5. Crear PR: devin/v12.5-fixes → main
 ```
-**NOTA**: El comando ahora hace backup de las DBs antes del reset y las restaura despues, para no perder datos de cuentas/sesiones.
+
+### Comando de actualizacion (enviar al usuario al terminar)
+```bash
+cd /root/BotSpam1 && fuser -k 3000/tcp 3001/tcp 3002/tcp 2>/dev/null; sleep 2 && git fetch origin && git reset --hard origin/devin/v12.5-fixes && npm install && bash start.sh
+```
 
 ---
 

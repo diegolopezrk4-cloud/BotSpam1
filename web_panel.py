@@ -617,52 +617,56 @@ async def api_tg_campanas_del(request):
 # ─────────────────────────────────────────
 
 async def api_tg_iniciar(request):
-    body = await request.json()
-    user_id = int(body.get("u", 0))
-    campana_id = int(body.get("id", 0))
-    if not user_id or not campana_id:
-        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
-    campana = await db.get_campana_by_id(campana_id)
-    if not campana or int(campana["user_id"]) != user_id:
-        return web.json_response({"ok": False, "error": "Sin permiso"}, status=403)
+    try:
+        body = await request.json()
+        user_id = int(body.get("u", 0))
+        campana_id = int(body.get("id", 0))
+        if not user_id or not campana_id:
+            return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+        campana = await db.get_campana_by_id(campana_id)
+        if not campana or int(campana["user_id"]) != user_id:
+            return web.json_response({"ok": False, "error": "Sin permiso"}, status=403)
 
-    # Verify membership before allowing campaign launch
-    if not es_admin(user_id):
-        usuario = await db.get_usuario(user_id)
-        if not usuario or not usuario.get("activo"):
-            return web.json_response({"ok": False, "error": "Membresia inactiva o expirada. Renueva tu plan."}, status=403)
-        fecha_exp = usuario.get("fecha_expira")
-        if fecha_exp:
-            from datetime import datetime as dt
-            try:
-                exp = dt.fromisoformat(fecha_exp.replace("Z", "+00:00")) if "Z" in str(fecha_exp) else dt.strptime(str(fecha_exp), "%Y-%m-%d %H:%M:%S")
-                if exp < dt.utcnow():
-                    return web.json_response({"ok": False, "error": "Membresia expirada. Renueva tu plan."}, status=403)
-            except Exception:
-                pass
+        # Verify membership before allowing campaign launch
+        if not es_admin(user_id):
+            usuario = await db.get_usuario(user_id)
+            if not usuario or not usuario.get("activo"):
+                return web.json_response({"ok": False, "error": "Membresia inactiva o expirada. Renueva tu plan."}, status=403)
+            fecha_exp = usuario.get("fecha_expira")
+            if fecha_exp:
+                from datetime import datetime as dt
+                try:
+                    exp = dt.fromisoformat(fecha_exp.replace("Z", "+00:00")) if "Z" in str(fecha_exp) else dt.strptime(str(fecha_exp), "%Y-%m-%d %H:%M:%S")
+                    if exp < dt.utcnow():
+                        return web.json_response({"ok": False, "error": "Membresia expirada. Renueva tu plan."}, status=403)
+                except Exception:
+                    pass
 
-    grupos_campana = await db.get_grupos_campana(campana_id)
-    if not grupos_campana:
-        grupos_user = await db.get_grupos(user_id)
-        if not grupos_user:
-            return web.json_response({"ok": False, "error": "Sin grupos. Agrega grupos primero."})
-        for g in grupos_user:
-            await db.agregar_grupo_campana(campana_id, g["link"])
+        grupos_campana = await db.get_grupos_campana(campana_id)
+        if not grupos_campana:
+            grupos_user = await db.get_grupos(user_id)
+            if not grupos_user:
+                return web.json_response({"ok": False, "error": "Sin grupos. Agrega grupos primero."})
+            for g in grupos_user:
+                await db.agregar_grupo_campana(campana_id, g["link"])
 
-    sesiones_campana = await db.get_sesiones_campana(campana_id)
-    if not sesiones_campana:
-        sesiones_user = await db.get_sesiones(user_id)
-        if not sesiones_user:
-            return web.json_response({"ok": False, "error": "Sin cuentas. Agrega cuentas primero."})
-        for s in sesiones_user:
-            await db.agregar_sesion_campana(campana_id, s["nombre"])
+        sesiones_campana = await db.get_sesiones_campana(campana_id)
+        if not sesiones_campana:
+            sesiones_user = await db.get_sesiones(user_id)
+            if not sesiones_user:
+                return web.json_response({"ok": False, "error": "Sin cuentas. Agrega cuentas primero."})
+            for s in sesiones_user:
+                await db.agregar_sesion_campana(campana_id, s["nombre"])
 
-    loop = asyncio.get_event_loop()
-    resultado = iniciar_campana(campana_id, user_id, loop, aiogram_bot)
-    if resultado:
-        return web.json_response({"ok": True, "msg": f"Campana '{campana['nombre']}' INICIADA!"})
-    else:
-        return web.json_response({"ok": False, "error": "La campana ya esta en ejecucion."})
+        loop = asyncio.get_event_loop()
+        resultado = iniciar_campana(campana_id, user_id, loop, aiogram_bot)
+        if resultado:
+            return web.json_response({"ok": True, "msg": f"Campana '{campana['nombre']}' INICIADA!"})
+        else:
+            return web.json_response({"ok": False, "error": "La campana ya esta en ejecucion."})
+    except Exception as e:
+        print(f"[ERROR] api_tg_iniciar: {e}")
+        return web.json_response({"ok": False, "error": f"Error interno: {str(e)}"}, status=500)
 
 
 async def api_tg_detener(request):
@@ -1034,6 +1038,65 @@ async def api_tg_send_recovery(request):
 
 
 # ─────────────────────────────────────────
+#   ENVIAR CODIGO DE VERIFICACION VIA BOT
+# ─────────────────────────────────────────
+
+async def api_tg_enviar_codigo_verificacion(request):
+    body = await request.json()
+    telegram_id = body.get("telegram_id", "")
+    code = body.get("code", "")
+    if not telegram_id or not code:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    if not aiogram_bot:
+        return web.json_response({"ok": False, "error": "Bot no disponible"}, status=503)
+    try:
+        await aiogram_bot.send_message(
+            int(telegram_id),
+            f"🔐 <b>Codigo de Verificacion</b>\n\n"
+            f"Tu codigo es: <code>{code}</code>\n\n"
+            f"⏰ Expira en <b>5 minutos</b>\n"
+            f"📋 Ingresalo en el panel web para completar tu registro/verificacion.\n\n"
+            f"⚠️ No compartas este codigo con nadie.",
+            parse_mode="HTML"
+        )
+        return web.json_response({"ok": True})
+    except Exception as e:
+        logger.error(f"Error enviando codigo de verificacion a {telegram_id}: {e}")
+        return web.json_response({"ok": False, "error": f"No se pudo enviar el codigo. Asegurate de haber iniciado el bot (@BotSpamJM_bot) primero."})
+
+
+# ─────────────────────────────────────────
+#   NOTIFICAR REGISTRO NUEVO AL ADMIN
+# ─────────────────────────────────────────
+
+async def api_tg_notificar_registro(request):
+    body = await request.json()
+    telegram_id = body.get("telegram_id", "")
+    username = body.get("username", "")
+    if not telegram_id:
+        return web.json_response({"ok": False, "error": "Faltan parametros"}, status=400)
+    if not aiogram_bot:
+        return web.json_response({"ok": False, "error": "Bot no disponible"}, status=503)
+    try:
+        from datetime import datetime, timezone, timedelta
+        peru_tz = timezone(timedelta(hours=-5))
+        ahora = datetime.now(peru_tz).strftime("%d/%m/%Y %H:%M")
+        await aiogram_bot.send_message(
+            ADMIN_ID,
+            f"🆕 <b>Nuevo registro en el panel</b>\n\n"
+            f"🆔 ID: <code>{telegram_id}</code>\n"
+            f"👤 Usuario: {username or '(sin nombre)'}\n"
+            f"📅 Fecha: {ahora}\n"
+            f"📋 Plan: Demo 1 dia",
+            parse_mode="HTML"
+        )
+        return web.json_response({"ok": True})
+    except Exception as e:
+        logger.error(f"Error notificando registro al admin: {e}")
+        return web.json_response({"ok": False, "error": str(e)})
+
+
+# ─────────────────────────────────────────
 #   SERVIDOR WEB
 # ─────────────────────────────────────────
 
@@ -1118,6 +1181,12 @@ def create_app():
 
     # Recovery
     app.router.add_post("/api/tg/send_recovery", api_tg_send_recovery)
+
+    # Verificacion de registro
+    app.router.add_post("/api/tg/enviar_codigo_verificacion", api_tg_enviar_codigo_verificacion)
+
+    # Notificar registro
+    app.router.add_post("/api/tg/notificar_registro", api_tg_notificar_registro)
 
     # Detectar
     app.router.add_get("/api/tg/detectar", api_tg_detectar)

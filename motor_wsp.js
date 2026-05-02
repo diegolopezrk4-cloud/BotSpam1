@@ -14,8 +14,11 @@ const reporteInterval = {};  // { userId: intervalId }
 // Updated by message listeners — used to detect if someone else posted after our spam
 const grupoUltimaActividad = {};
 
-// Limite de envios diarios por cuenta (proteccion anti-ban)
-const LIMITE_ENVIOS_DIARIOS = 500;
+// Track campaign rest state for countdown: { campanaId: { inicio: timestamp_ms, duracion_seg: number } }
+const campanaReposo = {};
+
+// Limite de envios diarios por cuenta (sin limite)
+const LIMITE_ENVIOS_DIARIOS = 999999;
 
 // Whole-word matching to avoid partial matches (e.g. 'no' in 'noches')
 function matchWholeWord(text, word) {
@@ -34,6 +37,9 @@ function getSessionDir(userId, nombre) {
     const safe = `${userId.replace(/[^a-zA-Z0-9]/g, "_")}_${nombre}`;
     return path.join(config.SESSIONS_DIR, safe);
 }
+
+// Lock to prevent simultaneous reconnection attempts per account
+const reconnectLocks = {};
 
 async function connectClientAccount(userId, nombre, telefono) {
     const sessionDir = getSessionDir(userId, nombre);
@@ -371,6 +377,16 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
                 if (errMsg.includes("not-authorized") || errMsg.includes("forbidden") || errMsg.includes("item-not-found") || errMsg.includes("404")) {
                     return { sent: false, delivered: false, reason: "not_member" };
                 }
+                // Connection-level errors: return disconnected immediately (no retry)
+                if (errMsg.includes("connection closed") || errMsg.includes("timed out") ||
+                    errMsg.includes("not connected") || errMsg.includes("socket") ||
+                    errMsg.includes("disconnected") || errMsg.includes("stream:error") ||
+                    errMsg.includes("connection lost") || errMsg.includes("econnreset") ||
+                    errMsg.includes("econnrefused") || errMsg.includes("epipe") ||
+                    errMsg.includes("websocket") || errMsg.includes("close") ||
+                    errMsg.includes("gone") || errMsg.includes("conflict")) {
+                    return { sent: false, delivered: false, reason: "disconnected" };
+                }
                 if (metaRetry === 0) {
                     await delay(2000);
                     continue;
@@ -406,15 +422,16 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
 
         const deliveryResult = await new Promise((resolve) => {
             let done = false;
+            const cleanup = () => { try { sock.ev.off("messages.update", handler); } catch (e) {} };
             const handler = (updates) => {
                 for (const upd of updates) {
                     if (upd.key?.id === msgId) {
                         const status = upd.update?.status;
                         if (status >= 2) {
-                            if (!done) { done = true; resolve({ delivered: true }); }
+                            if (!done) { done = true; cleanup(); resolve({ delivered: true }); }
                         }
                         if (status === 0) {
-                            if (!done) { done = true; resolve({ delivered: false, reason: "rejected" }); }
+                            if (!done) { done = true; cleanup(); resolve({ delivered: false, reason: "rejected" }); }
                         }
                     }
                 }
@@ -512,7 +529,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             const horario = db.getCampanaHorario(campanaId);
 
             if (!sesionesNombres.length || !gruposLinks.length) {
-                await botSock.sendMessage(userId, { text: "\u26A0 Campana sin cuentas o grupos asignados." });
+                try { if (botSock) await botSock.sendMessage(userId, { text: "\u26A0 Campana sin cuentas o grupos asignados." }); } catch (e) {}
                 return;
             }
 
@@ -533,7 +550,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                 }
             }
             if (!socks.length) {
-                await botSock.sendMessage(userId, { text: "\u274C No se pudo conectar ninguna cuenta." });
+                try { if (botSock) await botSock.sendMessage(userId, { text: "\u274C No se pudo conectar ninguna cuenta." }); } catch (e) {}
                 return;
             }
 
@@ -544,6 +561,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             let consecutivePending = 0;
             const MAX_CONSECUTIVE_PENDING = 3;
             const PAUSA_RATE_LIMIT = 300;
+            let reconnectFailures = 0;
 
             try {
                 let tiempoMsg = "";
@@ -667,6 +685,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                             db.actualizarGrupoStats(userId, grupoLink, "enviado");
                             db.incrementarEnvioDiario(userId, currentSock.nombre);
                             consecutiveErrors = 0;
+                            reconnectFailures = 0;
                             if (result.delivered) {
                                 consecutivePending = 0;
                                 if (delayMultiplier > 1.0) {
@@ -743,13 +762,28 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                         // Too many consecutive errors: pause and try to reconnect
                         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                            console.log(`   [ErrorRecovery] ${consecutiveErrors} errores consecutivos, pausando 60s...`);
+                            reconnectFailures++;
+                            // Escalating pause: 60s first time, then 5min, then 10min
+                            const pausaSeg = reconnectFailures <= 1 ? 60 : reconnectFailures <= 3 ? 300 : 600;
+                            console.log(`   [ErrorRecovery] ${consecutiveErrors} errores consecutivos (intento #${reconnectFailures}), pausando ${pausaSeg}s...`);
                             try {
                                 await botSock.sendMessage(userId, {
-                                    text: `\u26A0 *${campana.nombre}*: ${consecutiveErrors} errores seguidos. Pausando 60s para recuperarse...`,
+                                    text: `\u26A0 *${campana.nombre}*: ${consecutiveErrors} errores seguidos (intento #${reconnectFailures}).\n\u23F3 Pausando ${Math.round(pausaSeg/60)} min para recuperarse...`,
                                 });
                             } catch (e) {}
-                            await delay(60000);
+                            // After too many reconnect failures, stop the campaign
+                            if (reconnectFailures >= 5) {
+                                console.log(`   [ErrorRecovery] Demasiados intentos fallidos, deteniendo campana`);
+                                try {
+                                    await botSock.sendMessage(userId, {
+                                        text: `\u274C *${campana.nombre}*: Detenida automaticamente despues de ${reconnectFailures} intentos fallidos.\n\u{1F4A1} Revisa tu conexion y vuelve a iniciar manualmente.`,
+                                    });
+                                } catch (e) {}
+                                cancelled = true;
+                                break;
+                            }
+                            await delay(pausaSeg * 1000);
+                            if (cancelled) break;
                             const newSock = await reconectarCuenta(userId, currentSock.nombre);
                             if (newSock) {
                                 currentSock.sock = newSock;
@@ -810,25 +844,50 @@ function iniciarCampana(campanaId, userId, botSock) {
                         ? `\u23F0 Esperando 10 min...`
                         : `\u23F0 Esperando ${conf.espera_ciclo || 600}s...`;
 
+                    // Marcar en_reposo con timestamp para countdown en el panel
+                    const esperaSeg = numCuentas === 1 ? 600 : (conf.espera_ciclo || 600);
+                    campanaReposo[campanaId] = { inicio: Date.now(), duracion_seg: esperaSeg };
+                    db.setCampanaEstadoDetalle(campanaId, 'en_reposo');
+
                     try {
                         await botSock.sendMessage(userId, {
-                            text: `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c.enviados} env | \u274C ${c.errores} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`,
+                            text: `\u{1F4CA} *${campana.nombre}* ciclo #${ciclo}\n\u2705 ${c ? c.enviados : '?'} env | \u274C ${c ? c.errores : '?'} err\n\u{1F310} ${gruposLinks.length} grupo(s)\n${esperaMsg}${reporteExtra}${enviosDiaMsg}`,
                         });
                     } catch (e) {}
 
-                    if (numCuentas === 1) {
-                        await delay(600 * 1000);
-                    } else {
-                        await delay((conf.espera_ciclo || 600) * 1000);
-                    }
+                    await delay(esperaSeg * 1000);
                     delayMultiplier = Math.max(1.0, delayMultiplier - 0.5);
+                    // Restaurar estado activa despues de la pausa (si no fue cancelada)
+                    delete campanaReposo[campanaId];
+                    if (!cancelled) db.setCampanaEstadoDetalle(campanaId, 'activa');
                 }
             }
         } catch (e) {
             console.error(`Error campana ${campanaId}: ${e.message}`);
+            // Auto-restart: la campana NO debe morir por errores inesperados
+            if (!cancelled) {
+                db.setCampanaEstadoDetalle(campanaId, 'reiniciando');
+                try {
+                    if (botSock && botSock.sendMessage) {
+                        await botSock.sendMessage(userId.includes('@') ? userId : userId + '@s.whatsapp.net', {
+                            text: `\u26A0\uFE0F Campana error inesperado. Reiniciando en 60s...\n\u{1F4CB} ${e.message}`
+                        });
+                    }
+                } catch (notifErr) {}
+                await delay(60000);
+                if (!cancelled) {
+                    delete tareasActivas[campanaId];
+                    delete campanaReposo[campanaId];
+                    iniciarCampana(campanaId, userId, botSock);
+                    return;
+                }
+            }
         } finally {
-            db.setCampanaActiva(campanaId, false);
-            delete tareasActivas[campanaId];
+            if (tareasActivas[campanaId]) {
+                db.setCampanaActiva(campanaId, false, 'detenida');
+                delete tareasActivas[campanaId];
+                delete campanaReposo[campanaId];
+            }
         }
     })();
 
@@ -841,12 +900,22 @@ function detenerCampana(campanaId) {
         task.cancel();
         task.running = false;
         delete tareasActivas[campanaId];
-        db.setCampanaActiva(campanaId, false);
+        delete campanaReposo[campanaId];
+        db.setCampanaActiva(campanaId, false, 'detenida');
         return true;
     }
     // Aunque no haya tarea activa, asegurar que la DB este limpia
-    db.setCampanaActiva(campanaId, false);
+    delete campanaReposo[campanaId];
+    db.setCampanaActiva(campanaId, false, 'detenida');
     return false;
+}
+
+function getCampanaReposo(campanaId) {
+    return campanaReposo[campanaId] || null;
+}
+
+function isCampanaRunning(campanaId) {
+    return !!tareasActivas[campanaId];
 }
 
 // ============================================================
@@ -1173,7 +1242,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
 }
 
 let _taskIdCounter = 0;
-async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes, grupoNombre, grupoJid, startIndex) {
+async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes, grupoNombre, grupoJid, startIndex, cuenta) {
     if (envioPersonalActivo[userId]) return false;
 
     let cancelled = false;
@@ -1189,22 +1258,57 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
     delayMinutes = parseInt(delayMinutes) || 5;
     startIndex = parseInt(startIndex) || 0;
 
+    const userJid = userId.includes('@') ? userId : userId + '@s.whatsapp.net';
+
+    // Helper to get a fresh socket when connection drops
+    async function getFreshSock() {
+        if (cuenta) {
+            try {
+                const fresh = await getOrConnectClient(userId, cuenta);
+                if (fresh && fresh.user) return fresh;
+            } catch (e) {
+                console.log(`[EnvioMiembros] Reconnect via cuenta '${cuenta}' failed: ${e.message}`);
+            }
+        }
+        // Try any connected session for this user
+        try {
+            const sesiones = db.getSesiones(userId);
+            for (const s of sesiones) {
+                try {
+                    const fresh = await getOrConnectClient(userId, s.nombre);
+                    if (fresh && fresh.user) { cuenta = s.nombre; return fresh; }
+                } catch (e) {}
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    function isConnectionError(err) {
+        const msg = (err.message || '').toLowerCase();
+        return msg.includes('disconnect') || msg.includes('timeout') || msg.includes('connection') ||
+               msg.includes('socket') || msg.includes('closed') || msg.includes('not open') ||
+               msg.includes('unavailable') || err.name === 'DisconnectError';
+    }
+
     (async () => {
         try {
             const total = jids.length;
             let enviados = 0;
             let errores = 0;
-            // Random cooldown between 3-8 seconds (more human-like)
-            const DELAY_MIN = 3000;
-            const DELAY_MAX = 8000;
+            let consecutiveErrors = 0;
+            // Anti-ban v2: moderate delays for member DMs (they're already group members)
+            const DELAY_MIN = 8000;
+            const DELAY_MAX = 20000;
+            // Anti-ban: if no batch config, auto-batch every 10 messages with 5 min pause
+            if (!batchSize) { batchSize = 10; delayMinutes = delayMinutes >= 5 ? delayMinutes : 5; }
             const DELAY_ENTRE_LOTES = batchSize ? delayMinutes * 60 * 1000 : 0;
             const displayName = grupoNombre || grupoJid || "seleccionados";
 
             const batchInfo = batchSize ? `\n📦 Lotes: ${batchSize} por lote, pausa ${delayMinutes} min entre lotes` : "";
             const resumeInfo = startIndex > 0 ? `\n🔄 Reanudando desde #${startIndex + 1}` : "";
             try {
-                await botSock.sendMessage(userId, {
-                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u23F1 Delay: 3-8 seg aleatorio entre cada envio${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 5.5 / 60)} min`,
+                await botSock.sendMessage(userJid, {
+                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u{1F6E1} Anti-ban: delay 8-20s + typing${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 15 / 60)} min`,
                 });
             } catch (e) {}
 
@@ -1230,38 +1334,62 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                         db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
                     }
                     try {
-                        await botSock.sendMessage(userId, {
+                        await botSock.sendMessage(userJid, {
                             text: `⏸ Lote de ${batchSize} completado (${i}/${total}). Pausando ${delayMinutes} minutos...`,
                         });
                     } catch (e) {}
-                    await delay(DELAY_ENTRE_LOTES);
+                    // Anti-ban: add random jitter (±30%) to batch pause
+                    const jitter = DELAY_ENTRE_LOTES * (0.7 + Math.random() * 0.6);
+                    await delay(Math.round(jitter));
                     if (cancelled) {
                         if (grupoJid) {
                             db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
                         }
                         break;
                     }
+                    // Refresh socket after batch pause (connection may have dropped)
+                    const freshAfterPause = await getFreshSock();
+                    if (freshAfterPause) botSock = freshAfterPause;
                     try {
-                        await botSock.sendMessage(userId, {
+                        await botSock.sendMessage(userJid, {
                             text: `▶️ Reanudando envio... (${i}/${total})`,
                         });
                     } catch (e) {}
                 }
 
+                // Proactively check socket health before each send
+                if (!botSock || !botSock.user || (botSock.ws && botSock.ws.readyState !== botSock.ws.OPEN)) {
+                    console.log(`[EnvioMiembros] Socket stale, reconnecting...`);
+                    const freshSock = await getFreshSock();
+                    if (freshSock) {
+                        botSock = freshSock;
+                        consecutiveErrors = 0;
+                    } else {
+                        console.log(`[EnvioMiembros] Cannot reconnect, stopping send`);
+                        if (grupoJid) db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
+                        break;
+                    }
+                }
+
                 try {
-                    // Verify number has WhatsApp before sending
+                    // Verify number has WhatsApp before sending (skip for @lid JIDs — they're in the group)
                     const numToCheck = jid.replace(/@s\.whatsapp\.net$/, "");
-                    try {
-                        const [onWa] = await botSock.onWhatsApp(jid);
-                        if (!onWa || !onWa.exists) {
-                            console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid} NO TIENE WSP, saltando`);
-                            errores++;
-                            db.registrarEnvio(userId, 0, jid, "sin_whatsapp", grupoNombre, "personal");
-                            continue;
+                    if (jid.endsWith("@s.whatsapp.net")) {
+                        try {
+                            const onWaResult = await Promise.race([
+                                botSock.onWhatsApp(jid),
+                                new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000))
+                            ]);
+                            const [onWa] = onWaResult;
+                            if (!onWa || !onWa.exists) {
+                                console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid} NO TIENE WSP, saltando`);
+                                errores++;
+                                db.registrarEnvio(userId, 0, jid, "sin_whatsapp", grupoNombre, "personal");
+                                continue;
+                            }
+                        } catch (verifyErr) {
+                            console.log(`[EnvioMiembros] Verificacion WSP fallo para ${jid}: ${verifyErr.message}, enviando igual...`);
                         }
-                    } catch (verifyErr) {
-                        // If verification fails, continue sending anyway
-                        console.log(`[EnvioMiembros] Verificacion WSP fallo para ${jid}: ${verifyErr.message}, enviando igual...`);
                     }
 
                     // Check if number is in individual blacklist
@@ -1272,6 +1400,16 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
 
                     const textoFinal = addInvisibleChars(variarMensaje(mensaje, userId));
                     console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid}`);
+
+                    // Anti-ban: simulate typing before sending (looks human)
+                    try {
+                        await botSock.presenceSubscribe(jid);
+                        await delay(500 + Math.random() * 1000);
+                        await botSock.sendPresenceUpdate("composing", jid);
+                        await delay(2000 + Math.random() * 3000);
+                        await botSock.sendPresenceUpdate("paused", jid);
+                    } catch (e) {}
+
                     let result;
                     if (imagenPath && fs.existsSync(imagenPath)) {
                         result = await botSock.sendMessage(jid, {
@@ -1303,7 +1441,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                                 setTimeout(() => {
                                     try { botSock.ev.off("messages.update", handler); } catch (e) {}
                                     if (!done) { done = true; resolve("pendiente"); }
-                                }, 8000);
+                                }, 3000);
                             });
                             estadoEntrega = deliveryResult;
                         } catch (e) {}
@@ -1311,11 +1449,32 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
 
                     console.log(`[EnvioMiembros]   OK → key.id=${msgId || "?"} entrega=${estadoEntrega || "?"}`);
                     enviados++;
+                    consecutiveErrors = 0;
                     db.registrarEnvio(userId, 0, jid, "enviado_personal", grupoNombre, "personal", estadoEntrega, (mensaje || "").substring(0, 50));
                     if (_promoListeners[userId]) _promoListeners[userId].promoSentJids.add(jid);
                 } catch (e) {
                     console.log(`[EnvioMiembros]   ERROR → ${e.message}`);
                     errores++;
+                    consecutiveErrors++;
+
+                    // On connection error, try to reconnect before continuing
+                    if (isConnectionError(e)) {
+                        console.log(`[EnvioMiembros] Connection error detected, attempting reconnect...`);
+                        const freshSock = await getFreshSock();
+                        if (freshSock) {
+                            botSock = freshSock;
+                            console.log(`[EnvioMiembros] Reconnected successfully`);
+                        }
+                    }
+
+                    // Stop after 10 consecutive errors (connection likely dead)
+                    if (consecutiveErrors >= 10) {
+                        console.log(`[EnvioMiembros] 10 consecutive errors, stopping`);
+                        if (grupoJid) db.guardarProgresoEnvio(userId, grupoJid, i + 1, total, mensaje, jids, grupoNombre);
+                        try { await botSock.sendMessage(userJid, { text: `⚠️ Envio pausado tras 10 errores consecutivos. Puedes reanudar desde el panel.` }); } catch (ne) {}
+                        break;
+                    }
+
                     db.registrarEnvio(userId, 0, jid, "error_personal", grupoNombre, "personal");
                     // Add to retry queue (Mejora 4)
                     try { db.agregarRetryQueue(userId, jid, mensaje, imagenPath); } catch (re) {}
@@ -1328,15 +1487,22 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
 
                 if (enviados % 10 === 0 && enviados > 0 && !(batchSize && enviados % batchSize === 0)) {
                     try {
-                        await botSock.sendMessage(userId, {
+                        await botSock.sendMessage(userJid, {
                             text: `\u{1F4E8} Progreso: ${i + 1}/${total} (${enviados} ok, ${errores} err)...`,
                         });
                     } catch (e) {}
                 }
 
                 if (!cancelled) {
-                    // Random cooldown between 3-8 seconds (human-like)
-                    const cooldown = DELAY_MIN + Math.floor(Math.random() * (DELAY_MAX - DELAY_MIN));
+                    // Anti-ban: progressive delay — add 1s per 10 messages sent
+                    const progressiveExtra = Math.floor(enviados / 10) * 1000;
+                    let cooldown = DELAY_MIN + Math.floor(Math.random() * (DELAY_MAX - DELAY_MIN)) + progressiveExtra;
+                    // Anti-ban: random long pause (10% chance of 30-60s extra pause)
+                    if (Math.random() < 0.1) {
+                        const longPause = 30000 + Math.floor(Math.random() * 30000);
+                        console.log(`[EnvioMiembros] Anti-ban: pausa larga aleatoria ${Math.round(longPause/1000)}s`);
+                        cooldown += longPause;
+                    }
                     await delay(cooldown);
                 }
             }
@@ -1347,7 +1513,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             }
 
             try {
-                await botSock.sendMessage(userId, {
+                await botSock.sendMessage(userJid, {
                     text: `\u2705 *ENVIO A MIEMBROS ${cancelled ? "PAUSADO" : "COMPLETADO"}*\n📂 Grupo: ${displayName}\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Pausado — puedes reanudar desde el panel" : ""}`,
                 });
             } catch (e) {}
@@ -1441,7 +1607,7 @@ function iniciarSchedulerMiembros(botSock) {
                         }
                         if (jids.length) {
                             const grupoNombre = meta.subject || prog.grupo_nombre || prog.grupo_jid;
-                            enviarASeleccionados(user.wsp_id, jids, prog.mensaje, prog.imagen_path, sock, prog.batch_size || 0, prog.delay_minutes || 5, grupoNombre, prog.grupo_jid, 0);
+                            enviarASeleccionados(user.wsp_id, jids, prog.mensaje, prog.imagen_path, sock, prog.batch_size || 0, prog.delay_minutes || 5, grupoNombre, prog.grupo_jid, 0, prog.cuenta || null);
                         }
                     } catch (e) {
                         console.error(`[Scheduler] Error envio programado #${prog.id}: ${e.message}`);
@@ -1652,6 +1818,8 @@ module.exports = {
     clearLink,
     iniciarCampana,
     detenerCampana,
+    getCampanaReposo,
+    isCampanaRunning,
     iniciarReporteDiario,
     detenerReporteDiario,
     iniciarResponder,
