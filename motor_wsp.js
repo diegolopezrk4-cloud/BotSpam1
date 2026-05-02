@@ -914,6 +914,10 @@ function getCampanaReposo(campanaId) {
     return campanaReposo[campanaId] || null;
 }
 
+function isCampanaRunning(campanaId) {
+    return !!tareasActivas[campanaId];
+}
+
 // ============================================================
 // MEJORA 10: Reporte diario automatico
 // Envia resumen cada 24h al usuario
@@ -1739,6 +1743,7 @@ module.exports = {
     iniciarCampana,
     detenerCampana,
     getCampanaReposo,
+    isCampanaRunning,
     iniciarReporteDiario,
     detenerReporteDiario,
     iniciarResponder,

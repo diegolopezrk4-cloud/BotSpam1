@@ -358,6 +358,12 @@ poll();
                 const userId = url.searchParams.get("u");
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 const campanas = db.getCampanas(userId).map(c => {
+                    // Fix stuck campaigns: DB says active but no task running
+                    if ((c.activa || c.estado_detalle === 'en_reposo') && !motor.isCampanaRunning(c.id)) {
+                        db.setCampanaActiva(c.id, false, 'detenida');
+                        c.activa = 0;
+                        c.estado_detalle = 'detenida';
+                    }
                     const conf = db.getCampanaConfig(c.id);
                     const grupos = db.getGruposCampana(c.id);
                     const sesiones = db.getSesionesCampana(c.id);
@@ -472,8 +478,15 @@ poll();
             if (url.pathname === "/api/campana_reposo" && req.method === "GET") {
                 const campId = url.searchParams.get("id");
                 if (!campId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta id" })); }
-                const reposo = motor.getCampanaReposo(parseInt(campId));
+                const campIdInt = parseInt(campId);
+                const reposo = motor.getCampanaReposo(campIdInt);
                 if (!reposo) {
+                    // If DB shows active/en_reposo but no task is running, fix the stuck state
+                    const camp = db.getCampanaById(campIdInt);
+                    if (camp && (camp.activa || camp.estado_detalle === 'en_reposo') && !motor.isCampanaRunning(campIdInt)) {
+                        db.setCampanaActiva(campIdInt, false, 'detenida');
+                        console.log(`[campana_reposo] Campana ${campIdInt} estaba stuck en_reposo sin tarea activa, marcada como detenida`);
+                    }
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, en_reposo: false }));
                 }
