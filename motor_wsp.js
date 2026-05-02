@@ -377,6 +377,16 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
                 if (errMsg.includes("not-authorized") || errMsg.includes("forbidden") || errMsg.includes("item-not-found") || errMsg.includes("404")) {
                     return { sent: false, delivered: false, reason: "not_member" };
                 }
+                // Connection-level errors: return disconnected immediately (no retry)
+                if (errMsg.includes("connection closed") || errMsg.includes("timed out") ||
+                    errMsg.includes("not connected") || errMsg.includes("socket") ||
+                    errMsg.includes("disconnected") || errMsg.includes("stream:error") ||
+                    errMsg.includes("connection lost") || errMsg.includes("econnreset") ||
+                    errMsg.includes("econnrefused") || errMsg.includes("epipe") ||
+                    errMsg.includes("websocket") || errMsg.includes("close") ||
+                    errMsg.includes("gone") || errMsg.includes("conflict")) {
+                    return { sent: false, delivered: false, reason: "disconnected" };
+                }
                 if (metaRetry === 0) {
                     await delay(2000);
                     continue;
@@ -551,6 +561,7 @@ function iniciarCampana(campanaId, userId, botSock) {
             let consecutivePending = 0;
             const MAX_CONSECUTIVE_PENDING = 3;
             const PAUSA_RATE_LIMIT = 300;
+            let reconnectFailures = 0;
 
             try {
                 let tiempoMsg = "";
@@ -674,6 +685,7 @@ function iniciarCampana(campanaId, userId, botSock) {
                             db.actualizarGrupoStats(userId, grupoLink, "enviado");
                             db.incrementarEnvioDiario(userId, currentSock.nombre);
                             consecutiveErrors = 0;
+                            reconnectFailures = 0;
                             if (result.delivered) {
                                 consecutivePending = 0;
                                 if (delayMultiplier > 1.0) {
@@ -750,13 +762,28 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                         // Too many consecutive errors: pause and try to reconnect
                         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                            console.log(`   [ErrorRecovery] ${consecutiveErrors} errores consecutivos, pausando 60s...`);
+                            reconnectFailures++;
+                            // Escalating pause: 60s first time, then 5min, then 10min
+                            const pausaSeg = reconnectFailures <= 1 ? 60 : reconnectFailures <= 3 ? 300 : 600;
+                            console.log(`   [ErrorRecovery] ${consecutiveErrors} errores consecutivos (intento #${reconnectFailures}), pausando ${pausaSeg}s...`);
                             try {
                                 await botSock.sendMessage(userId, {
-                                    text: `\u26A0 *${campana.nombre}*: ${consecutiveErrors} errores seguidos. Pausando 60s para recuperarse...`,
+                                    text: `\u26A0 *${campana.nombre}*: ${consecutiveErrors} errores seguidos (intento #${reconnectFailures}).\n\u23F3 Pausando ${Math.round(pausaSeg/60)} min para recuperarse...`,
                                 });
                             } catch (e) {}
-                            await delay(60000);
+                            // After too many reconnect failures, stop the campaign
+                            if (reconnectFailures >= 5) {
+                                console.log(`   [ErrorRecovery] Demasiados intentos fallidos, deteniendo campana`);
+                                try {
+                                    await botSock.sendMessage(userId, {
+                                        text: `\u274C *${campana.nombre}*: Detenida automaticamente despues de ${reconnectFailures} intentos fallidos.\n\u{1F4A1} Revisa tu conexion y vuelve a iniciar manualmente.`,
+                                    });
+                                } catch (e) {}
+                                cancelled = true;
+                                break;
+                            }
+                            await delay(pausaSeg * 1000);
+                            if (cancelled) break;
                             const newSock = await reconectarCuenta(userId, currentSock.nombre);
                             if (newSock) {
                                 currentSock.sock = newSock;
