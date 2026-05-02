@@ -1242,7 +1242,7 @@ async function enviarAPersonales(userId, mensaje, imagenPath, botSock, cuenta, b
 }
 
 let _taskIdCounter = 0;
-async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes, grupoNombre, grupoJid, startIndex) {
+async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, batchSize, delayMinutes, grupoNombre, grupoJid, startIndex, cuenta) {
     if (envioPersonalActivo[userId]) return false;
 
     let cancelled = false;
@@ -1258,11 +1258,44 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
     delayMinutes = parseInt(delayMinutes) || 5;
     startIndex = parseInt(startIndex) || 0;
 
+    const userJid = userId.includes('@') ? userId : userId + '@s.whatsapp.net';
+
+    // Helper to get a fresh socket when connection drops
+    async function getFreshSock() {
+        if (cuenta) {
+            try {
+                const fresh = await getOrConnectClient(userId, cuenta);
+                if (fresh && fresh.user) return fresh;
+            } catch (e) {
+                console.log(`[EnvioMiembros] Reconnect via cuenta '${cuenta}' failed: ${e.message}`);
+            }
+        }
+        // Try any connected session for this user
+        try {
+            const sesiones = db.getSesiones(userId);
+            for (const s of sesiones) {
+                try {
+                    const fresh = await getOrConnectClient(userId, s.nombre);
+                    if (fresh && fresh.user) { cuenta = s.nombre; return fresh; }
+                } catch (e) {}
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    function isConnectionError(err) {
+        const msg = (err.message || '').toLowerCase();
+        return msg.includes('disconnect') || msg.includes('timeout') || msg.includes('connection') ||
+               msg.includes('socket') || msg.includes('closed') || msg.includes('not open') ||
+               msg.includes('unavailable') || err.name === 'DisconnectError';
+    }
+
     (async () => {
         try {
             const total = jids.length;
             let enviados = 0;
             let errores = 0;
+            let consecutiveErrors = 0;
             // Anti-ban v2: wider delay range + typing simulation + random long pauses
             const DELAY_MIN = 15000;
             const DELAY_MAX = 45000;
@@ -1274,7 +1307,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             const batchInfo = batchSize ? `\n📦 Lotes: ${batchSize} por lote, pausa ${delayMinutes} min entre lotes` : "";
             const resumeInfo = startIndex > 0 ? `\n🔄 Reanudando desde #${startIndex + 1}` : "";
             try {
-                await botSock.sendMessage(userId, {
+                await botSock.sendMessage(userJid, {
                     text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u{1F6E1} Anti-ban v2: delay 15-45s + typing + pausas aleatorias${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 30 / 60)} min`,
                 });
             } catch (e) {}
@@ -1301,7 +1334,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                         db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
                     }
                     try {
-                        await botSock.sendMessage(userId, {
+                        await botSock.sendMessage(userJid, {
                             text: `⏸ Lote de ${batchSize} completado (${i}/${total}). Pausando ${delayMinutes} minutos...`,
                         });
                     } catch (e) {}
@@ -1314,27 +1347,45 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                         }
                         break;
                     }
+                    // Refresh socket after batch pause (connection may have dropped)
+                    const freshAfterPause = await getFreshSock();
+                    if (freshAfterPause) botSock = freshAfterPause;
                     try {
-                        await botSock.sendMessage(userId, {
+                        await botSock.sendMessage(userJid, {
                             text: `▶️ Reanudando envio... (${i}/${total})`,
                         });
                     } catch (e) {}
                 }
 
+                // Proactively check socket health before each send
+                if (!botSock || !botSock.user || (botSock.ws && botSock.ws.readyState !== botSock.ws.OPEN)) {
+                    console.log(`[EnvioMiembros] Socket stale, reconnecting...`);
+                    const freshSock = await getFreshSock();
+                    if (freshSock) {
+                        botSock = freshSock;
+                        consecutiveErrors = 0;
+                    } else {
+                        console.log(`[EnvioMiembros] Cannot reconnect, stopping send`);
+                        if (grupoJid) db.guardarProgresoEnvio(userId, grupoJid, i, total, mensaje, jids, grupoNombre);
+                        break;
+                    }
+                }
+
                 try {
-                    // Verify number has WhatsApp before sending
+                    // Verify number has WhatsApp before sending (skip for @lid JIDs — they're in the group)
                     const numToCheck = jid.replace(/@s\.whatsapp\.net$/, "");
-                    try {
-                        const [onWa] = await botSock.onWhatsApp(jid);
-                        if (!onWa || !onWa.exists) {
-                            console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid} NO TIENE WSP, saltando`);
-                            errores++;
-                            db.registrarEnvio(userId, 0, jid, "sin_whatsapp", grupoNombre, "personal");
-                            continue;
+                    if (jid.endsWith("@s.whatsapp.net")) {
+                        try {
+                            const [onWa] = await botSock.onWhatsApp(jid);
+                            if (!onWa || !onWa.exists) {
+                                console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid} NO TIENE WSP, saltando`);
+                                errores++;
+                                db.registrarEnvio(userId, 0, jid, "sin_whatsapp", grupoNombre, "personal");
+                                continue;
+                            }
+                        } catch (verifyErr) {
+                            console.log(`[EnvioMiembros] Verificacion WSP fallo para ${jid}: ${verifyErr.message}, enviando igual...`);
                         }
-                    } catch (verifyErr) {
-                        // If verification fails, continue sending anyway
-                        console.log(`[EnvioMiembros] Verificacion WSP fallo para ${jid}: ${verifyErr.message}, enviando igual...`);
                     }
 
                     // Check if number is in individual blacklist
@@ -1394,11 +1445,32 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
 
                     console.log(`[EnvioMiembros]   OK → key.id=${msgId || "?"} entrega=${estadoEntrega || "?"}`);
                     enviados++;
+                    consecutiveErrors = 0;
                     db.registrarEnvio(userId, 0, jid, "enviado_personal", grupoNombre, "personal", estadoEntrega, (mensaje || "").substring(0, 50));
                     if (_promoListeners[userId]) _promoListeners[userId].promoSentJids.add(jid);
                 } catch (e) {
                     console.log(`[EnvioMiembros]   ERROR → ${e.message}`);
                     errores++;
+                    consecutiveErrors++;
+
+                    // On connection error, try to reconnect before continuing
+                    if (isConnectionError(e)) {
+                        console.log(`[EnvioMiembros] Connection error detected, attempting reconnect...`);
+                        const freshSock = await getFreshSock();
+                        if (freshSock) {
+                            botSock = freshSock;
+                            console.log(`[EnvioMiembros] Reconnected successfully`);
+                        }
+                    }
+
+                    // Stop after 10 consecutive errors (connection likely dead)
+                    if (consecutiveErrors >= 10) {
+                        console.log(`[EnvioMiembros] 10 consecutive errors, stopping`);
+                        if (grupoJid) db.guardarProgresoEnvio(userId, grupoJid, i + 1, total, mensaje, jids, grupoNombre);
+                        try { await botSock.sendMessage(userJid, { text: `⚠️ Envio pausado tras 10 errores consecutivos. Puedes reanudar desde el panel.` }); } catch (ne) {}
+                        break;
+                    }
+
                     db.registrarEnvio(userId, 0, jid, "error_personal", grupoNombre, "personal");
                     // Add to retry queue (Mejora 4)
                     try { db.agregarRetryQueue(userId, jid, mensaje, imagenPath); } catch (re) {}
@@ -1411,7 +1483,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
 
                 if (enviados % 10 === 0 && enviados > 0 && !(batchSize && enviados % batchSize === 0)) {
                     try {
-                        await botSock.sendMessage(userId, {
+                        await botSock.sendMessage(userJid, {
                             text: `\u{1F4E8} Progreso: ${i + 1}/${total} (${enviados} ok, ${errores} err)...`,
                         });
                     } catch (e) {}
@@ -1437,7 +1509,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             }
 
             try {
-                await botSock.sendMessage(userId, {
+                await botSock.sendMessage(userJid, {
                     text: `\u2705 *ENVIO A MIEMBROS ${cancelled ? "PAUSADO" : "COMPLETADO"}*\n📂 Grupo: ${displayName}\n\n\u{1F4E8} Total: ${total}\n\u2705 Enviados: ${enviados}\n\u274C Errores: ${errores}${cancelled ? "\n\u{1F6D1} Pausado — puedes reanudar desde el panel" : ""}`,
                 });
             } catch (e) {}
@@ -1531,7 +1603,7 @@ function iniciarSchedulerMiembros(botSock) {
                         }
                         if (jids.length) {
                             const grupoNombre = meta.subject || prog.grupo_nombre || prog.grupo_jid;
-                            enviarASeleccionados(user.wsp_id, jids, prog.mensaje, prog.imagen_path, sock, prog.batch_size || 0, prog.delay_minutes || 5, grupoNombre, prog.grupo_jid, 0);
+                            enviarASeleccionados(user.wsp_id, jids, prog.mensaje, prog.imagen_path, sock, prog.batch_size || 0, prog.delay_minutes || 5, grupoNombre, prog.grupo_jid, 0, prog.cuenta || null);
                         }
                     } catch (e) {
                         console.error(`[Scheduler] Error envio programado #${prog.id}: ${e.message}`);

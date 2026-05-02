@@ -1217,10 +1217,17 @@ poll();
                     let sock;
                     if (cuenta) {
                         sock = await motor.getOrConnectClient(userId, cuenta);
-                    } else if (botSock) {
-                        sock = botSock;
                     } else {
-                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                        // Try user's own accounts first, then global botSock
+                        const sesiones = db.getSesiones(userId);
+                        for (const s of sesiones) {
+                            try {
+                                sock = await motor.getOrConnectClient(userId, s.nombre);
+                                if (sock && sock.user) break;
+                            } catch (e) {}
+                        }
+                        if (!sock && botSock) sock = botSock;
+                        if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP. Selecciona una cuenta vinculada." })); }
                     }
                     const meta = await sock.groupMetadata(grupoJid);
                     const miembros = (meta.participants || []).map(p => {
@@ -1336,19 +1343,24 @@ poll();
                 if (!body.u || !body.grupo || !body.mensaje) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u, grupo o mensaje" })); }
                 try {
                     let sock;
+                    let cuentaUsada = body.cuenta || null;
                     if (body.cuenta) {
                         sock = await motor.getOrConnectClient(body.u, body.cuenta);
-                    } else if (botSock) {
-                        sock = botSock;
                     } else {
-                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                        // Try user's own accounts first, then global botSock
+                        const sesiones = db.getSesiones(body.u);
+                        for (const s of sesiones) {
+                            try {
+                                sock = await motor.getOrConnectClient(body.u, s.nombre);
+                                if (sock && sock.user) { cuentaUsada = s.nombre; break; }
+                            } catch (e) {}
+                        }
+                        if (!sock && botSock) sock = botSock;
+                        if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP. Selecciona una cuenta vinculada." })); }
                     }
                     const meta = await sock.groupMetadata(body.grupo);
                     const rawParticipants = meta.participants || [];
 
-                    // Use p.jid (phone-based JID resolved by Baileys from phone_number attr)
-                    // p.id may be @lid which can't receive DMs in Baileys 6.x
-                    // p.jid is always @s.whatsapp.net (resolved from attrs.phone_number)
                     const myJid = sock.user?.id || "";
                     const myNum = jidToNumber(myJid);
                     // Load blacklist (groups + individual numbers) to skip
@@ -1358,14 +1370,16 @@ poll();
                     blNumeros.forEach(b => blNums.add(b.numero));
                     const seen = new Set();
                     const jids = [];
+                    let lidSkipped = 0;
                     for (const p of rawParticipants) {
+                        // Prefer phone-based JID; fall back to p.id
                         let jid = (p.jid && p.jid.endsWith("@s.whatsapp.net")) ? p.jid : p.id;
                         if (!jid) continue;
                         if (jid.includes(":") && (jid.endsWith("@s.whatsapp.net") || jid.endsWith("@lid"))) {
                             const suffix = jid.endsWith("@s.whatsapp.net") ? "@s.whatsapp.net" : "@lid";
                             jid = jid.split(":")[0] + suffix;
                         }
-                        if (jid.endsWith("@lid")) continue;
+                        if (jid.endsWith("@lid")) { lidSkipped++; continue; }
                         const num = jidToNumber(jid);
                         if (!num || !/^\d{7,15}$/.test(num)) continue;
                         if (num === myNum) continue;
@@ -1379,8 +1393,9 @@ poll();
                         jids.push(jid);
                     }
                     if (!jids.length) {
+                        const lidMsg = lidSkipped > 0 ? ` (${lidSkipped} miembros con formato LID no soportado)` : "";
                         res.writeHead(200);
-                        return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros validos para enviar (todos filtrados)" }));
+                        return res.end(JSON.stringify({ ok: false, error: "No se encontraron miembros validos para enviar (todos filtrados)" + lidMsg }));
                     }
                     const grupoNombre = meta.subject || body.grupo;
                     const envioConfig = db.getUserEnvioConfig(body.u);
@@ -1397,7 +1412,7 @@ poll();
                         const buf = Buffer.from(body.imagen_b64, "base64");
                         fs.writeFileSync(imagenPath, buf);
                     }
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo, startIndex);
+                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo, startIndex, cuentaUsada);
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, total: jids.length, filtered: rawParticipants.length - jids.length, batch_size: batchSize || jids.length, delay_minutes: batchSize ? delayMinutes : 0, grupo_nombre: grupoNombre }));
                 } catch (e) {
@@ -1578,17 +1593,24 @@ poll();
                 }
                 try {
                     let sock;
+                    let cuentaUsada = body.cuenta || null;
                     if (body.cuenta) {
                         sock = await motor.getOrConnectClient(body.u, body.cuenta);
-                    } else if (botSock) {
-                        sock = botSock;
                     } else {
-                        res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP" }));
+                        const sesiones = db.getSesiones(body.u);
+                        for (const s of sesiones) {
+                            try {
+                                sock = await motor.getOrConnectClient(body.u, s.nombre);
+                                if (sock && sock.user) { cuentaUsada = s.nombre; break; }
+                            } catch (e) {}
+                        }
+                        if (!sock && botSock) sock = botSock;
+                        if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "Sin conexion WSP. Selecciona una cuenta vinculada." })); }
                     }
                     const envioConfig = db.getUserEnvioConfig(body.u);
                     const batchSize = parseInt(body.batch_size) || envioConfig.lote_tamano || 0;
                     const delayMinutes = parseInt(body.delay_minutes) || Math.ceil((envioConfig.lote_pausa_seg || 300) / 60);
-                    motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice);
+                    motor.enviarASeleccionados(body.u, progreso.jids, progreso.mensaje, null, sock, batchSize, delayMinutes, progreso.grupo_nombre, progreso.grupo_jid, progreso.ultimo_indice, cuentaUsada);
                     res.writeHead(200);
                     return res.end(JSON.stringify({
                         ok: true,
@@ -2066,7 +2088,7 @@ poll();
                     const envioConfig = db.getUserEnvioConfig(body.u);
                     const batchSize = body.batch_size || envioConfig.lote_tamano || 0;
                     const delayMinutes = body.delay_minutes || Math.ceil((envioConfig.lote_pausa_seg || 300) / 60);
-                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo);
+                    motor.enviarASeleccionados(body.u, jids, body.mensaje, imagenPath, sock, batchSize, delayMinutes, grupoNombre, body.grupo, 0, body.cuenta || null);
                     db.agregarLog(body.u, 'promo', `Promo enviada a ${jids.length} miembros de ${grupoNombre} + escucha activada`);
                     res.writeHead(200);
                     return res.end(JSON.stringify({ ok: true, message: `promo enviada a ${jids.length} miembros y escucha activada`, total: jids.length, grupo_nombre: grupoNombre }));
