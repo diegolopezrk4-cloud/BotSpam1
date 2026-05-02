@@ -1296,11 +1296,11 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             let enviados = 0;
             let errores = 0;
             let consecutiveErrors = 0;
-            // Anti-ban v2: wider delay range + typing simulation + random long pauses
-            const DELAY_MIN = 15000;
-            const DELAY_MAX = 45000;
-            // Anti-ban: if no batch config, auto-batch every 5 messages with 10 min pause
-            if (!batchSize) { batchSize = 5; delayMinutes = delayMinutes >= 10 ? delayMinutes : 10; }
+            // Anti-ban v2: moderate delays for member DMs (they're already group members)
+            const DELAY_MIN = 8000;
+            const DELAY_MAX = 20000;
+            // Anti-ban: if no batch config, auto-batch every 10 messages with 5 min pause
+            if (!batchSize) { batchSize = 10; delayMinutes = delayMinutes >= 5 ? delayMinutes : 5; }
             const DELAY_ENTRE_LOTES = batchSize ? delayMinutes * 60 * 1000 : 0;
             const displayName = grupoNombre || grupoJid || "seleccionados";
 
@@ -1308,7 +1308,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
             const resumeInfo = startIndex > 0 ? `\n🔄 Reanudando desde #${startIndex + 1}` : "";
             try {
                 await botSock.sendMessage(userJid, {
-                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u{1F6E1} Anti-ban v2: delay 15-45s + typing + pausas aleatorias${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 30 / 60)} min`,
+                    text: `\u{1F4E8} *ENVIO A MIEMBROS INICIADO*\n📂 Grupo: ${displayName}\n\n\u{1F464} ${total} miembro(s)${resumeInfo}\n\u{1F6E1} Anti-ban: delay 8-20s + typing${batchInfo}\n\u23F3 Tiempo estimado: ~${Math.round((total - startIndex) * 15 / 60)} min`,
                 });
             } catch (e) {}
 
@@ -1376,7 +1376,11 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                     const numToCheck = jid.replace(/@s\.whatsapp\.net$/, "");
                     if (jid.endsWith("@s.whatsapp.net")) {
                         try {
-                            const [onWa] = await botSock.onWhatsApp(jid);
+                            const onWaResult = await Promise.race([
+                                botSock.onWhatsApp(jid),
+                                new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000))
+                            ]);
+                            const [onWa] = onWaResult;
                             if (!onWa || !onWa.exists) {
                                 console.log(`[EnvioMiembros] #${i+1}/${total} → ${jid} NO TIENE WSP, saltando`);
                                 errores++;
@@ -1437,7 +1441,7 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                                 setTimeout(() => {
                                     try { botSock.ev.off("messages.update", handler); } catch (e) {}
                                     if (!done) { done = true; resolve("pendiente"); }
-                                }, 8000);
+                                }, 3000);
                             });
                             estadoEntrega = deliveryResult;
                         } catch (e) {}
@@ -1490,12 +1494,12 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                 }
 
                 if (!cancelled) {
-                    // Anti-ban v2: progressive delay — add 3s per 5 messages sent
-                    const progressiveExtra = Math.floor(enviados / 5) * 3000;
+                    // Anti-ban: progressive delay — add 1s per 10 messages sent
+                    const progressiveExtra = Math.floor(enviados / 10) * 1000;
                     let cooldown = DELAY_MIN + Math.floor(Math.random() * (DELAY_MAX - DELAY_MIN)) + progressiveExtra;
-                    // Anti-ban v2: random long pause (20% chance of 60-120s extra pause)
-                    if (Math.random() < 0.2) {
-                        const longPause = 60000 + Math.floor(Math.random() * 60000);
+                    // Anti-ban: random long pause (10% chance of 30-60s extra pause)
+                    if (Math.random() < 0.1) {
+                        const longPause = 30000 + Math.floor(Math.random() * 30000);
                         console.log(`[EnvioMiembros] Anti-ban: pausa larga aleatoria ${Math.round(longPause/1000)}s`);
                         cooldown += longPause;
                     }
