@@ -8,6 +8,7 @@ const config = require("./config_wsp");
 const db = require("./db_wsp");
 const motor = require("./motor_wsp");
 const _addMembersProgress = {};
+const _autoJoinProgress = {};
 
 const QR_PORT = process.env.QR_PORT || 3000;
 
@@ -1883,6 +1884,14 @@ poll();
             }
 
             // ─── AUTOJOIN ───
+            // Progress endpoint for autojoin
+            if (url.pathname === "/api/autojoin_progreso" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const prog = _autoJoinProgress[userId] || null;
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, progreso: prog }));
+            }
+
             if (url.pathname === "/api/autojoin" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.u || !body.links || !Array.isArray(body.links)) {
@@ -1896,45 +1905,80 @@ poll();
                 let sock;
                 try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (e) {}
                 if (!sock) { res.writeHead(503); return res.end(JSON.stringify({ ok: false, error: "No se pudo conectar la cuenta '" + body.cuenta + "'. Verifica que este vinculada." })); }
-                const stats = [];
-                for (const link of body.links) {
+                // Respond immediately, process in background
+                const totalLinks = body.links.length;
+                _autoJoinProgress[body.u] = { total: totalLinks, unidos: 0, fallidos: 0, subgrupos: 0, estado: "iniciando", actual: "", inicio: Date.now(), stats: [] };
+                res.writeHead(200);
+                res.end(JSON.stringify({ ok: true, total: totalLinks, message: "Procesando en segundo plano" }));
+                // Background processing
+                (async () => {
+                    const prog = _autoJoinProgress[body.u];
+                    prog.estado = "uniendose";
+                    for (let i = 0; i < body.links.length; i++) {
+                        const link = body.links[i];
+                        prog.actual = link.substring(0, 50);
+                        try {
+                            // Re-check connection before each join
+                            try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (reconErr) {
+                                prog.estado = "reconectando";
+                                await new Promise(r => setTimeout(r, 15000));
+                                try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) {
+                                    prog.estado = "error_conexion";
+                                    prog.fallidos++;
+                                    prog.stats.push({ link: link.substring(0, 40), ok: false, error: "conexion perdida" });
+                                    continue;
+                                }
+                                prog.estado = "uniendose";
+                            }
+                            const code = link.split("chat.whatsapp.com/").pop().split(/[?#]/)[0];
+                            if (!code) { prog.fallidos++; prog.stats.push({ link: link.substring(0, 40), ok: false, error: "link invalido" }); continue; }
+                            const meta = await sock.groupAcceptInvite(code);
+                            if (meta) {
+                                db.agregarGrupo(body.u, meta, null, 0);
+                                prog.unidos++;
+                                prog.stats.push({ link: link.substring(0, 40), ok: true });
+                                console.log(`[Auto-Join] ${i+1}/${totalLinks} unido: ${meta}`);
+                            } else {
+                                prog.fallidos++;
+                                prog.stats.push({ link: link.substring(0, 40), ok: false, error: "no se pudo unir" });
+                            }
+                        } catch (e) {
+                            const errMsg = e.message || "error";
+                            prog.fallidos++;
+                            prog.stats.push({ link: link.substring(0, 40), ok: false, error: errMsg.substring(0, 60) });
+                            console.log(`[Auto-Join] ${i+1}/${totalLinks} error: ${errMsg}`);
+                            // If already in group, count as success
+                            if (errMsg.includes("already") || errMsg.includes("409")) {
+                                prog.unidos++;
+                                prog.fallidos--;
+                            }
+                        }
+                        // Wait 8 seconds between each join to avoid rate-limit
+                        await new Promise(r => setTimeout(r, 8000 + Math.floor(Math.random() * 4000)));
+                    }
+                    // After all joins, detect community sub-groups ONCE
+                    prog.estado = "detectando_subgrupos";
                     try {
-                        const code = link.split("chat.whatsapp.com/").pop().split(/[?#]/)[0];
-                        if (!code) { stats.push({ link, ok: false, error: "link invalido" }); continue; }
-                        const meta = await sock.groupAcceptInvite(code);
-                        if (meta) {
-                            db.agregarGrupo(body.u, meta, null, 0);
-                            stats.push({ link, ok: true, jid: meta });
-                            // If joined a community, auto-detect and register sub-groups
-                            try {
-                                await new Promise(r => setTimeout(r, 2000));
-                                const allG = await sock.groupFetchAllParticipating();
-                                const joinedMeta = allG[meta];
-                                if (joinedMeta && joinedMeta.isCommunity) {
-                                    let subCount = 0;
-                                    for (const [sjid, sg] of Object.entries(allG)) {
-                                        if (sg.linkedParent === meta && sjid !== meta) {
-                                            db.agregarGrupo(body.u, sjid, null, 0);
-                                            subCount++;
-                                        }
-                                    }
-                                    if (subCount > 0) {
-                                        stats.push({ link: "sub-grupos de " + (joinedMeta.subject || meta), ok: true, jid: meta, subgrupos: subCount });
+                        await new Promise(r => setTimeout(r, 5000));
+                        sock = await motor.getOrConnectClient(body.u, body.cuenta);
+                        const allG = await sock.groupFetchAllParticipating();
+                        for (const [gid, gmeta] of Object.entries(allG)) {
+                            if (gmeta.isCommunity && !gmeta.linkedParent) {
+                                for (const [sjid, sg] of Object.entries(allG)) {
+                                    if (sg.linkedParent === gid && sjid !== gid) {
+                                        db.agregarGrupo(body.u, sjid, null, 0);
+                                        prog.subgrupos++;
                                     }
                                 }
-                            } catch (ce) {
-                                console.log("[Auto-Join] Error detectando sub-grupos de comunidad:", ce.message);
                             }
-                        } else {
-                            stats.push({ link, ok: false, error: "no se pudo unir" });
                         }
-                    } catch (e) {
-                        stats.push({ link, ok: false, error: e.message || "error" });
+                    } catch (ce) {
+                        console.log("[Auto-Join] Error detectando sub-grupos:", ce.message);
                     }
-                    await delay(2000);
-                }
-                res.writeHead(200);
-                return res.end(JSON.stringify({ ok: true, stats }));
+                    prog.estado = "completado";
+                    console.log(`[Auto-Join] Completado: ${prog.unidos} ok, ${prog.fallidos} error, ${prog.subgrupos} sub-grupos`);
+                    setTimeout(() => { delete _autoJoinProgress[body.u]; }, 120000);
+                })();
             }
 
             // ─── ADMIN ENDPOINTS ───

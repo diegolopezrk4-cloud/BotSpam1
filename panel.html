@@ -650,6 +650,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
         <button class="btn btn-danger" onclick="eliminarTodosGruposPanel()" title="Eliminar todos los grupos">🗑 Eliminar Todos</button>
         <button class="btn btn-primary" onclick="showAsignarSeccion()" title="Asignar seccion a grupos seleccionados">📂 Asignar Seccion</button>
       </div>
+      <div id="autoJoinProgressArea" style="margin:0 10px"></div>
       <div id="gruposContent" class="loading-overlay"><span class="spinner"></span> Cargando...</div>
     </div>
 
@@ -2977,12 +2978,27 @@ async function ejecutarAutoJoin(){
   const links=raw.split('\n').map(l=>l.trim()).filter(l=>l.startsWith('https://chat.whatsapp.com/'));
   if(!links.length){toast('No se encontraron links validos','error');return}
   closeModal();toast('Uniendose a '+links.length+' grupo(s)...','success');
+  // Show progress area below search bar
+  const progArea=document.getElementById('autoJoinProgressArea');
+  if(progArea)progArea.innerHTML='<div id="autoJoinProgress" style="padding:12px;background:var(--bg2);border-radius:8px;margin:10px 0"><span class="spinner" style="width:16px;height:16px;display:inline-block"></span> Iniciando union a '+links.length+' grupo(s)...</div>';
   const r=await api('/api/autojoin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,links,cuenta})});
   if(r.ok){
-    const s=r.stats||[];const ok=s.filter(x=>x.ok).length;const err=s.filter(x=>!x.ok).length;
-    toast('Unido a '+ok+' grupo(s), '+err+' error(es)',ok>0?'success':'error');
-    loadGrupos();
-  }else{toast('Error: '+(r.error||''),'error')}
+    // Poll progress
+    const pollJoin=setInterval(async()=>{
+      try{
+        const p=await api('/api/autojoin_progreso?u='+userId);
+        if(p.ok&&p.progreso){
+          const pr=p.progreso;
+          const done=pr.unidos+pr.fallidos;
+          const pct=Math.round((done/pr.total)*100);
+          let st=pr.estado==='completado'?'Completado!':pr.estado==='detectando_subgrupos'?'Detectando sub-grupos de comunidades...':pr.estado==='reconectando'?'Reconectando...':'Procesando: '+pr.actual;
+          const el=document.getElementById('autoJoinProgress');
+          if(el)el.innerHTML='<div style="margin-bottom:6px"><b>'+pct+'%</b> — '+pr.unidos+' unidos, '+pr.fallidos+' error'+(pr.subgrupos>0?', '+pr.subgrupos+' sub-grupos':'')+' de '+pr.total+'</div><div style="background:var(--bg);border-radius:4px;height:8px;overflow:hidden"><div style="background:#4ade80;height:100%;width:'+pct+'%;transition:width 0.3s"></div></div><div style="font-size:11px;color:var(--text2);margin-top:4px">'+st+'</div>';
+          if(pr.estado==='completado'){clearInterval(pollJoin);setTimeout(()=>loadGrupos(),2000);}
+        }else if(!p.progreso){clearInterval(pollJoin);loadGrupos();}
+      }catch(e){}
+    },3000);
+  }else{toast('Error: '+(r.error||''),'error');if(progArea)progArea.innerHTML='';}
 }
 
 // --- ENVIO PERSONAL ---
