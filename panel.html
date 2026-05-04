@@ -625,6 +625,7 @@ table tr:hover { background: rgba(108,92,231,0.05); }
           </div>
           <button class="btn btn-primary" onclick="detectarGrupos()">🔍 Detectar Grupos</button>
           <button class="btn btn-success" onclick="showAutoJoin()">🔗 Auto-unirse</button>
+          <button class="btn btn-warning" onclick="scanComunidades()" style="background:#f59e0b;border-color:#f59e0b">🏘️Escanear Comunidades</button>
           <button class="btn btn-outline" onclick="loadGrupos()">🔄 Refrescar</button>
         </div>
       </div>
@@ -2999,6 +3000,39 @@ async function ejecutarAutoJoin(){
       }catch(e){}
     },3000);
   }else{toast('Error: '+(r.error||''),'error');if(progArea)progArea.innerHTML='';}
+}
+
+// --- ESCANEAR COMUNIDADES ---
+async function scanComunidades(){
+  if(!requireMembresia())return;
+  const cuenta=$('wspDetectCuenta')?$('wspDetectCuenta').value:'';
+  if(!cuenta){toast('Selecciona una cuenta WSP primero','error');return}
+  if(!confirm('Escanear todas las comunidades y registrar sub-grupos faltantes?'))return;
+  const progArea=document.getElementById('autoJoinProgressArea');
+  if(progArea)progArea.innerHTML='<div id="commScanProgress" style="padding:12px;background:var(--bg2);border-radius:8px;margin:10px 0"><span class="spinner" style="width:16px;height:16px;display:inline-block"></span> Escaneando comunidades...</div>';
+  const r=await api('/api/scan_comunidades',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:userId,cuenta})});
+  if(!r.ok){toast('Error: '+(r.error||''),'error');if(progArea)progArea.innerHTML='';return}
+  const pollScan=setInterval(async()=>{
+    try{
+      const p=await api('/api/scan_comunidades_progreso?u='+userId);
+      if(p.ok&&p.progreso){
+        const pr=p.progreso;
+        const el=document.getElementById('commScanProgress');
+        if(el){
+          if(pr.estado==='completado'){
+            el.innerHTML='<div style="color:#4ade80;font-weight:bold">✅ Escaneo completado</div><div style="margin-top:6px">'+pr.comunidades+' comunidades encontradas<br>'+pr.subgrupos_encontrados+' sub-grupos totales<br><b>'+pr.subgrupos_nuevos+' nuevos registrados</b><br>'+pr.subgrupos_ya_registrados+' ya estaban registrados'+(pr.grupos_sueltos>0?'<br>'+pr.grupos_sueltos+' grupos sueltos agregados':'')+'<br>Total: '+pr.total_registrados+' grupos</div>';
+            clearInterval(pollScan);
+            setTimeout(()=>loadGrupos(),2000);
+          }else if(pr.estado==='error'){
+            el.innerHTML='<div style="color:#f87171">❌ Error: '+(pr.error||'desconocido')+'</div>';
+            clearInterval(pollScan);
+          }else{
+            el.innerHTML='<div><span class="spinner" style="width:16px;height:16px;display:inline-block"></span> Escaneando: <b>'+pr.actual+'</b></div><div style="font-size:12px;color:var(--text2);margin-top:4px">'+pr.comunidades+' comunidades | '+pr.subgrupos_encontrados+' sub-grupos encontrados | '+pr.subgrupos_nuevos+' nuevos</div>';
+          }
+        }
+      }else if(!p.progreso){clearInterval(pollScan);loadGrupos();}
+    }catch(e){}
+  },2000);
 }
 
 // --- ENVIO PERSONAL ---

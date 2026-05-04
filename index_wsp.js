@@ -9,6 +9,7 @@ const db = require("./db_wsp");
 const motor = require("./motor_wsp");
 const _addMembersProgress = {};
 const _autoJoinProgress = {};
+const _communityScanProgress = {};
 
 // Prevent unhandled exceptions from crashing the entire process
 process.on('uncaughtException', (err) => {
@@ -1892,6 +1893,82 @@ poll();
             }
 
             // ─── AUTOJOIN ───
+            // ─── COMMUNITY SUB-GROUP SCAN ───
+            // Scans all communities the account is in, finds sub-groups not yet registered, and registers them
+            if (url.pathname === "/api/scan_comunidades" && req.method === "POST") {
+                const body = await readBody();
+                if (!body.u || !body.cuenta) {
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ ok: false, error: "falta u o cuenta" }));
+                }
+                let sock;
+                try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (e) {}
+                if (!sock || !sock.user) {
+                    res.writeHead(503);
+                    return res.end(JSON.stringify({ ok: false, error: "Cuenta no conectada" }));
+                }
+                // Respond immediately, process in background
+                _communityScanProgress[body.u] = { estado: "escaneando", comunidades: 0, subgrupos_encontrados: 0, subgrupos_nuevos: 0, subgrupos_ya_registrados: 0, actual: "", inicio: Date.now() };
+                res.writeHead(200);
+                res.end(JSON.stringify({ ok: true, message: "Escaneando comunidades en segundo plano" }));
+                (async () => {
+                    const prog = _communityScanProgress[body.u];
+                    try {
+                        const allGroups = await sock.groupFetchAllParticipating();
+                        // Get currently registered groups for this user
+                        const registeredGroups = db.getGrupos(body.u);
+                        const registeredJids = new Set(registeredGroups.map(g => g.jid || g.link).filter(Boolean));
+                        // Find all communities
+                        const communities = Object.entries(allGroups).filter(([gid, g]) => g.isCommunity && !g.linkedParent);
+                        prog.comunidades = communities.length;
+                        console.log(`[CommunityScan] Found ${communities.length} communities`);
+                        for (const [communityJid, communityMeta] of communities) {
+                            prog.actual = communityMeta.subject || communityJid;
+                            // Find all sub-groups of this community
+                            for (const [sjid, sg] of Object.entries(allGroups)) {
+                                if (sg.linkedParent === communityJid && sjid !== communityJid) {
+                                    prog.subgrupos_encontrados++;
+                                    if (!registeredJids.has(sjid)) {
+                                        // Not registered yet — add it
+                                        db.agregarGrupo(body.u, sjid, null, 0);
+                                        registeredJids.add(sjid);
+                                        prog.subgrupos_nuevos++;
+                                        console.log(`[CommunityScan] Nuevo sub-grupo: ${sg.subject || sjid} (de ${communityMeta.subject || communityJid})`);
+                                    } else {
+                                        prog.subgrupos_ya_registrados++;
+                                    }
+                                }
+                            }
+                        }
+                        // Also register any groups we're in but not registered
+                        let gruposSueltos = 0;
+                        for (const [gid, gmeta] of Object.entries(allGroups)) {
+                            if (motor.esGrupoReal(gid, gmeta) && !registeredJids.has(gid)) {
+                                db.agregarGrupo(body.u, gid, null, 0);
+                                registeredJids.add(gid);
+                                gruposSueltos++;
+                            }
+                        }
+                        prog.grupos_sueltos = gruposSueltos;
+                        prog.estado = "completado";
+                        prog.total_registrados = registeredJids.size;
+                        console.log(`[CommunityScan] Completado: ${prog.comunidades} comunidades, ${prog.subgrupos_nuevos} nuevos sub-grupos, ${gruposSueltos} grupos sueltos`);
+                    } catch (e) {
+                        prog.estado = "error";
+                        prog.error = e.message;
+                        console.log(`[CommunityScan] Error: ${e.message}`);
+                    }
+                    setTimeout(() => { delete _communityScanProgress[body.u]; }, 120000);
+                })();
+            }
+
+            if (url.pathname === "/api/scan_comunidades_progreso" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const prog = _communityScanProgress[userId] || null;
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, progreso: prog }));
+            }
+
             // Progress endpoint for autojoin
             if (url.pathname === "/api/autojoin_progreso" && req.method === "GET") {
                 const userId = url.searchParams.get("u");
