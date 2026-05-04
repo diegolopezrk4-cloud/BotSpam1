@@ -1465,21 +1465,30 @@ poll();
                     if (!jids.length) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, error: "No se encontraron numeros validos" })); }
                     res.writeHead(200);
                     res.end(JSON.stringify({ ok: true, total: jids.length, message: "Agregando miembros en segundo plano..." }));
-                    // Run in background — add with moderate delays to avoid WhatsApp disconnection
-                    let agregados = 0, fallidos = 0;
+                    // Run in background — anti-ban v3: human-like delays + escalating pauses + verify before add
+                    let agregados = 0, fallidos = 0, saltados = 0;
                     const BATCH_SIZE = parseInt(body.batch_size) || 3;
-                    const DELAY_BETWEEN_BATCHES = body.delay_minutes ? parseInt(body.delay_minutes) * 60 * 1000 : 120000;
-                    const DELAY_AFTER_ERROR = 90000; // 90s pause after any error
-                    // Initial delay before starting to add (let connection stabilize)
+                    const BASE_BATCH_PAUSE = body.delay_minutes ? parseInt(body.delay_minutes) * 60 * 1000 : 120000;
+                    const DELAY_AFTER_ERROR = 120000; // 2 min pause after connection error
+                    const MAX_DAILY_ADDS = 50; // WhatsApp daily limit safety threshold
+                    // Initial delay before starting (let connection stabilize)
                     console.log(`[agregar_miembros] Iniciando en 5s... (${jids.length} miembros por agregar)`);
                     await new Promise(r => setTimeout(r, 5000));
+                    let batchNumber = 0;
+                    let consecutiveErrors = 0;
                     for (let i = 0; i < jids.length; i++) {
+                        // Safety: stop after daily limit
+                        if (agregados >= MAX_DAILY_ADDS) {
+                            console.log(`[agregar_miembros] Limite diario de ${MAX_DAILY_ADDS} alcanzado, deteniendo`);
+                            db.agregarLog(body.u, 'warning', `Limite diario de ${MAX_DAILY_ADDS} agregados alcanzado. Reanuda manana para evitar ban.`);
+                            break;
+                        }
                         try {
                             // Re-check connection before each add
                             if (body.cuenta) {
                                 try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (reconErr) {
-                                    console.log(`[agregar_miembros] Reconexion fallida, esperando 60s...`);
-                                    await new Promise(r => setTimeout(r, 60000));
+                                    console.log(`[agregar_miembros] Reconexion fallida, esperando 90s...`);
+                                    await new Promise(r => setTimeout(r, 90000));
                                     try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) { break; }
                                 }
                             }
@@ -1490,18 +1499,35 @@ poll();
                                     try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) { break; }
                                 } else { break; }
                             }
+                            // Verify number has WhatsApp before adding (avoid suspicious adds)
+                            if (jids[i].endsWith("@s.whatsapp.net")) {
+                                try {
+                                    const [onWa] = await Promise.race([
+                                        sock.onWhatsApp(jids[i]),
+                                        new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000))
+                                    ]);
+                                    if (!onWa || !onWa.exists) {
+                                        console.log(`[agregar_miembros] ${jids[i]} no tiene WSP, saltando`);
+                                        saltados++;
+                                        continue;
+                                    }
+                                } catch (_) {} // timeout = continue anyway
+                            }
                             await sock.groupParticipantsUpdate(body.destino, [jids[i]], "add");
                             agregados++;
+                            consecutiveErrors = 0;
                             console.log(`[agregar_miembros] ${i+1}/${jids.length} agregado: ${jids[i]}`);
                             db.agregarLog(body.u, 'info', `Miembro agregado ${i+1}/${jids.length}: ${jids[i].split('@')[0]}`);
                         } catch (e) {
                             const errMsg = e.message || '';
+                            const errLower = errMsg.toLowerCase();
                             console.log(`[agregar_miembros] Error ${jids[i]}: ${errMsg}`);
                             fallidos++;
-                            const errLower = errMsg.toLowerCase();
-                            if (errLower.includes("closed") || errLower.includes("disconnect") || errLower.includes("timed out") || errLower.includes("connection") || errLower.includes("boom") || errLower.includes("lost") || errLower.includes("stream:error") || errLower.includes("econnreset") || errLower.includes("epipe") || errLower.includes("network") || errLower.includes("aborted") || errLower.includes("socket") || errLower.includes("not open") || errLower.includes("unavailable")) {
-                                console.log(`[agregar_miembros] Conexion perdida despues de ${agregados} agregados, pausa larga de 60s...`);
-                                db.agregarLog(body.u, 'error', `Conexion perdida al agregar miembro ${i+1}/${jids.length}, pausando 60s`);
+                            consecutiveErrors++;
+                            const isConnErr = errLower.includes("closed") || errLower.includes("disconnect") || errLower.includes("timed out") || errLower.includes("connection") || errLower.includes("boom") || errLower.includes("lost") || errLower.includes("stream:error") || errLower.includes("econnreset") || errLower.includes("epipe") || errLower.includes("network") || errLower.includes("aborted") || errLower.includes("socket") || errLower.includes("not open") || errLower.includes("unavailable");
+                            if (isConnErr) {
+                                console.log(`[agregar_miembros] Conexion perdida despues de ${agregados} agregados, pausa ${DELAY_AFTER_ERROR/1000}s...`);
+                                db.agregarLog(body.u, 'error', `Conexion perdida al agregar miembro ${i+1}/${jids.length}, pausando ${DELAY_AFTER_ERROR/1000}s`);
                                 await new Promise(r => setTimeout(r, DELAY_AFTER_ERROR));
                                 if (body.cuenta) {
                                     try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) {
@@ -1509,7 +1535,6 @@ poll();
                                         db.agregarLog(body.u, 'error', `No se pudo reconectar, ${agregados} agregados de ${jids.length}`);
                                         break;
                                     }
-                                    // Extra wait after reconnection to let it stabilize
                                     await new Promise(r => setTimeout(r, 30000));
                                     console.log(`[agregar_miembros] Reconectado, esperando 30s para estabilizar...`);
                                 } else { break; }
@@ -1518,26 +1543,40 @@ poll();
                                     await sock.groupParticipantsUpdate(body.destino, [jids[i]], "add");
                                     agregados++;
                                     fallidos--;
+                                    consecutiveErrors = 0;
                                     console.log(`[agregar_miembros] Retry OK para ${jids[i]}`);
                                 } catch (retryErr) {
                                     console.log(`[agregar_miembros] Retry tambien fallo: ${retryErr.message}`);
                                 }
                             }
-                            // Non-connection errors (e.g. "not authorized", "forbidden") — skip member and continue
+                            // Stop after 5 consecutive errors (likely banned or account issue)
+                            if (consecutiveErrors >= 5) {
+                                console.log(`[agregar_miembros] 5 errores consecutivos, deteniendo por seguridad`);
+                                db.agregarLog(body.u, 'error', `5 errores consecutivos al agregar miembros, detenido por seguridad. ${agregados} ok de ${jids.length}`);
+                                break;
+                            }
                         }
-                        // Random delay between individual adds (12-20 seconds to prevent disconnection)
-                        const memberDelay = 12000 + Math.floor(Math.random() * 8000);
+                        // Human-like random delay (15-30 seconds, with occasional longer pauses)
+                        let memberDelay = 15000 + Math.floor(Math.random() * 15000);
+                        // 15% chance of extra "thinking" pause (30-60s) to look human
+                        if (Math.random() < 0.15) {
+                            memberDelay += 30000 + Math.floor(Math.random() * 30000);
+                            console.log(`[agregar_miembros] Pausa humana extra: ${Math.round(memberDelay/1000)}s`);
+                        }
                         await new Promise(r => setTimeout(r, memberDelay));
-                        // Longer pause every BATCH_SIZE members
+                        // Escalating batch pause (grows with each batch to look less robotic)
                         if ((i + 1) % BATCH_SIZE === 0 && i + 1 < jids.length) {
-                            const batchPause = DELAY_BETWEEN_BATCHES + Math.floor(Math.random() * 15000); // 45-60s
-                            console.log(`[agregar_miembros] Lote de ${BATCH_SIZE} completado (${i + 1}/${jids.length}), pausa ${Math.round(batchPause/1000)}s...`);
-                            db.agregarLog(body.u, 'info', `Lote ${Math.ceil((i+1)/BATCH_SIZE)} completado: ${agregados} ok, ${fallidos} error. Pausa ${Math.round(batchPause/1000)}s`);
+                            batchNumber++;
+                            // Each batch pause grows: base + 30s per batch number (max 5 min extra)
+                            const escalation = Math.min(batchNumber * 30000, 300000);
+                            const batchPause = BASE_BATCH_PAUSE + escalation + Math.floor(Math.random() * 30000);
+                            console.log(`[agregar_miembros] Lote ${batchNumber} completado (${i + 1}/${jids.length}), pausa ${Math.round(batchPause/1000)}s...`);
+                            db.agregarLog(body.u, 'info', `Lote ${batchNumber} completado: ${agregados} ok, ${fallidos} error, ${saltados} sin WSP. Pausa ${Math.round(batchPause/1000)}s`);
                             await new Promise(r => setTimeout(r, batchPause));
                         }
                     }
-                    console.log(`[agregar_miembros] Completado: ${agregados} ok, ${fallidos} error de ${jids.length}`);
-                    db.agregarLog(body.u, 'info', `Agregar miembros completado: ${agregados} ok, ${fallidos} error de ${jids.length}`);
+                    console.log(`[agregar_miembros] Completado: ${agregados} ok, ${fallidos} error, ${saltados} sin WSP de ${jids.length}`);
+                    db.agregarLog(body.u, 'info', `Agregar miembros completado: ${agregados} ok, ${fallidos} error, ${saltados} sin WSP de ${jids.length}`);
                 } catch (e) {
                     if (!res.writableEnded) {
                         res.writeHead(500);
@@ -4741,8 +4780,31 @@ async function handleFSM(jid, msg, text, trimmed, state) {
                         errores.push(`${g.link.substring(0, 30)}... - link invalido`);
                         continue;
                     }
-                    await botSock.groupAcceptInvite(inviteCode);
+                    const joinedJid = await botSock.groupAcceptInvite(inviteCode);
                     joined++;
+                    // If joined a community, auto-detect and register sub-groups
+                    if (joinedJid) {
+                        try {
+                            await new Promise(r => setTimeout(r, 2000));
+                            const allGroups = await botSock.groupFetchAllParticipating();
+                            const joinedMeta = allGroups[joinedJid];
+                            if (joinedMeta && joinedMeta.isCommunity) {
+                                let subCount = 0;
+                                for (const [sjid, sg] of Object.entries(allGroups)) {
+                                    if (sg.linkedParent === joinedJid && sjid !== joinedJid) {
+                                        db.agregarGrupo(jid, sjid);
+                                        subCount++;
+                                    }
+                                }
+                                if (subCount > 0) {
+                                    joined += subCount;
+                                    await send(jid, `\u{1F310} Comunidad detectada: ${joinedMeta.subject || joinedJid}\n\u{1F4C2} ${subCount} sub-grupo(s) agregados automaticamente`);
+                                }
+                            }
+                        } catch (ce) {
+                            console.log("[Auto-Join] Error detectando sub-grupos:", ce.message);
+                        }
+                    }
                 } catch (e) {
                     if (e.message && e.message.includes("already")) {
                         alreadyIn++;
@@ -4751,8 +4813,8 @@ async function handleFSM(jid, msg, text, trimmed, state) {
                         errores.push(`${g.link.substring(0, 30)}... - ${e.message || "error"}`);
                     }
                 }
-                // Esperar 5 seg entre cada grupo para evitar ban
-                await new Promise(r => setTimeout(r, 5000));
+                // Esperar 8 seg entre cada grupo para evitar ban
+                await new Promise(r => setTimeout(r, 8000));
             }
 
             let resultado = `\u{1F4CB} *RESULTADO DE UNIRSE A GRUPOS*\n\n`;
