@@ -7,6 +7,7 @@ const path = require("path");
 const config = require("./config_wsp");
 const db = require("./db_wsp");
 const motor = require("./motor_wsp");
+const _addMembersProgress = {};
 
 const QR_PORT = process.env.QR_PORT || 3000;
 
@@ -1433,6 +1434,15 @@ poll();
             }
 
             // ─── AGREGAR MIEMBROS A GRUPO ───
+            if (url.pathname === "/api/agregar_miembros_progreso" && req.method === "GET") {
+                const userId = url.searchParams.get("u");
+                const destino = url.searchParams.get("destino");
+                const key = userId + "_" + destino;
+                const prog = _addMembersProgress[key] || null;
+                res.writeHead(200);
+                return res.end(JSON.stringify({ ok: true, progreso: prog }));
+            }
+
             if (url.pathname === "/api/agregar_miembros" && req.method === "POST") {
                 const body = await readBody();
                 if (!body.u || !body.destino) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u o destino" })); }
@@ -1476,7 +1486,10 @@ poll();
                     // No daily limit — user controls the pace via batch size and delay
                     // Initial delay before starting (let connection stabilize)
                     console.log(`[agregar_miembros] Iniciando en 5s... (${jids.length} miembros por agregar)`);
+                    const progressKey = body.u + "_" + body.destino;
+                    _addMembersProgress[progressKey] = { total: jids.length, agregados: 0, fallidos: 0, saltados: 0, estado: "iniciando", actual: "", lote: 0, inicio: Date.now() };
                     await new Promise(r => setTimeout(r, 5000));
+                    _addMembersProgress[progressKey].estado = "agregando";
                     let batchNumber = 0;
                     let consecutiveErrors = 0;
                     for (let i = 0; i < jids.length; i++) {
@@ -1507,6 +1520,7 @@ poll();
                                     if (!onWa || !onWa.exists) {
                                         console.log(`[agregar_miembros] ${jids[i]} no tiene WSP, saltando`);
                                         saltados++;
+                                        if (_addMembersProgress[progressKey]) { _addMembersProgress[progressKey].saltados = saltados; _addMembersProgress[progressKey].actual = jids[i].split('@')[0] + " (sin WSP)"; }
                                         continue;
                                     }
                                 } catch (_) {} // timeout = continue anyway
@@ -1521,12 +1535,14 @@ poll();
                             consecutiveErrors = 0;
                             console.log(`[agregar_miembros] ${i+1}/${jids.length} agregado: ${jids[i]}`);
                             db.agregarLog(body.u, 'info', `Miembro agregado ${i+1}/${jids.length}: ${jids[i].split('@')[0]}`);
+                            if (_addMembersProgress[progressKey]) { _addMembersProgress[progressKey].agregados = agregados; _addMembersProgress[progressKey].actual = jids[i].split('@')[0]; }
                         } catch (e) {
                             const errMsg = e.message || '';
                             const errLower = errMsg.toLowerCase();
                             console.log(`[agregar_miembros] Error ${jids[i]}: ${errMsg}`);
                             fallidos++;
                             consecutiveErrors++;
+                            if (_addMembersProgress[progressKey]) { _addMembersProgress[progressKey].fallidos = fallidos; _addMembersProgress[progressKey].actual = jids[i].split('@')[0] + " (error)"; }
                             const isConnErr = errLower.includes("closed") || errLower.includes("disconnect") || errLower.includes("timed out") || errLower.includes("connection") || errLower.includes("boom") || errLower.includes("lost") || errLower.includes("stream:error") || errLower.includes("econnreset") || errLower.includes("epipe") || errLower.includes("network") || errLower.includes("aborted") || errLower.includes("socket") || errLower.includes("not open") || errLower.includes("unavailable");
                             if (isConnErr) {
                                 console.log(`[agregar_miembros] Conexion perdida despues de ${agregados} agregados, pausa ${DELAY_AFTER_ERROR/1000}s...`);
@@ -1575,11 +1591,15 @@ poll();
                             const batchPause = BASE_BATCH_PAUSE + escalation + Math.floor(Math.random() * 30000);
                             console.log(`[agregar_miembros] Lote ${batchNumber} completado (${i + 1}/${jids.length}), pausa ${Math.round(batchPause/1000)}s...`);
                             db.agregarLog(body.u, 'info', `Lote ${batchNumber} completado: ${agregados} ok, ${fallidos} error, ${saltados} sin WSP. Pausa ${Math.round(batchPause/1000)}s`);
+                            if (_addMembersProgress[progressKey]) { _addMembersProgress[progressKey].estado = "pausa_lote"; _addMembersProgress[progressKey].lote = batchNumber; _addMembersProgress[progressKey].pausaHasta = Date.now() + batchPause; }
                             await new Promise(r => setTimeout(r, batchPause));
+                            if (_addMembersProgress[progressKey]) { _addMembersProgress[progressKey].estado = "agregando"; }
                         }
                     }
                     console.log(`[agregar_miembros] Completado: ${agregados} ok, ${fallidos} error, ${saltados} sin WSP de ${jids.length}`);
                     db.agregarLog(body.u, 'info', `Agregar miembros completado: ${agregados} ok, ${fallidos} error, ${saltados} sin WSP de ${jids.length}`);
+                    if (_addMembersProgress[progressKey]) { _addMembersProgress[progressKey].estado = "completado"; _addMembersProgress[progressKey].agregados = agregados; _addMembersProgress[progressKey].fallidos = fallidos; _addMembersProgress[progressKey].saltados = saltados; }
+                    setTimeout(() => { delete _addMembersProgress[progressKey]; }, 60000);
                 } catch (e) {
                     if (!res.writableEnded) {
                         res.writeHead(500);

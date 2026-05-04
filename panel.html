@@ -3300,7 +3300,25 @@ async function agregarMiembrosAGrupo(){if(!requireMembresia())return;
   const payload={u:userId,origen,destino};
   if(cuenta)payload.cuenta=cuenta;
   const r=await api('/api/agregar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  toast(r.ok?'Agregando '+(r.total||0)+' miembros en segundo plano (lotes de 5, 5s entre cada uno)':'Error: '+(r.error||''),r.ok?'success':'error');
+  if(r.ok){
+    toast('Agregando '+(r.total||0)+' miembros...','success');
+    // Show progress below the button
+    const progDiv=document.createElement('div');progDiv.id='addMembersProgressGrp';progDiv.style.cssText='margin-top:8px;padding:10px';progDiv.innerHTML='<span class="spinner" style="width:16px;height:16px;display:inline-block"></span> Iniciando... 0/'+(r.total||0);
+    const btn=document.querySelector('[onclick*="agregarAlGrupo"]');if(btn&&btn.parentNode)btn.parentNode.appendChild(progDiv);
+    const destGrp=payload.destino;
+    const pollGrp=setInterval(async()=>{
+      try{
+        const p=await api('/api/agregar_miembros_progreso?u='+userId+'&destino='+encodeURIComponent(destGrp));
+        if(p.ok&&p.progreso){
+          const pr=p.progreso;const pct=Math.round(((pr.agregados+pr.fallidos+pr.saltados)/pr.total)*100);
+          let st=pr.estado==='pausa_lote'?'Pausa lote '+pr.lote:pr.estado==='completado'?'Completado!':'Agregando: '+pr.actual;
+          if(pr.estado==='completado')clearInterval(pollGrp);
+          const el=$('addMembersProgressGrp');
+          if(el)el.innerHTML='<div><b>'+pct+'%</b> — '+pr.agregados+' ok, '+pr.fallidos+' err, '+pr.saltados+' skip / '+pr.total+'</div><div style="background:var(--bg2);border-radius:4px;height:8px;overflow:hidden"><div style="background:var(--accent);height:100%;width:'+pct+'%;transition:width 0.3s"></div></div><div style="font-size:11px;color:var(--text2)">'+st+'</div>';
+        }else if(!p.progreso){clearInterval(pollGrp);const el=$('addMembersProgressGrp');if(el)el.innerHTML='Finalizado';}
+      }catch(e){}
+    },3000);
+  }else{toast('Error: '+(r.error||''),'error');}
 }
 
 // --- STATS ---
@@ -4544,8 +4562,37 @@ async function agregarMiembrosDesdeArchivo(){
   const payload={u:userId,destino,numeros,batch_size:batchSize,delay_minutes:delayMin};
   if(cuenta)payload.cuenta=cuenta;
   const r=await api('/api/agregar_miembros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  if(r.ok){toast('Agregando '+r.total+' miembros en segundo plano (lotes de '+batchSize+', '+delayMin+' min entre lotes)','success');$('emAddFileInfo').textContent='Agregando '+r.total+' miembros...';}
-  else{toast('Error: '+(r.error||''),'error');}
+  if(r.ok){
+    toast('Agregando '+r.total+' miembros...','success');
+    $('emAddFileInfo').innerHTML='<div id="addMembersProgress" style="margin-top:8px"><span class="spinner" style="width:16px;height:16px;display:inline-block"></span> Iniciando... 0/'+r.total+'</div>';
+    // Poll progress every 3 seconds
+    const destino2=destino;
+    const pollInterval=setInterval(async()=>{
+      try{
+        const p=await api('/api/agregar_miembros_progreso?u='+userId+'&destino='+encodeURIComponent(destino2));
+        if(p.ok&&p.progreso){
+          const pr=p.progreso;
+          const pct=Math.round(((pr.agregados+pr.fallidos+pr.saltados)/pr.total)*100);
+          let statusText='';
+          if(pr.estado==='pausa_lote'){
+            const secsLeft=pr.pausaHasta?Math.max(0,Math.round((pr.pausaHasta-Date.now())/1000)):0;
+            statusText='Pausa lote '+pr.lote+' ('+secsLeft+'s)';
+          }else if(pr.estado==='completado'){
+            statusText='Completado!';
+            clearInterval(pollInterval);
+          }else{
+            statusText='Agregando: '+pr.actual;
+          }
+          const el=$('addMembersProgress');
+          if(el)el.innerHTML='<div style="margin-bottom:4px"><b>'+pct+'%</b> — '+pr.agregados+' ok, '+pr.fallidos+' error, '+pr.saltados+' sin WSP de '+pr.total+'</div><div style="background:var(--bg2);border-radius:4px;height:8px;overflow:hidden"><div style="background:var(--accent);height:100%;width:'+pct+'%;transition:width 0.3s"></div></div><div style="font-size:11px;color:var(--text2);margin-top:2px">'+statusText+'</div>';
+        }else if(!p.progreso){
+          clearInterval(pollInterval);
+          const el=$('addMembersProgress');
+          if(el)el.innerHTML='<span style="color:var(--success)">Proceso finalizado</span>';
+        }
+      }catch(e){}
+    },3000);
+  }else{toast('Error: '+(r.error||''),'error');}
   fileInput.value='';
 }
 
