@@ -230,6 +230,10 @@ function init() {
         db.exec("ALTER TABLE campana_config ADD COLUMN espera_ciclo INTEGER DEFAULT 600");
         console.log("   Columnas 'espera_cuenta/espera_ciclo' agregadas");
     }
+    try {
+        db.exec("ALTER TABLE campana_config ADD COLUMN min_miembros INTEGER DEFAULT 0");
+        console.log("   Columna 'min_miembros' agregada");
+    } catch (e) {}
     // Migración: es_admin, tipo_membresia, username
     try {
         db.prepare("SELECT es_admin FROM usuarios LIMIT 1").get();
@@ -1168,13 +1172,14 @@ function eliminarGrupoCampana(campanaId, grupoLink) {
 // --- CONFIG CAMPANA ---
 function getCampanaConfig(campanaId) {
     const row = db.prepare("SELECT * FROM campana_config WHERE campana_id = ?").get(campanaId);
-    return row || { intervalo_min: 30, intervalo_max: 60, espera_cuenta: 300, espera_ciclo: 600 };
+    return row || { intervalo_min: 30, intervalo_max: 60, espera_cuenta: 300, espera_ciclo: 600, min_miembros: 0 };
 }
 
-function setCampanaConfig(campanaId, min, max, esperaCuenta, esperaCiclo) {
+function setCampanaConfig(campanaId, min, max, esperaCuenta, esperaCiclo, minMiembros) {
     const ec = esperaCuenta !== undefined ? esperaCuenta : 300;
     const eciclo = esperaCiclo !== undefined ? esperaCiclo : 600;
-    db.prepare("INSERT OR REPLACE INTO campana_config (campana_id, intervalo_min, intervalo_max, espera_cuenta, espera_ciclo) VALUES (?, ?, ?, ?, ?)").run(campanaId, min, max, ec, eciclo);
+    const mm = minMiembros !== undefined ? minMiembros : 0;
+    db.prepare("INSERT OR REPLACE INTO campana_config (campana_id, intervalo_min, intervalo_max, espera_cuenta, espera_ciclo, min_miembros) VALUES (?, ?, ?, ?, ?, ?)").run(campanaId, min, max, ec, eciclo, mm);
 }
 
 // --- LIMITES ---

@@ -343,6 +343,23 @@ function registrarActividadGrupo(grupoJid) {
     grupoUltimaActividad[grupoJid] = Date.now();
 }
 
+// Check if a participant JID belongs to one of our managed client sessions
+function esNuestraCuenta(participantJid) {
+    if (!participantJid) return false;
+    const partNum = participantJid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+    for (const [key, sock] of Object.entries(clientSessions)) {
+        if (sock && sock.user) {
+            const sockNum = sock.user.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+            if (partNum === sockNum) return true;
+        }
+    }
+    if (_botSock && _botSock.user) {
+        const botNum = _botSock.user.id.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "");
+        if (partNum === botNum) return true;
+    }
+    return false;
+}
+
 // Record when campaign sends to a group (persists to DB)
 function registrarEnvioCampana(campanaId, grupoJid) {
     db.registrarEnvioCampanaDB(campanaId, grupoJid);
@@ -364,7 +381,7 @@ function grupoTieneActividadNueva(campanaId, grupoJid) {
 // ============================================================
 // sendToGroup con verificacion de entrega
 // ============================================================
-async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
+async function sendToGroup(sock, groupJid, mensaje, imagenPath, minMiembros) {
     const textoFinal = addInvisibleChars(mensaje);
     try {
         let metadata = null;
@@ -394,6 +411,14 @@ async function sendToGroup(sock, groupJid, mensaje, imagenPath) {
                 return { sent: false, delivered: false, reason: "metadata_error" };
             }
         }
+        // Check minimum members filter (from campaign config)
+        if (metadata && metadata.participants && minMiembros > 0) {
+            const memberCount = metadata.participants.length;
+            if (memberCount < minMiembros) {
+                return { sent: false, delivered: false, reason: "below_min_members", memberCount };
+            }
+        }
+
         if (metadata && metadata.announce) {
             const myJid = sock.user?.id;
             const myNum = myJid ? myJid.replace(/@s\.whatsapp\.net$/, "").replace(/@lid$/, "").replace(/:\d+$/, "") : "";
@@ -482,7 +507,8 @@ function esGrupoReal(groupId, groupMetadata) {
     if (!groupId.endsWith("@g.us")) return false;
     if (groupMetadata) {
         if (groupMetadata.isCommunityAnnounce) return false;
-        if (groupMetadata.isCommunity && groupMetadata.linkedParent) return false;
+        // Keep community sub-groups (they have linkedParent) — only filter community parent container
+        if (groupMetadata.isCommunity && !groupMetadata.linkedParent) return false;
         // Nota: NO filtrar announce (solo-admin) aqui — sendToGroup ya verifica si somos admin
         // Filtrar newsletters/canales
         if (groupMetadata.isNewsletter) return false;
@@ -676,7 +702,7 @@ function iniciarCampana(campanaId, userId, botSock) {
 
                         mensajeAEnviar = variarMensaje(mensajeAEnviar, userId);
 
-                        const result = await sendToGroup(currentSock.sock, groupJid, mensajeAEnviar, imagenAEnviar);
+                        const result = await sendToGroup(currentSock.sock, groupJid, mensajeAEnviar, imagenAEnviar, conf.min_miembros);
 
                         if (result.sent && (result.delivered || result.reason === "pending" || result.reason === "no_id")) {
                             registrarEnvioCampana(campanaId, groupJid);
@@ -738,6 +764,12 @@ function iniciarCampana(campanaId, userId, botSock) {
                                 }
                             }
 
+                            if (result.reason === "below_min_members") {
+                                console.log(`[Campana] Grupo ${grupoLink}: solo ${result.memberCount} miembros (min: ${conf.min_miembros}), saltando`);
+                                db.registrarEnvio(userId, campanaId, grupoLink, "saltado_pocos_miembros");
+                                db.actualizarStatsCampana(campanaId, 0, 1);
+                                continue;
+                            }
                             if (result.reason === "readonly" || result.reason === "not_member" || result.reason === "forbidden") {
                                 db.eliminarGrupoPorLink(userId, grupoLink);
                                 db.eliminarGrupoCampana(campanaId, grupoLink);
@@ -749,7 +781,9 @@ function iniciarCampana(campanaId, userId, botSock) {
                             } else if (result.reason === "metadata_error") {
                                 db.registrarEnvio(userId, campanaId, grupoLink, "error_temporal");
                                 db.actualizarGrupoStats(userId, grupoLink, "fallido");
-                                console.log(`[Campana] Grupo ${grupoLink}: error temporal de metadata, NO eliminado`);
+                                // Record in anti-dup tracker to prevent immediate re-spam
+                                registrarEnvioCampana(campanaId, groupJid);
+                                console.log(`[Campana] Grupo ${grupoLink}: error temporal, cooldown 30 min`);
                             }
                             db.actualizarStatsCampana(campanaId, 0, 1);
                             consecutiveErrors++;
@@ -1287,7 +1321,10 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
         const msg = (err.message || '').toLowerCase();
         return msg.includes('disconnect') || msg.includes('timeout') || msg.includes('connection') ||
                msg.includes('socket') || msg.includes('closed') || msg.includes('not open') ||
-               msg.includes('unavailable') || err.name === 'DisconnectError';
+               msg.includes('unavailable') || msg.includes('stream:error') || msg.includes('econnreset') ||
+               msg.includes('epipe') || msg.includes('network') || msg.includes('aborted') ||
+               msg.includes('gone') || msg.includes('no longer') ||
+               err.name === 'DisconnectError' || err.code === 'ERR_SOCKET_CONNECTION_TIMEOUT';
     }
 
     (async () => {
@@ -1457,13 +1494,30 @@ async function enviarASeleccionados(userId, jids, mensaje, imagenPath, botSock, 
                     errores++;
                     consecutiveErrors++;
 
-                    // On connection error, try to reconnect before continuing
+                    // On connection error, try to reconnect and retry current message
                     if (isConnectionError(e)) {
                         console.log(`[EnvioMiembros] Connection error detected, attempting reconnect...`);
+                        await delay(3000);
                         const freshSock = await getFreshSock();
                         if (freshSock) {
                             botSock = freshSock;
-                            console.log(`[EnvioMiembros] Reconnected successfully`);
+                            consecutiveErrors = Math.max(0, consecutiveErrors - 1);
+                            console.log(`[EnvioMiembros] Reconnected, retrying message to ${jid}...`);
+                            try {
+                                const textoRetry = addInvisibleChars(variarMensaje(mensaje, userId));
+                                if (imagenPath && fs.existsSync(imagenPath)) {
+                                    await botSock.sendMessage(jid, { image: fs.readFileSync(imagenPath), caption: textoRetry });
+                                } else {
+                                    await botSock.sendMessage(jid, { text: textoRetry });
+                                }
+                                enviados++;
+                                errores--;
+                                consecutiveErrors = 0;
+                                console.log(`[EnvioMiembros] Retry OK for ${jid}`);
+                                db.registrarEnvio(userId, 0, jid, "enviado_personal", grupoNombre, "personal", "pendiente", (mensaje || "").substring(0, 50));
+                            } catch (retryErr) {
+                                console.log(`[EnvioMiembros] Retry also failed: ${retryErr.message}`);
+                            }
                         }
                     }
 
@@ -1809,6 +1863,7 @@ module.exports = {
     setBotSocket,
     BOT_NOMBRE: _botNombre,
     esGrupoReal,
+    esNuestraCuenta,
     variarMensaje,
     connectClientAccount,
     getOrConnectClient,

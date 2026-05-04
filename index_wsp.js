@@ -367,7 +367,7 @@ poll();
                     const conf = db.getCampanaConfig(c.id);
                     const grupos = db.getGruposCampana(c.id);
                     const sesiones = db.getSesionesCampana(c.id);
-                    return { ...c, intervalo_min: conf.intervalo_min, intervalo_max: conf.intervalo_max, espera_ciclo: conf.espera_ciclo, grupos_count: grupos.length, sesiones_count: sesiones.length, camp_sesiones: sesiones, camp_grupos: grupos };
+                    return { ...c, intervalo_min: conf.intervalo_min, intervalo_max: conf.intervalo_max, espera_ciclo: conf.espera_ciclo, min_miembros: conf.min_miembros || 0, grupos_count: grupos.length, sesiones_count: sesiones.length, camp_sesiones: sesiones, camp_grupos: grupos };
                 });
                 res.writeHead(200);
                 return res.end(JSON.stringify({ ok: true, campanas }));
@@ -424,7 +424,8 @@ poll();
                 const imin = body.intervalo_min !== undefined ? (parseInt(body.intervalo_min) || conf.intervalo_min) : conf.intervalo_min;
                 const imax = body.intervalo_max !== undefined ? (parseInt(body.intervalo_max) || conf.intervalo_max) : conf.intervalo_max;
                 const eciclo = body.espera_ciclo !== undefined ? (parseInt(body.espera_ciclo) || conf.espera_ciclo) : conf.espera_ciclo;
-                db.setCampanaConfig(body.id, imin, imax, conf.espera_cuenta, eciclo);
+                const minMiembros = body.min_miembros !== undefined ? (parseInt(body.min_miembros) || 0) : (conf.min_miembros || 0);
+                db.setCampanaConfig(body.id, imin, imax, conf.espera_cuenta, eciclo, minMiembros);
                 // Update campaign accounts if provided
                 if (Array.isArray(body.sesiones)) {
                     db.getDb().prepare("DELETE FROM campana_sesiones WHERE campana_id = ?").run(body.id);
@@ -640,15 +641,21 @@ poll();
                     const allGroups = await sock.groupFetchAllParticipating();
                     const grupos = [];
                     let filtrados = 0;
+                    const minMiembros = parseInt(url.searchParams.get("min_miembros")) || 0;
                     for (const [jid, meta] of Object.entries(allGroups)) {
                         if (!motor.esGrupoReal(jid, meta)) {
+                            filtrados++;
+                            continue;
+                        }
+                        const size = meta.participants?.length || 0;
+                        if (minMiembros > 0 && size < minMiembros) {
                             filtrados++;
                             continue;
                         }
                         grupos.push({
                             jid,
                             subject: meta.subject || "Sin nombre",
-                            size: meta.participants?.length || 0,
+                            size,
                             announce: meta.announce || false,
                         });
                     }
@@ -1186,7 +1193,8 @@ poll();
                     }
                     const allGroups = await sock.groupFetchAllParticipating();
                     const myJid = sock.user ? sock.user.id.split(":")[0] + "@s.whatsapp.net" : "";
-                    const grupos = Object.values(allGroups).filter(g => motor.esGrupoReal(g.id, g)).map(g => {
+                    const minMiembros = parseInt(url.searchParams.get("min_miembros")) || 0;
+                    const grupos = Object.values(allGroups).filter(g => motor.esGrupoReal(g.id, g)).filter(g => minMiembros <= 0 || (g.participants || []).length >= minMiembros).map(g => {
                         const myParticipant = (g.participants || []).find(p => p.id === myJid || p.id.split(":")[0] === myJid.split("@")[0]);
                         const esAdmin = myParticipant ? (myParticipant.admin === "admin" || myParticipant.admin === "superadmin") : false;
                         const canPost = !(g.announce) || esAdmin;
@@ -1824,6 +1832,26 @@ poll();
                         if (meta) {
                             db.agregarGrupo(body.u, meta, null, 0);
                             stats.push({ link, ok: true, jid: meta });
+                            // If joined a community, auto-detect and register sub-groups
+                            try {
+                                await new Promise(r => setTimeout(r, 2000));
+                                const allG = await sock.groupFetchAllParticipating();
+                                const joinedMeta = allG[meta];
+                                if (joinedMeta && joinedMeta.isCommunity) {
+                                    let subCount = 0;
+                                    for (const [sjid, sg] of Object.entries(allG)) {
+                                        if (sg.linkedParent === meta && sjid !== meta) {
+                                            db.agregarGrupo(body.u, sjid, null, 0);
+                                            subCount++;
+                                        }
+                                    }
+                                    if (subCount > 0) {
+                                        stats.push({ link: "sub-grupos de " + (joinedMeta.subject || meta), ok: true, jid: meta, subgrupos: subCount });
+                                    }
+                                }
+                            } catch (ce) {
+                                console.log("[Auto-Join] Error detectando sub-grupos de comunidad:", ce.message);
+                            }
                         } else {
                             stats.push({ link, ok: false, error: "no se pudo unir" });
                         }
@@ -3593,7 +3621,11 @@ async function startBot() {
 
             // Track group activity from OTHER users (for duplicate spam detection)
             if (jid.endsWith("@g.us") && !msg.key.fromMe) {
-                motor.registrarActividadGrupo(jid);
+                // Skip messages from our managed accounts (avoid false activity)
+                const participant2 = msg.key.participant;
+                if (!participant2 || !motor.esNuestraCuenta(participant2)) {
+                    motor.registrarActividadGrupo(jid);
+                }
             }
 
             // Grupos: solo permitir comandos admin
@@ -5031,7 +5063,7 @@ async function handleFSM(jid, msg, text, trimmed, state) {
             if (isNaN(min) || isNaN(max)) return await send(jid, "\u274C Deben ser numeros.");
             if (min < 3) return await send(jid, "\u274C Minimo 3 segundos entre grupos.");
             if (max > 3600) return await send(jid, "\u274C Maximo 3600 segundos.");
-            db.setCampanaConfig(data.campanaId, min, Math.max(min, max), espCuenta, espCiclo);
+            db.setCampanaConfig(data.campanaId, min, Math.max(min, max), espCuenta, espCiclo, data.minMiembros || 0);
             clearState(jid);
             await send(jid,
                 `\u2705 *Intervalo actualizado:*\n` +
