@@ -1508,16 +1508,31 @@ poll();
                             // Re-check connection before each add
                             if (body.cuenta) {
                                 try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (reconErr) {
-                                    console.log(`[agregar_miembros] Reconexion fallida, esperando 90s...`);
-                                    await new Promise(r => setTimeout(r, 90000));
-                                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) { break; }
+                                    if (_addMembersProgress[progressKey]) { _addMembersProgress[progressKey].estado = "reconectando"; _addMembersProgress[progressKey].actual = "Esperando 60s para reconectar..."; }
+                                    console.log(`[agregar_miembros] Reconexion fallida, esperando 60s...`);
+                                    await new Promise(r => setTimeout(r, 60000));
+                                    try {
+                                        sock = await motor.getOrConnectClient(body.u, body.cuenta);
+                                        if (_addMembersProgress[progressKey]) { _addMembersProgress[progressKey].estado = "agregando"; }
+                                    } catch (_) {
+                                        if (_addMembersProgress[progressKey]) { _addMembersProgress[progressKey].estado = "error_conexion"; _addMembersProgress[progressKey].actual = "No se pudo reconectar. Revisa la cuenta WSP."; }
+                                        console.log(`[agregar_miembros] Reconexion fallida 2 veces, deteniendo`);
+                                        break;
+                                    }
                                 }
                             }
                             if (!sock || !sock.ws || (sock.ws.readyState !== undefined && sock.ws.readyState !== sock.ws.OPEN && sock.ws.readyState !== 1)) {
+                                if (_addMembersProgress[progressKey]) { _addMembersProgress[progressKey].estado = "reconectando"; _addMembersProgress[progressKey].actual = "Socket caido, reconectando..."; }
                                 console.log(`[agregar_miembros] Socket no disponible, esperando 30s y reconectando...`);
                                 await new Promise(r => setTimeout(r, 30000));
                                 if (body.cuenta) {
-                                    try { sock = await motor.getOrConnectClient(body.u, body.cuenta); } catch (_) { break; }
+                                    try {
+                                        sock = await motor.getOrConnectClient(body.u, body.cuenta);
+                                        if (_addMembersProgress[progressKey]) { _addMembersProgress[progressKey].estado = "agregando"; }
+                                    } catch (_) {
+                                        if (_addMembersProgress[progressKey]) { _addMembersProgress[progressKey].estado = "error_conexion"; _addMembersProgress[progressKey].actual = "No se pudo reconectar. Revisa la cuenta WSP."; }
+                                        break;
+                                    }
                                 } else { break; }
                             }
                             // Verify number has WhatsApp before adding (avoid suspicious adds)
@@ -1579,9 +1594,9 @@ poll();
                                 }
                             }
                             // Stop after 5 consecutive errors (likely banned or account issue)
-                            if (consecutiveErrors >= 5) {
-                                console.log(`[agregar_miembros] 5 errores consecutivos, deteniendo por seguridad`);
-                                db.agregarLog(body.u, 'error', `5 errores consecutivos al agregar miembros, detenido por seguridad. ${agregados} ok de ${jids.length}`);
+                            if (consecutiveErrors >= 3) {
+                                console.log(`[agregar_miembros] 3 errores consecutivos, deteniendo por seguridad`);
+                                db.agregarLog(body.u, 'error', `3 errores consecutivos al agregar miembros, detenido por seguridad. ${agregados} ok de ${jids.length}`);
                                 break;
                             }
                         }
