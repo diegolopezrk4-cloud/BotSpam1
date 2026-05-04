@@ -2580,7 +2580,7 @@ async function loadGrupos(){
     }
   }
   const [r,secR]=await Promise.all([api('/api/grupos?u='+userId),api('/api/grupos/secciones?u='+userId)]);
-  if(!r.ok){$('gruposContent').innerHTML='<div class="empty-state"><p>Error</p></div>';return}
+  if(!r.ok){toast('Error cargando grupos: '+(r.error||'servidor no responde'),'error');if(_gruposData.length)return;$('gruposContent').innerHTML='<div class="empty-state"><p>Error cargando. Reintenta en unos segundos.</p></div>';return}
   _gruposData=r.grupos||[];
   // Populate seccion filter
   const secFiltro=$('gruposSeccionFiltro');

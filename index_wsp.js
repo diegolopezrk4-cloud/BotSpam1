@@ -10,6 +10,14 @@ const motor = require("./motor_wsp");
 const _addMembersProgress = {};
 const _autoJoinProgress = {};
 
+// Prevent unhandled exceptions from crashing the entire process
+process.on('uncaughtException', (err) => {
+    console.error('[CRASH PREVENTED] Unhandled exception:', err.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('[CRASH PREVENTED] Unhandled rejection:', reason?.message || reason);
+});
+
 const QR_PORT = process.env.QR_PORT || 3000;
 
 // --- Grupo admin (persistido en archivo) ---
@@ -3521,12 +3529,16 @@ poll();
             }
 
             // Endpoint no encontrado
-            res.writeHead(404);
-            return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
+            if (!res.headersSent) {
+                res.writeHead(404);
+                return res.end(JSON.stringify({ ok: false, error: "endpoint no encontrado" }));
+            }
 
         } catch (e) {
-            res.writeHead(500);
-            return res.end(JSON.stringify({ ok: false, error: e.message }));
+            if (!res.headersSent) {
+                res.writeHead(500);
+                return res.end(JSON.stringify({ ok: false, error: e.message }));
+            }
         }
     }
 
