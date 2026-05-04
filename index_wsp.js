@@ -1930,11 +1930,13 @@ poll();
                                     prog.subgrupos_encontrados++;
                                     if (!registeredJids.has(sjid)) {
                                         // Not registered yet — add it
-                                        db.agregarGrupo(body.u, sjid, null, 0);
+                                        db.agregarGrupo(body.u, sjid, sg.subject || null, sg.size || 0);
                                         registeredJids.add(sjid);
                                         prog.subgrupos_nuevos++;
                                         console.log(`[CommunityScan] Nuevo sub-grupo: ${sg.subject || sjid} (de ${communityMeta.subject || communityJid})`);
                                     } else {
+                                        // Update name/size for existing groups too
+                                        if (sg.subject || sg.size) db.agregarGrupo(body.u, sjid, sg.subject || null, sg.size || 0);
                                         prog.subgrupos_ya_registrados++;
                                     }
                                 }
@@ -1943,10 +1945,15 @@ poll();
                         // Also register any groups we're in but not registered
                         let gruposSueltos = 0;
                         for (const [gid, gmeta] of Object.entries(allGroups)) {
-                            if (motor.esGrupoReal(gid, gmeta) && !registeredJids.has(gid)) {
-                                db.agregarGrupo(body.u, gid, null, 0);
-                                registeredJids.add(gid);
-                                gruposSueltos++;
+                            if (motor.esGrupoReal(gid, gmeta)) {
+                                if (!registeredJids.has(gid)) {
+                                    db.agregarGrupo(body.u, gid, gmeta.subject || null, gmeta.size || 0);
+                                    registeredJids.add(gid);
+                                    gruposSueltos++;
+                                } else {
+                                    // Update name/size for existing groups
+                                    if (gmeta.subject || gmeta.size) db.agregarGrupo(body.u, gid, gmeta.subject || null, gmeta.size || 0);
+                                }
                             }
                         }
                         prog.grupos_sueltos = gruposSueltos;
@@ -2019,10 +2026,17 @@ poll();
                             if (!code) { prog.fallidos++; prog.stats.push({ link: link.substring(0, 40), ok: false, error: "link invalido" }); continue; }
                             const meta = await sock.groupAcceptInvite(code);
                             if (meta) {
-                                db.agregarGrupo(body.u, meta, null, 0);
+                                // Fetch group name+size
+                                let gName = null, gSize = 0;
+                                try {
+                                    const gMeta = await sock.groupMetadata(meta);
+                                    gName = gMeta?.subject || null;
+                                    gSize = gMeta?.size || gMeta?.participants?.length || 0;
+                                } catch (_) {}
+                                db.agregarGrupo(body.u, meta, gName, gSize);
                                 prog.unidos++;
-                                prog.stats.push({ link: link.substring(0, 40), ok: true });
-                                console.log(`[Auto-Join] ${i+1}/${totalLinks} unido: ${meta}`);
+                                prog.stats.push({ link: link.substring(0, 40), ok: true, nombre: gName });
+                                console.log(`[Auto-Join] ${i+1}/${totalLinks} unido: ${gName || meta}`);
                             } else {
                                 prog.fallidos++;
                                 prog.stats.push({ link: link.substring(0, 40), ok: false, error: "no se pudo unir" });

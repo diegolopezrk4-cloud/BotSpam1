@@ -1014,7 +1014,7 @@ function agregarGrupo(userId, link, nombre = null, size = 0) {
         db.prepare("INSERT INTO grupos (user_id, link, nombre, size) VALUES (?, ?, ?, ?)").run(userId, link, nombre, size || 0);
         return true;
     } else {
-        if (nombre && !existente.nombre) {
+        if (nombre) {
             db.prepare("UPDATE grupos SET nombre = ? WHERE id = ?").run(nombre, existente.id);
         }
         if (size) {
