@@ -1164,12 +1164,15 @@ poll();
                 const forceRefresh = url.searchParams.get("refresh") === "1";
                 if (!userId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: "falta u" })); }
                 try {
-                    // Check cache first (unless force refresh)
+                    // Check cache first (unless force refresh) — cache expires after 5 min
                     if (cuenta && !forceRefresh) {
                         const cached = db.getGruposCacheSesion(userId, cuenta);
                         if (cached.length > 0) {
-                            res.writeHead(200);
-                            return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true }));
+                            const cacheAge = cached[0].fecha_cache ? (Date.now() - new Date(cached[0].fecha_cache).getTime()) : Infinity;
+                            if (cacheAge < 5 * 60 * 1000) {
+                                res.writeHead(200);
+                                return res.end(JSON.stringify({ ok: true, grupos: cached, from_cache: true }));
+                            }
                         }
                     }
                     let sock;
@@ -1470,19 +1473,14 @@ poll();
                     const BATCH_SIZE = parseInt(body.batch_size) || 3;
                     const BASE_BATCH_PAUSE = body.delay_minutes ? parseInt(body.delay_minutes) * 60 * 1000 : 120000;
                     const DELAY_AFTER_ERROR = 120000; // 2 min pause after connection error
-                    const MAX_DAILY_ADDS = 50; // WhatsApp daily limit safety threshold
+                    // No daily limit — user controls the pace via batch size and delay
                     // Initial delay before starting (let connection stabilize)
                     console.log(`[agregar_miembros] Iniciando en 5s... (${jids.length} miembros por agregar)`);
                     await new Promise(r => setTimeout(r, 5000));
                     let batchNumber = 0;
                     let consecutiveErrors = 0;
                     for (let i = 0; i < jids.length; i++) {
-                        // Safety: stop after daily limit
-                        if (agregados >= MAX_DAILY_ADDS) {
-                            console.log(`[agregar_miembros] Limite diario de ${MAX_DAILY_ADDS} alcanzado, deteniendo`);
-                            db.agregarLog(body.u, 'warning', `Limite diario de ${MAX_DAILY_ADDS} agregados alcanzado. Reanuda manana para evitar ban.`);
-                            break;
-                        }
+
                         try {
                             // Re-check connection before each add
                             if (body.cuenta) {
@@ -1513,6 +1511,11 @@ poll();
                                     }
                                 } catch (_) {} // timeout = continue anyway
                             }
+                            // Pre-subscribe presence (tells WhatsApp we "know" this contact — reduces ban risk)
+                            try {
+                                await sock.presenceSubscribe(jids[i]);
+                                await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500));
+                            } catch (_) {}
                             await sock.groupParticipantsUpdate(body.destino, [jids[i]], "add");
                             agregados++;
                             consecutiveErrors = 0;

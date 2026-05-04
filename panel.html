@@ -2630,7 +2630,7 @@ async function detectarGrupos(){
   if(!cuenta){toast('Selecciona una cuenta primero','error');return}
   $('gruposContent').innerHTML='<div class="loading-overlay"><span class="spinner"></span> Detectando grupos...</div>';
   const minM=$('wspDetectMinMiembros')?.value||0;
-  const r=await api('/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta)+'&min_miembros='+minM);
+  const r=await api('/api/detectar_cliente?u='+userId+'&cuenta='+encodeURIComponent(cuenta)+'&min_miembros='+minM+'&refresh=1');
   if(!r.ok){toast('Error: '+(r.error||''),'error');loadGrupos();return}
   const g=r.grupos||[];if(!g.length){toast('No se detectaron grupos','error');loadGrupos();return}
   window._dg=g;
