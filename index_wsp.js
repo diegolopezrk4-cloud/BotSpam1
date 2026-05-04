@@ -1467,12 +1467,12 @@ poll();
                     res.end(JSON.stringify({ ok: true, total: jids.length, message: "Agregando miembros en segundo plano..." }));
                     // Run in background — add with moderate delays to avoid WhatsApp disconnection
                     let agregados = 0, fallidos = 0;
-                    const BATCH_SIZE = parseInt(body.batch_size) || 5;
-                    const DELAY_BETWEEN_BATCHES = body.delay_minutes ? parseInt(body.delay_minutes) * 60 * 1000 : 45000;
-                    const DELAY_AFTER_ERROR = 45000; // 45s pause after any error
+                    const BATCH_SIZE = parseInt(body.batch_size) || 3;
+                    const DELAY_BETWEEN_BATCHES = body.delay_minutes ? parseInt(body.delay_minutes) * 60 * 1000 : 120000;
+                    const DELAY_AFTER_ERROR = 90000; // 90s pause after any error
                     // Initial delay before starting to add (let connection stabilize)
-                    console.log(`[agregar_miembros] Iniciando en 3s... (${jids.length} miembros por agregar)`);
-                    await new Promise(r => setTimeout(r, 3000));
+                    console.log(`[agregar_miembros] Iniciando en 5s... (${jids.length} miembros por agregar)`);
+                    await new Promise(r => setTimeout(r, 5000));
                     for (let i = 0; i < jids.length; i++) {
                         try {
                             // Re-check connection before each add
@@ -1498,7 +1498,8 @@ poll();
                             const errMsg = e.message || '';
                             console.log(`[agregar_miembros] Error ${jids[i]}: ${errMsg}`);
                             fallidos++;
-                            if (errMsg.includes("closed") || errMsg.includes("disconnect") || errMsg.includes("timed out") || errMsg.includes("Connection") || errMsg.includes("Boom") || errMsg.includes("lost")) {
+                            const errLower = errMsg.toLowerCase();
+                            if (errLower.includes("closed") || errLower.includes("disconnect") || errLower.includes("timed out") || errLower.includes("connection") || errLower.includes("boom") || errLower.includes("lost") || errLower.includes("stream:error") || errLower.includes("econnreset") || errLower.includes("epipe") || errLower.includes("network") || errLower.includes("aborted") || errLower.includes("socket") || errLower.includes("not open") || errLower.includes("unavailable")) {
                                 console.log(`[agregar_miembros] Conexion perdida despues de ${agregados} agregados, pausa larga de 60s...`);
                                 db.agregarLog(body.u, 'error', `Conexion perdida al agregar miembro ${i+1}/${jids.length}, pausando 60s`);
                                 await new Promise(r => setTimeout(r, DELAY_AFTER_ERROR));
@@ -1509,13 +1510,23 @@ poll();
                                         break;
                                     }
                                     // Extra wait after reconnection to let it stabilize
-                                    await new Promise(r => setTimeout(r, 10000));
+                                    await new Promise(r => setTimeout(r, 30000));
+                                    console.log(`[agregar_miembros] Reconectado, esperando 30s para estabilizar...`);
                                 } else { break; }
+                                // Retry the failed member after reconnection
+                                try {
+                                    await sock.groupParticipantsUpdate(body.destino, [jids[i]], "add");
+                                    agregados++;
+                                    fallidos--;
+                                    console.log(`[agregar_miembros] Retry OK para ${jids[i]}`);
+                                } catch (retryErr) {
+                                    console.log(`[agregar_miembros] Retry tambien fallo: ${retryErr.message}`);
+                                }
                             }
                             // Non-connection errors (e.g. "not authorized", "forbidden") — skip member and continue
                         }
-                        // Random delay between individual adds (5-8 seconds)
-                        const memberDelay = 5000 + Math.floor(Math.random() * 3000);
+                        // Random delay between individual adds (12-20 seconds to prevent disconnection)
+                        const memberDelay = 12000 + Math.floor(Math.random() * 8000);
                         await new Promise(r => setTimeout(r, memberDelay));
                         // Longer pause every BATCH_SIZE members
                         if ((i + 1) % BATCH_SIZE === 0 && i + 1 < jids.length) {
